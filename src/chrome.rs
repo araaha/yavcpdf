@@ -1,10 +1,11 @@
 //! What is drawn around the document: status bar, search bar, hotbar and table of contents.
 use std::sync::Arc;
 
-use egui::{Align2, Color32, FontData, FontDefinitions, FontFamily, FontId, Painter, Rect, Sense, Vec2, pos2, vec2};
+use egui::{Align, Align2, Color32, FontData, FontDefinitions, FontFamily, FontId, Painter, Pos2, Rect, Sense, Vec2, pos2, vec2};
 
 use crate::app::{App, Bar, BarKind, EntryKind, FillItem, Mode, SignPad, TocState, Tool};
 use crate::config::{Config, Side};
+use crate::field::Field;
 use crate::hint::Purpose;
 use crate::keymap::Action;
 
@@ -16,6 +17,31 @@ pub fn bar_height(config: &Config) -> f32 {
 
 fn font(config: &Config) -> FontId {
     FontId::proportional(config.font_size)
+}
+
+/// How far above the baseline the middle of the capitals is, as the font draws them.
+fn cap_middle(painter: &Painter, font: FontId) -> f32 {
+    let fallback = font.size * 0.35;
+    let galley = painter.layout_no_wrap("H".to_owned(), font, Color32::WHITE);
+    let glyph = galley.rows.first().and_then(|row| row.glyphs.first());
+    glyph.map_or(fallback, |g| -(g.uv_rect.offset.y + g.uv_rect.size.y / 2.0))
+}
+
+/// Draws a line of interface text with the middle of its capitals at the height of `at`. Centring
+/// its line box instead would depend on the font's metrics, and would move the text whenever a
+/// fallback font makes that box taller. Only the horizontal part of `align` counts.
+fn text_line(painter: &Painter, config: &Config, at: Pos2, align: Align2, text: impl ToString, color: Color32) -> Rect {
+    let galley = painter.layout_no_wrap(text.to_string(), font(config), color);
+    let baseline = galley.rows.first().map_or(0.0, |row| row.pos.y + row.glyphs.first().map_or(0.0, |g| g.pos.y));
+    let width = galley.size().x;
+    let x = match align.x() {
+        Align::Min => at.x,
+        Align::Center => at.x - width / 2.0,
+        Align::Max => at.x - width,
+    };
+    let rect = Rect::from_min_size(pos2(x, at.y + cap_middle(painter, font(config)) - baseline), galley.size());
+    painter.galley(rect.min, galley, color);
+    rect
 }
 
 /// The file of a fontconfig font.
@@ -162,9 +188,9 @@ impl App {
         let bar = &self.config.statusbar;
         let (left, right) = (expand(&bar.left, |f| self.status_field(f)), expand(&bar.right, |f| self.status_field(f)));
         let color = theme.ui_text.egui();
-        let right_rect = painter.text(rect.right_center() - vec2(PADDING, 0.0), Align2::RIGHT_CENTER, right, font(&self.config), color);
+        let right_rect = text_line(painter, &self.config, rect.right_center() - vec2(PADDING, 0.0), Align2::RIGHT_CENTER, right, color);
         let room = Rect::from_min_max(rect.min, pos2(right_rect.left() - PADDING, rect.max.y));
-        painter.with_clip_rect(room).text(rect.left_center() + vec2(PADDING, 0.0), Align2::LEFT_CENTER, left, font(&self.config), color);
+        text_line(&painter.with_clip_rect(room), &self.config, rect.left_center() + vec2(PADDING, 0.0), Align2::LEFT_CENTER, left, color);
     }
 
     /// The bar across the top: search and commands.
@@ -180,18 +206,23 @@ impl App {
             BarKind::Entry(entry) if entry.kind == EntryKind::Note => "note: ",
             BarKind::Entry(_) => "text: ",
         };
-        let shown = painter.text(
-            rect.left_center() + vec2(PADDING, 0.0),
-            Align2::LEFT_CENTER,
-            format!("{prompt}{}", bar.text),
-            font(&self.config),
-            theme.ui_text.egui(),
-        );
-        let cursor = Rect::from_min_size(pos2(shown.right() + 2.0, rect.top() + 3.0), vec2(1.5, rect.height() - 6.0));
-        painter.rect_filled(cursor, 0.0, theme.ui_accent.egui());
+        self.draw_field(painter, rect, prompt, &bar.field, theme.ui_text.egui());
         if let Some(search) = self.search.as_ref().filter(|_| matches!(bar.kind, BarKind::Search { .. })) {
-            painter.text(rect.right_center() - vec2(PADDING, 0.0), Align2::RIGHT_CENTER, search.status(), font(&self.config), theme.ui_accent.egui());
+            text_line(painter, &self.config, rect.right_center() - vec2(PADDING, 0.0), Align2::RIGHT_CENTER, search.status(), theme.ui_accent.egui());
         }
+    }
+
+    /// A prompt and a text field on one row. A line too long for the row slides left to keep the
+    /// cursor in sight.
+    fn draw_field(&self, painter: &Painter, rect: Rect, prompt: &str, field: &Field, color: Color32) {
+        let width = |text: String| painter.layout_no_wrap(text, font(&self.config), color).size().x;
+        let room = rect.shrink2(vec2(PADDING, 0.0));
+        let to_cursor = width(format!("{prompt}{}", field.before_cursor()));
+        let start = room.left() - (to_cursor - room.width() + 2.0).max(0.0);
+        let clipped = painter.with_clip_rect(rect);
+        text_line(&clipped, &self.config, pos2(start, rect.center().y), Align2::LEFT_CENTER, format!("{prompt}{}", field.text), color);
+        let cursor = Rect::from_min_size(pos2(start + to_cursor, rect.top() + 3.0), vec2(1.5, rect.height() - 6.0));
+        clipped.rect_filled(cursor, 0.0, self.config.active_theme().ui_accent.egui());
     }
 
     /// Where a signature is drawn.
@@ -204,8 +235,8 @@ impl App {
         let theme = self.config.active_theme();
         let rect = self.pad_rect();
         let pen = egui::Stroke::new(2.0, theme.ui_text.egui());
-        painter.rect_filled(rect.expand(PADDING), 6.0, theme.ui_background.egui());
-        painter.rect_stroke(rect, 2.0, egui::Stroke::new(1.0, theme.ui_accent.egui()), egui::StrokeKind::Outside);
+        painter.rect_filled(rect.expand(PADDING), 0.0, theme.ui_background.egui());
+        painter.rect_stroke(rect, 0.0, egui::Stroke::new(1.0, theme.ui_accent.egui()), egui::StrokeKind::Outside);
         let baseline = rect.bottom() - rect.height() * 0.25;
         painter
             .line_segment([pos2(rect.left() + 16.0, baseline), pos2(rect.right() - 16.0, baseline)], egui::Stroke::new(1.0, theme.ui_accent.egui()));
@@ -226,18 +257,14 @@ impl App {
         let area = self.view.rect;
         let size = vec2((area.width() * 0.7).min(760.0), area.height() * 0.8);
         let rect = Rect::from_center_size(area.center(), size);
-        painter.rect_filled(rect, 4.0, theme.ui_background.egui());
+        painter.rect_filled(rect, 0.0, theme.ui_background.egui());
+        painter.rect_stroke(rect, 0.0, egui::Stroke::new(1.0, theme.ui_accent.egui()), egui::StrokeKind::Inside);
         let row_height = bar_height(&self.config);
         let mut y = rect.top() + PADDING;
         let text_color = theme.ui_text.egui();
         if state.filtering || !state.filter.is_empty() {
-            painter.text(
-                pos2(rect.left() + PADDING, y + row_height / 2.0),
-                Align2::LEFT_CENTER,
-                format!("/{}", state.filter),
-                font(&self.config),
-                theme.ui_accent.egui(),
-            );
+            let row = Rect::from_min_size(pos2(rect.left(), y), vec2(rect.width(), row_height));
+            self.draw_field(painter, row, "/", &state.filter, theme.ui_accent.egui());
             y += row_height;
         }
         let rows = self.toc_rows(state);
@@ -250,12 +277,21 @@ impl App {
             let line = Rect::from_min_size(pos2(rect.left() + PADDING / 2.0, y), vec2(rect.width() - PADDING, row_height));
             let selected = i == at;
             if selected {
-                clipped.rect_filled(line, 2.0, theme.ui_accent.egui());
+                clipped.rect_filled(line, 0.0, theme.ui_accent.egui());
             }
             let color = if selected { theme.ui_background.egui() } else { text_color };
             let indent = PADDING + entry.depth as f32 * 14.0;
-            clipped.text(pos2(line.left() + indent, line.center().y), Align2::LEFT_CENTER, &entry.title, font(&self.config), color);
-            clipped.text(line.right_center() - vec2(PADDING, 0.0), Align2::RIGHT_CENTER, (entry.page + 1).to_string(), font(&self.config), color);
+            let number = text_line(&clipped, &self.config, line.right_center() - vec2(PADDING, 0.0), Align2::RIGHT_CENTER, entry.page + 1, color);
+            // A long title stops short of its page number.
+            let room = Rect::from_min_max(line.min, pos2(number.left() - PADDING, line.max.y)).intersect(clipped.clip_rect());
+            text_line(
+                &clipped.with_clip_rect(room),
+                &self.config,
+                pos2(line.left() + indent, line.center().y),
+                Align2::LEFT_CENTER,
+                &entry.title,
+                color,
+            );
             y += row_height;
         }
     }
@@ -347,9 +383,9 @@ impl App {
         let rect = self.hotbar_rect(inner + Vec2::splat(PADDING));
         let _ = ui.interact(rect, ui.scope_id().with("hotbar"), Sense::click_and_drag());
         let theme = self.config.active_theme().clone();
-        painter.rect_filled(rect, 6.0, theme.ui_background.egui());
+        painter.rect_filled(rect, 0.0, theme.ui_background.egui());
         let border = egui::Stroke::new(self.config.hotbar.border, theme.ui_accent.egui());
-        painter.rect_stroke(rect, 6.0, border, egui::StrokeKind::Inside);
+        painter.rect_stroke(rect, 0.0, border, egui::StrokeKind::Inside);
         let mut at = rect.min + Vec2::splat(PADDING / 2.0);
         let mut clicked = None;
         for (index, (item, width)) in items.iter().zip(widths).enumerate() {
@@ -374,18 +410,18 @@ impl App {
         let mut text = theme.ui_text.egui();
         if let Item::Color(i) = item {
             let swatch = self.config.hotbar.colors[i].egui();
-            painter.rect_filled(inset, 3.0, swatch);
+            painter.rect_filled(inset, 0.0, swatch);
             text = theme.ui_background.egui();
             if active {
-                painter.rect_stroke(inset, 3.0, egui::Stroke::new(2.0, theme.ui_text.egui()), egui::StrokeKind::Outside);
+                painter.rect_stroke(inset, 0.0, egui::Stroke::new(2.0, theme.ui_text.egui()), egui::StrokeKind::Outside);
             }
         } else if active {
-            painter.rect_filled(inset, 3.0, theme.ui_accent.egui());
+            painter.rect_filled(inset, 0.0, theme.ui_accent.egui());
             text = theme.ui_background.egui();
         } else if hovered {
-            painter.rect_filled(inset, 3.0, theme.ui_accent.egui().gamma_multiply(0.3));
+            painter.rect_filled(inset, 0.0, theme.ui_accent.egui().gamma_multiply(0.3));
         }
-        painter.text(cell.center(), Align2::CENTER_CENTER, self.item_label(item), font(&self.config), text);
+        text_line(painter, &self.config, cell.center(), Align2::CENTER_CENTER, self.item_label(item), text);
     }
 }
 

@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=yapdf
+GenericName=PDF Viewer
+Comment=A minimal, keyboard-driven PDF viewer
+Exec=yapdf %f
+Icon=application-pdf
+Terminal=false
+Categories=Office;Viewer;
+MimeType=application/pdf;
+StartupWMClass=yapdf

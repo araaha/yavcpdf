@@ -3,6 +3,7 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::Receiver;
 use std::time::{Duration, Instant, SystemTime};
 
 use egui::{Pos2, Rect, pos2};
@@ -11,6 +12,7 @@ use pdfcraft_render::{Pixels, RenderRequest, RequestKind};
 use crate::cache::{TileCache, TileKey};
 use crate::config::Config;
 use crate::doc::Doc;
+use crate::field::Field;
 use crate::hint::HintState;
 use crate::keymap::{Keymap, Pending};
 use crate::overview::Overview;
@@ -117,7 +119,7 @@ pub enum BarKind {
 #[derive(Clone, Debug)]
 pub struct Bar {
     pub kind: BarKind,
-    pub text: String,
+    pub field: Field,
     /// Where the view was when the bar opened, to go back to on escape.
     pub origin: Anchor,
     /// The search the bar's replaces, to go back to on escape.
@@ -127,7 +129,7 @@ pub struct Bar {
 #[derive(Clone, Debug, Default)]
 pub struct TocState {
     pub selected: usize,
-    pub filter: String,
+    pub filter: Field,
     pub filtering: bool,
 }
 
@@ -296,6 +298,8 @@ pub struct App {
     pub smart: Option<(Reference, Landing)>,
     /// The table of contents was asked for while its printed pages were still being read.
     pub toc_waiting: bool,
+    /// What the file chooser picks arrives here, while it is open.
+    pub chooser: Option<Receiver<Option<PathBuf>>>,
     pub overview: Option<Overview>,
     /// The references the hints showing stand for.
     pub hint_references: Vec<Reference>,
@@ -363,6 +367,7 @@ impl App {
             hover: None,
             smart: None,
             toc_waiting: false,
+            chooser: None,
             overview: None,
             hint_references: Vec::new(),
             undo: Vec::new(),
@@ -465,6 +470,9 @@ impl App {
             self.redo.clear();
             self.started = false;
             self.fit = Some(Fit::Width);
+            // A document with no saved place starts at the top, not where the last one was.
+            self.view.y = 0.0;
+            self.view.x = 0.0;
             store::remember_document(path);
             self.watcher.follow(path);
             if let Some(warning) = warning {
@@ -494,7 +502,7 @@ impl App {
     }
 
     pub fn set_title(&self, ctx: &egui::Context) {
-        ctx.send_viewport_cmd_to(egui::ViewportId::ROOT, egui::ViewportCommand::Title(format!("{} - pdfviewer", self.doc.file_name())));
+        ctx.send_viewport_cmd_to(egui::ViewportId::ROOT, egui::ViewportCommand::Title(format!("{} - yapdf", self.doc.file_name())));
     }
 
     /// Picks up a changed config file.
@@ -717,6 +725,7 @@ impl eframe::App for App {
         self.pump_search();
         self.pump_smart();
         self.pump_contents();
+        self.pump_chooser(&ctx);
         self.prepare_hints();
         self.settle_zoom(&ctx);
         self.frame(ui);

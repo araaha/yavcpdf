@@ -2,6 +2,7 @@
 use egui::{CursorIcon, Event, MouseWheelUnit, PointerButton, Pos2, Response, Sense};
 
 use crate::app::{App, Bar, BarKind, Landing, Mode, Selection, TocState, Tool};
+use crate::field::{Edit, Field};
 use crate::keymap::Stroke;
 use crate::search::Search;
 use crate::view::Anchor;
@@ -20,14 +21,6 @@ fn clipboard_stroke(event: &Event) -> Option<Stroke> {
         _ => return None,
     };
     Some(Stroke { ctrl: true, ..Stroke::plain(key) })
-}
-
-/// Removes the last word of a text field, as control-w does.
-fn delete_word(text: &mut String) {
-    let trimmed = text.trim_end().len();
-    text.truncate(trimmed);
-    let start = text.rfind(char::is_whitespace).map_or(0, |i| i + 1);
-    text.truncate(start);
 }
 
 impl App {
@@ -119,7 +112,7 @@ impl App {
 
     fn paste(&mut self, text: &str) {
         let Mode::Bar(bar) = &mut self.mode else { return };
-        bar.text.push_str(text.lines().next().unwrap_or(""));
+        bar.field.insert(text.lines().next().unwrap_or(""));
         let kind = bar.kind;
         self.bar_changed(kind);
     }
@@ -128,7 +121,7 @@ impl App {
     fn bar_changed(&mut self, kind: BarKind) {
         let BarKind::Search { forward } = kind else { return };
         let Mode::Bar(bar) = &self.mode else { return };
-        let (text, origin) = (bar.text.clone(), bar.origin);
+        let (text, origin) = (bar.field.text.clone(), bar.origin);
         self.view.go_to(&self.doc.layout, origin);
         self.search = if text.is_empty() {
             None
@@ -149,11 +142,11 @@ impl App {
     fn bar_submit(&mut self, ctx: &egui::Context, bar: Bar) {
         self.mode = Mode::Normal;
         match bar.kind {
-            BarKind::Command => self.command(ctx, &bar.text),
-            BarKind::Entry(entry) => self.entry_done(entry, &bar.text),
+            BarKind::Command => self.command(ctx, &bar.field.text),
+            BarKind::Entry(entry) => self.entry_done(entry, &bar.field.text),
             BarKind::Search { forward } => {
                 // An empty search repeats the last one, as in vim.
-                if bar.text.is_empty()
+                if bar.field.is_empty()
                     && let Some(mut previous) = bar.previous
                 {
                     previous.forward = forward;
@@ -179,21 +172,15 @@ impl App {
         } else if stroke.is("cr") {
             let bar = bar.clone();
             self.bar_submit(ctx, bar);
-        } else if stroke.is("bs") {
-            if bar.text.pop().is_none() {
+        } else if let Some(edit) = self.keymap.edit(stroke) {
+            if edit == Edit::Backspace && bar.field.is_empty() {
                 let bar = bar.clone();
                 self.bar_cancel(bar);
-            } else {
+            } else if bar.field.apply(edit) {
                 self.bar_changed(kind);
             }
-        } else if stroke.is_ctrl("u") {
-            bar.text.clear();
-            self.bar_changed(kind);
-        } else if stroke.is_ctrl("w") {
-            delete_word(&mut bar.text);
-            self.bar_changed(kind);
         } else if let Some(c) = stroke.text() {
-            bar.text.push(c);
+            bar.field.insert(c.encode_utf8(&mut [0; 4]));
             self.bar_changed(kind);
         }
     }
@@ -239,7 +226,7 @@ impl App {
 
     /// The entries the filter lets through, as indices.
     pub fn toc_rows(&self, state: &TocState) -> Vec<usize> {
-        let filter = state.filter.to_lowercase();
+        let filter = state.filter.text.to_lowercase();
         let shown = |(_, e): &(usize, &crate::doc::TocEntry)| e.title.to_lowercase().contains(&filter);
         self.doc.toc.iter().enumerate().filter(shown).map(|(i, _)| i).collect()
     }
@@ -262,7 +249,7 @@ impl App {
         if self.keymap.cancels(stroke) {
             if state.filtering {
                 state.filtering = false;
-                state.filter.clear();
+                state.filter = Field::default();
             } else {
                 self.mode = Mode::Normal;
                 return;
@@ -281,10 +268,10 @@ impl App {
         } else if stroke.is_ctrl("u") {
             moved = Some(at.saturating_sub(10));
         } else if state.filtering {
-            if stroke.is("bs") {
-                state.filter.pop();
+            if let Some(edit) = self.keymap.edit(stroke) {
+                state.filter.apply(edit);
             } else if let Some(c) = stroke.text() {
-                state.filter.push(c);
+                state.filter.insert(c.encode_utf8(&mut [0; 4]));
             }
         } else {
             match stroke.text() {
@@ -505,7 +492,7 @@ fn pointer_path(ctx: &egui::Context, response: &Response) -> Vec<Pos2> {
 
 #[cfg(test)]
 mod tests {
-    use super::{clipboard_stroke, delete_word};
+    use super::clipboard_stroke;
     use crate::keymap::parse_sequence;
     use egui::Event;
 
@@ -514,14 +501,5 @@ mod tests {
         assert_eq!(clipboard_stroke(&Event::Copy).as_ref(), parse_sequence("<C-c>").unwrap().first());
         assert_eq!(clipboard_stroke(&Event::Cut).as_ref(), parse_sequence("<C-x>").unwrap().first());
         assert_eq!(clipboard_stroke(&Event::Text("c".to_owned())), None);
-    }
-
-    #[test]
-    fn control_w_takes_the_last_word_and_the_space_after_it() {
-        let mut text = "one two  ".to_owned();
-        delete_word(&mut text);
-        assert_eq!(text, "one ");
-        delete_word(&mut text);
-        assert_eq!(text, "");
     }
 }

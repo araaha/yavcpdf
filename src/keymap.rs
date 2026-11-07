@@ -2,6 +2,8 @@
 use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
 
+use crate::field::Edit;
+
 use serde::Deserialize;
 
 /// How long a sequence that is both complete and the start of a longer one waits for more keys.
@@ -79,6 +81,43 @@ pub enum Action {
     ToggleFullscreen,
     Reload,
     Quit,
+    Open,
+    EditLeft,
+    EditRight,
+    EditWordLeft,
+    EditWordRight,
+    EditStart,
+    EditEnd,
+    EditBackspace,
+    EditDelete,
+    EditEraseWord,
+    EditDeleteWord,
+    EditEraseBlank,
+    EditEraseToStart,
+    EditEraseToEnd,
+}
+
+impl Action {
+    /// What this does to a text field, if it is one of the `edit_*` actions. Those work in a text
+    /// field and nowhere else, so they can share keys with what the same keys do in normal mode.
+    fn edit(self) -> Option<Edit> {
+        Some(match self {
+            Self::EditLeft => Edit::Left,
+            Self::EditRight => Edit::Right,
+            Self::EditWordLeft => Edit::WordLeft,
+            Self::EditWordRight => Edit::WordRight,
+            Self::EditStart => Edit::Start,
+            Self::EditEnd => Edit::End,
+            Self::EditBackspace => Edit::Backspace,
+            Self::EditDelete => Edit::Delete,
+            Self::EditEraseWord => Edit::EraseWord,
+            Self::EditDeleteWord => Edit::DeleteWord,
+            Self::EditEraseBlank => Edit::EraseBlank,
+            Self::EditEraseToStart => Edit::EraseToStart,
+            Self::EditEraseToEnd => Edit::EraseToEnd,
+            _ => return None,
+        })
+    }
 }
 
 /// One key press. Printable keys hold their character as typed (`G`, `/`), so shift is only set
@@ -275,8 +314,17 @@ impl Keymap {
         stroke.text().is_none() && self.binds.iter().any(|(s, a)| *a == Action::Cancel && s.as_slice() == std::slice::from_ref(stroke))
     }
 
+    /// What this one stroke does in a text field. As with `cancel`, a printable key never does
+    /// anything here, so that it can still be typed.
+    pub fn edit(&self, stroke: &Stroke) -> Option<Edit> {
+        if stroke.text().is_some() {
+            return None;
+        }
+        self.binds.iter().find(|(s, a)| a.edit().is_some() && s.as_slice() == std::slice::from_ref(stroke)).and_then(|(_, a)| a.edit())
+    }
+
     fn exact(&self, strokes: &[Stroke]) -> Option<Action> {
-        self.binds.iter().find(|(s, _)| s == strokes).map(|(_, a)| *a)
+        self.binds.iter().find(|(s, a)| s == strokes && a.edit().is_none()).map(|(_, a)| *a)
     }
 
     fn has_longer(&self, strokes: &[Stroke]) -> bool {
@@ -381,6 +429,44 @@ mod tests {
         assert_eq!(parse_sequence("<").unwrap()[0], Stroke::plain("<"));
         assert!(parse_sequence("<nonsense>").is_err());
         assert!(parse_sequence("").is_err());
+    }
+
+    fn default_keymap() -> Keymap {
+        let (map, errors) = Keymap::new(&crate::config::Config::load_str("").unwrap().keys);
+        assert_eq!(errors, Vec::<String>::new());
+        map
+    }
+
+    fn stroke(text: &str) -> Stroke {
+        parse_sequence(text).unwrap().remove(0)
+    }
+
+    #[test]
+    fn the_editing_keys_edit_a_field() {
+        let map = default_keymap();
+        assert_eq!(map.edit(&stroke("<C-bs>")), Some(Edit::EraseWord));
+        assert_eq!(map.edit(&stroke("<C-left>")), Some(Edit::WordLeft));
+        assert_eq!(map.edit(&stroke("<C-right>")), Some(Edit::WordRight));
+        assert_eq!(map.edit(&stroke("<C-del>")), Some(Edit::DeleteWord));
+        assert_eq!(map.edit(&stroke("<left>")), Some(Edit::Left));
+        assert_eq!(map.edit(&stroke("<bs>")), Some(Edit::Backspace));
+    }
+
+    #[test]
+    fn the_editing_keys_keep_their_meaning_in_normal_mode() {
+        let map = default_keymap();
+        assert_eq!(map.exact(&[stroke("<left>")]), Some(Action::ScrollLeft));
+        assert_eq!(map.exact(&[stroke("<C-u>")]), Some(Action::HalfUp));
+        assert_eq!(map.exact(&[stroke("<C-w>")]), Some(Action::Quit));
+        assert_eq!(map.exact(&[stroke("<home>")]), Some(Action::GotoFirst));
+        assert_eq!(map.exact(&[stroke("<C-bs>")]), None, "editing alone");
+    }
+
+    #[test]
+    fn a_printable_key_bound_to_an_edit_still_types() {
+        let table = BTreeMap::from([(Action::EditLeft, vec!["x".to_owned()])]);
+        let (map, _) = Keymap::new(&table);
+        assert_eq!(map.edit(&Stroke::plain("x")), None);
     }
 
     #[test]

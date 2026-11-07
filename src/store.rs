@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::config::home;
+use crate::config::{Config, home};
 use crate::view::Anchor;
 
 /// A link from one place in the document to another, shown beside the source.
@@ -216,10 +216,30 @@ pub fn save_signature(dir: &Path, strokes: &[Vec<[f32; 2]>]) -> Result<(), Strin
     std::fs::rename(&temporary, &file).map_err(fail)
 }
 
-/// `$XDG_DATA_HOME/pdfviewer`.
+/// `$XDG_DATA_HOME/yapdf`.
 pub fn data_dir() -> PathBuf {
     let base = std::env::var_os("XDG_DATA_HOME").filter(|v| !v.is_empty()).map_or_else(|| home().join(".local/share"), PathBuf::from);
-    base.join("pdfviewer")
+    base.join("yapdf")
+}
+
+/// Moves a folder of the program's old name to its new one. One already there is left alone, and
+/// so is the old one then, as merging them could lose either's data.
+fn move_folder(old: &Path, new: &Path) -> std::io::Result<()> {
+    if old.is_dir() && new.symlink_metadata().is_err() {
+        std::fs::rename(old, new)?;
+    }
+    Ok(())
+}
+
+/// Brings along the settings and saved data of a version from before the rename to yapdf.
+pub fn adopt_old_folders() {
+    let config = Config::path();
+    for new in [config.parent().map(Path::to_owned), Some(data_dir())].into_iter().flatten() {
+        let old = new.with_file_name("pdfviewer");
+        if let Err(e) = move_folder(&old, &new) {
+            eprintln!("yapdf: couldn't move {} to {}: {e}", old.display(), new.display());
+        }
+    }
 }
 
 pub fn content_key(bytes: &[u8]) -> String {
@@ -331,12 +351,47 @@ pub fn remember_document(path: &Path) {
 mod tests {
     use super::*;
 
+    fn scratch_folders(name: &str) -> (Scratch, PathBuf, PathBuf) {
+        let scratch = Scratch::new(name);
+        let (old, new) = (scratch.0.join("pdfviewer"), scratch.0.join("yapdf"));
+        (scratch, old, new)
+    }
+
+    #[test]
+    fn an_old_folder_moves_to_the_new_name_with_what_is_in_it() {
+        let (_scratch, old, new) = scratch_folders("rename-moves");
+        std::fs::create_dir_all(&old).unwrap();
+        std::fs::write(old.join("signature.json"), "kept").unwrap();
+        move_folder(&old, &new).unwrap();
+        assert!(!old.exists());
+        assert_eq!(std::fs::read_to_string(new.join("signature.json")).unwrap(), "kept");
+    }
+
+    #[test]
+    fn a_folder_already_at_the_new_name_keeps_both() {
+        let (_scratch, old, new) = scratch_folders("rename-keeps");
+        std::fs::create_dir_all(&old).unwrap();
+        std::fs::create_dir_all(&new).unwrap();
+        std::fs::write(old.join("a"), "old").unwrap();
+        std::fs::write(new.join("a"), "new").unwrap();
+        move_folder(&old, &new).unwrap();
+        assert_eq!(std::fs::read_to_string(old.join("a")).unwrap(), "old");
+        assert_eq!(std::fs::read_to_string(new.join("a")).unwrap(), "new");
+    }
+
+    #[test]
+    fn without_an_old_folder_nothing_happens() {
+        let (_scratch, old, new) = scratch_folders("rename-nothing");
+        move_folder(&old, &new).unwrap();
+        assert!(!new.exists());
+    }
+
     /// A scratch directory removed at the end of the test.
     struct Scratch(PathBuf);
 
     impl Scratch {
         fn new(name: &str) -> Self {
-            let dir = std::env::temp_dir().join(format!("pdfviewer-test-{name}-{}", std::process::id()));
+            let dir = std::env::temp_dir().join(format!("yapdf-test-{name}-{}", std::process::id()));
             let _ = std::fs::remove_dir_all(&dir);
             std::fs::create_dir_all(&dir).unwrap();
             Self(dir)

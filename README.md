@@ -1,11 +1,11 @@
-# pdfviewer
+# yapdf
 
 A minimal, keyboard-driven PDF viewer. The whole window is the document, with a status line at the
 bottom. It uses PdfCraft's render engine, and its annotation writer for `:export`, and nothing else
 from the PdfCraft app.
 
-    cargo build --release -p pdfviewer
-    target/release/pdfviewer [--page N] [--password PW] [file.pdf]
+    cargo build --release -p yapdf
+    target/release/yapdf [--page N] [--password PW] [file.pdf]
 
 With no file it reopens the last document. It reloads the PDF when the file changes.
 
@@ -41,6 +41,7 @@ Every binding can be changed under `[keys]` in the config. A count works before 
 | `u` `U` | undo, redo |
 | `Ctrl-r` `T` | light or dark theme, next theme |
 | `gl` `Ctrl-s` `Alt-f` | tint on links, status line, fullscreen |
+| `Ctrl-t` | open a file with the desktop's file chooser |
 | `R` `:` `q` | reload, command line, quit |
 | `Esc` `Ctrl-c` | cancel: closes a bar, hints or the contents; otherwise takes back the last thing: keys, overview, jump, portal, selection, tool, search. Rebind it as `cancel` |
 
@@ -65,23 +66,33 @@ place.
 export, gets one from its printed contents pages when their entries are links: the titles are the
 text of those links, and their indents are the levels. A PDF with neither has no table of contents.
 
+**Editing text.** The `/` `?` `:` bars, the note and text bars and the contents filter have a cursor.
+`Left` `Right` move it, `Ctrl-Left` `Ctrl-Right` or `Alt-b` `Alt-f` by word, `Home` `End` or `Ctrl-a`
+`Ctrl-e` to the ends. `Ctrl-Backspace` and `Ctrl-Delete` erase a word either side, `Ctrl-w` erases
+back to the last space, and `Ctrl-u` `Ctrl-k` erase to either end. The `edit_*` actions rebind them.
+
 **Sticky notes.** With `tn`, click a place and type the note in the bar. Its text shows when the
 pointer is on it, and all of them show while the tool is in hand. Click a note to edit it.
 
 **Fill & sign.** Pick an item and click where it goes, or press `f` and pick a word to put it just
 after that word. The first signature asks you to draw one on a pad and is kept for every document
-in `~/.local/share/pdfviewer/signature.json`, readable by you alone; `:sign` draws a new one. Move
+in `~/.local/share/yapdf/signature.json`, readable by you alone; `:sign` draws a new one. Move
 something by undoing it and placing it again.
 
 **Portals.** Press `p` where you are reading, go to the target, press `p` again. The view returns,
 and the portal window shows the target of the portal nearest the view.
 
-**Commands.** `:{page}`, `:q`, `:w`, `:e {file}`, `:noh`, `:theme {name}`, `:zoom {percent}`,
+**Opening files.** `Ctrl-t` or `:open` shows the desktop's file chooser, through the
+[XDG portal](https://flatpak.github.io/xdg-desktop-portal/) when there is one, so a portal backend
+such as `xdg-desktop-portal-termfilechooser` gets used. It says "no file chosen" if the chooser is
+cancelled, and also if none could be shown.
+
+**Commands.** `:{page}`, `:q`, `:w`, `:e {file}`, `:open [file]`, `:noh`, `:theme {name}`, `:zoom {percent}`,
 `:reload`, `:toc`, `:hotbar`, `:marks`, `:sign`, `:export [file]`, `:export! [file]`.
 
 ## Configuration
 
-`~/.config/pdfviewer/config.toml`, reloaded while the viewer runs. Put only what you want to change
+`~/.config/yapdf/config.toml`, reloaded while the viewer runs. Put only what you want to change
 in it: [`src/default_config.toml`](src/default_config.toml) holds every setting with its default.
 Colours are in the themes, and one key is enough to change one:
 
@@ -89,11 +100,20 @@ Colours are in the themes, and one key is enough to change one:
     background = "#000000"    # around and between the pages
     link = "#0000ff55"        # links to places in the document
 
+## Install
+
+    install -Dm755 target/release/yapdf ~/.local/bin/yapdf
+    install -Dm644 apps/yapdf/yapdf.desktop ~/.local/share/applications/yapdf.desktop
+    xdg-mime default yapdf.desktop application/pdf    # to make it the default
+
 ## What is stored where
 
-Position, marks, portals and annotations are kept in `~/.local/share/pdfviewer/{hash}.json`. The PDF
+Position, marks, portals and annotations are kept in `~/.local/share/yapdf/{hash}.json`. The PDF
 itself is never changed, so other viewers don't show them. A file keeps its data when it moves, and
 when it is rebuilt at the same path.
+
+This program was called pdfviewer before 0.2. On its first run it moves `~/.config/pdfviewer` and
+`~/.local/share/pdfviewer` to their new names, unless those already exist.
 
 `:export` is how annotations leave the viewer: it writes a copy with all of them in it as PDF
 annotations, as `{name}-annotated.pdf` beside the document unless given a path. It won't replace a

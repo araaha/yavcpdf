@@ -1,6 +1,7 @@
 //! What bound keys and commands do.
 use std::fmt::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::sync::mpsc::TryRecvError;
 use std::time::Instant;
 
 use egui::Pos2;
@@ -11,6 +12,7 @@ use crate::app::{
 };
 use crate::config::home;
 use crate::doc::dest_y;
+use crate::field::Field;
 use crate::hint::{self, HintState, Purpose, Target, TargetKind};
 use crate::keymap::Action;
 use crate::search::Search;
@@ -182,7 +184,7 @@ impl App {
     fn open_bar(&mut self, kind: BarKind) {
         let previous = if matches!(kind, BarKind::Search { .. }) { self.search.clone() } else { None };
         let origin = self.view.anchor(&self.doc.layout);
-        self.mode = Mode::Bar(Bar { kind, text: String::new(), origin, previous });
+        self.mode = Mode::Bar(Bar { kind, field: Field::default(), origin, previous });
     }
 
     fn run_modes(&mut self, ctx: &egui::Context, action: Action) -> bool {
@@ -201,6 +203,7 @@ impl App {
             Action::HintLink => self.mode = Mode::Hint(HintState::new(Purpose::Link)),
             Action::DeleteAnnotation => self.mode = Mode::Hint(HintState::new(Purpose::DeleteAnnotation)),
             Action::ToggleToc => self.open_toc(),
+            Action::Open => self.choose_file(ctx),
             Action::Quit => ctx.send_viewport_cmd_to(egui::ViewportId::ROOT, egui::ViewportCommand::Close),
             _ => return false,
         }
@@ -421,7 +424,7 @@ impl App {
 
     fn open_entry(&mut self, entry: Entry, text: String) {
         let origin = self.view.anchor(&self.doc.layout);
-        self.mode = Mode::Bar(Bar { kind: BarKind::Entry(entry), text, origin, previous: None });
+        self.mode = Mode::Bar(Bar { kind: BarKind::Entry(entry), field: Field::new(text), origin, previous: None });
     }
 
     /// Opens a note for editing.
@@ -979,6 +982,7 @@ impl App {
                 self.save();
                 self.say("saved");
             }
+            "open" if argument.is_empty() => self.choose_file(ctx),
             "e" | "edit" | "open" => self.command_open(ctx, argument),
             "noh" | "nohlsearch" => self.search = None,
             "theme" => self.command_theme(argument),
@@ -1006,6 +1010,56 @@ impl App {
         let path = std::fs::canonicalize(&path).unwrap_or(path);
         if let Err(e) = self.open(ctx, &path) {
             self.say(e);
+        }
+    }
+
+    /// Asks the desktop's file chooser for a document, through its portal when it has one. That
+    /// can stay open for as long as it likes, so it has a thread of its own.
+    fn choose_file(&mut self, ctx: &egui::Context) {
+        if self.chooser.is_some() {
+            self.say("the file chooser is already open");
+            return;
+        }
+        let (send, receive) = std::sync::mpsc::channel();
+        let folder = self.doc.path.parent().map(Path::to_owned);
+        let repaint = ctx.clone();
+        let choose = move || {
+            let dialog = rfd::FileDialog::new().set_title("Open a PDF").add_filter("PDF", &["pdf", "PDF"]);
+            let dialog = match folder {
+                Some(folder) => dialog.set_directory(folder),
+                None => dialog,
+            };
+            // The viewer may have closed by now, with nothing left to tell.
+            let _ = send.send(dialog.pick_file());
+            repaint.request_repaint();
+        };
+        match std::thread::Builder::new().name("file chooser".to_owned()).spawn(choose) {
+            Ok(_) => self.chooser = Some(receive),
+            Err(e) => self.say(format!("file chooser: {e}")),
+        }
+    }
+
+    /// Opens what the file chooser picked, once it has. It doesn't say whether it was cancelled or
+    /// couldn't open at all, so neither does this.
+    pub fn pump_chooser(&mut self, ctx: &egui::Context) {
+        let Some(chooser) = &self.chooser else { return };
+        let answer = match chooser.try_recv() {
+            Ok(answer) => answer,
+            Err(TryRecvError::Empty) => return,
+            Err(TryRecvError::Disconnected) => {
+                self.chooser = None;
+                self.say("the file chooser failed");
+                return;
+            }
+        };
+        self.chooser = None;
+        match answer {
+            Some(path) => {
+                if let Err(e) = self.open(ctx, &path) {
+                    self.say(e);
+                }
+            }
+            None => self.say("no file chosen"),
         }
     }
 

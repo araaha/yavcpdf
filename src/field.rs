@@ -1,0 +1,291 @@
+//! The one-line text field of the bars: its text, a cursor, and what the editing keys do to them.
+
+/// What an editing key does. The `edit_*` actions under `[keys]` choose the keys.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Edit {
+    Left,
+    Right,
+    WordLeft,
+    WordRight,
+    Start,
+    End,
+    Backspace,
+    Delete,
+    EraseWord,
+    DeleteWord,
+    /// Back to the last space, so all of a path goes at once.
+    EraseBlank,
+    EraseToStart,
+    EraseToEnd,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Field {
+    pub text: String,
+    /// A byte offset on a character boundary, kept there by every edit.
+    cursor: usize,
+}
+
+/// Letters and digits make words, punctuation makes its own, and space separates them.
+#[derive(PartialEq, Eq)]
+enum Class {
+    Space,
+    Word,
+    Punctuation,
+}
+
+fn class(c: char) -> Class {
+    if c.is_whitespace() {
+        Class::Space
+    } else if c.is_alphanumeric() || c == '_' {
+        Class::Word
+    } else {
+        Class::Punctuation
+    }
+}
+
+impl Field {
+    /// A field holding `text`, with the cursor at its end.
+    pub fn new(text: String) -> Self {
+        let cursor = text.len();
+        Self { text, cursor }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.text.is_empty()
+    }
+
+    /// What is left of the cursor.
+    pub fn before_cursor(&self) -> &str {
+        self.text.get(..self.cursor).unwrap_or(&self.text)
+    }
+
+    fn after_cursor(&self) -> &str {
+        self.text.get(self.cursor..).unwrap_or("")
+    }
+
+    pub fn insert(&mut self, text: &str) {
+        self.text.insert_str(self.cursor, text);
+        self.cursor += text.len();
+    }
+
+    /// Where the character before the cursor starts.
+    fn char_left(&self) -> usize {
+        self.before_cursor().char_indices().next_back().map_or(0, |(i, _)| i)
+    }
+
+    /// Where the character after the cursor ends.
+    fn char_right(&self) -> usize {
+        self.cursor + self.after_cursor().chars().next().map_or(0, char::len_utf8)
+    }
+
+    /// The start of the word before the cursor.
+    fn word_left(&self) -> usize {
+        let mut chars = self.before_cursor().char_indices().rev().skip_while(|(_, c)| class(*c) == Class::Space).peekable();
+        let Some((mut start, first)) = chars.next() else { return 0 };
+        let kind = class(first);
+        for (i, c) in chars {
+            if class(c) != kind {
+                break;
+            }
+            start = i;
+        }
+        start
+    }
+
+    /// The end of the word after the cursor.
+    fn word_right(&self) -> usize {
+        let mut chars = self.after_cursor().char_indices().skip_while(|(_, c)| class(*c) == Class::Space);
+        let Some((at, first)) = chars.next() else { return self.text.len() };
+        let kind = class(first);
+        let mut end = at + first.len_utf8();
+        for (i, c) in chars {
+            if class(c) != kind {
+                break;
+            }
+            end = i + c.len_utf8();
+        }
+        self.cursor + end
+    }
+
+    /// The start of the run of non-space before the cursor.
+    fn blank_left(&self) -> usize {
+        let before = self.before_cursor().trim_end();
+        before.rfind(char::is_whitespace).map_or(0, |i| i + before[i..].chars().next().map_or(1, char::len_utf8))
+    }
+
+    /// Removes from `from` to the cursor.
+    fn erase_back(&mut self, from: usize) -> bool {
+        let erased = from < self.cursor;
+        self.text.replace_range(from..self.cursor, "");
+        self.cursor = from;
+        erased
+    }
+
+    /// Removes from the cursor to `to`.
+    fn erase_ahead(&mut self, to: usize) -> bool {
+        let erased = self.cursor < to;
+        self.text.replace_range(self.cursor..to, "");
+        erased
+    }
+
+    /// Does an edit, and says whether the text changed.
+    pub fn apply(&mut self, edit: Edit) -> bool {
+        match edit {
+            Edit::Left => self.cursor = self.char_left(),
+            Edit::Right => self.cursor = self.char_right(),
+            Edit::WordLeft => self.cursor = self.word_left(),
+            Edit::WordRight => self.cursor = self.word_right(),
+            Edit::Start => self.cursor = 0,
+            Edit::End => self.cursor = self.text.len(),
+            Edit::Backspace => return self.erase_back(self.char_left()),
+            Edit::Delete => return self.erase_ahead(self.char_right()),
+            Edit::EraseWord => return self.erase_back(self.word_left()),
+            Edit::DeleteWord => return self.erase_ahead(self.word_right()),
+            Edit::EraseBlank => return self.erase_back(self.blank_left()),
+            Edit::EraseToStart => return self.erase_back(0),
+            Edit::EraseToEnd => return self.erase_ahead(self.text.len()),
+        }
+        false
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A field written with `|` for the cursor.
+    fn at(marked: &str) -> Field {
+        let cursor = marked.find('|').unwrap();
+        Field { text: marked.replace('|', ""), cursor }
+    }
+
+    fn marked(field: &Field) -> String {
+        format!("{}|{}", field.before_cursor(), field.after_cursor())
+    }
+
+    fn after(start: &str, edit: Edit) -> String {
+        let mut field = at(start);
+        field.apply(edit);
+        marked(&field)
+    }
+
+    #[test]
+    fn a_new_field_has_its_cursor_at_the_end() {
+        assert_eq!(marked(&Field::new("abc".to_owned())), "abc|");
+    }
+
+    #[test]
+    fn text_goes_in_at_the_cursor() {
+        let mut field = at("ab|cd");
+        field.insert("xy");
+        assert_eq!(marked(&field), "abxy|cd");
+    }
+
+    #[test]
+    fn the_cursor_moves_by_character() {
+        assert_eq!(after("ab|c", Edit::Left), "a|bc");
+        assert_eq!(after("ab|c", Edit::Right), "abc|");
+        assert_eq!(after("|abc", Edit::Left), "|abc");
+        assert_eq!(after("abc|", Edit::Right), "abc|");
+    }
+
+    #[test]
+    fn the_cursor_moves_by_word() {
+        assert_eq!(after("one two three|", Edit::WordLeft), "one two |three");
+        assert_eq!(after("one two |three", Edit::WordLeft), "one |two three");
+        assert_eq!(after("|one two", Edit::WordRight), "one| two");
+        assert_eq!(after("one| two", Edit::WordRight), "one two|");
+        assert_eq!(after("|", Edit::WordLeft), "|");
+        assert_eq!(after("|", Edit::WordRight), "|");
+    }
+
+    #[test]
+    fn punctuation_stops_a_word() {
+        assert_eq!(after("~/papers/draft.pdf|", Edit::WordLeft), "~/papers/draft.|pdf");
+        assert_eq!(after("~/papers/draft.|pdf", Edit::WordLeft), "~/papers/draft|.pdf");
+        assert_eq!(after("|snake_case word", Edit::WordRight), "snake_case| word");
+    }
+
+    #[test]
+    fn the_ends_of_the_line() {
+        assert_eq!(after("ab|c", Edit::Start), "|abc");
+        assert_eq!(after("ab|c", Edit::End), "abc|");
+    }
+
+    #[test]
+    fn single_characters_are_erased_either_side() {
+        assert_eq!(after("ab|c", Edit::Backspace), "a|c");
+        assert_eq!(after("ab|c", Edit::Delete), "ab|");
+        assert_eq!(after("|abc", Edit::Backspace), "|abc");
+        assert_eq!(after("abc|", Edit::Delete), "abc|");
+    }
+
+    #[test]
+    fn words_are_erased_either_side() {
+        assert_eq!(after("one two  |three", Edit::EraseWord), "one |three");
+        assert_eq!(after("one|  two three", Edit::DeleteWord), "one| three");
+        assert_eq!(after("  |", Edit::EraseWord), "|");
+    }
+
+    #[test]
+    fn a_blank_erase_takes_all_of_a_path() {
+        assert_eq!(after("e ~/a/b.pdf|", Edit::EraseBlank), "e |");
+        assert_eq!(after("one two  |", Edit::EraseBlank), "one |");
+        assert_eq!(after("word|", Edit::EraseBlank), "|");
+        assert_eq!(after("a\u{3000}b|", Edit::EraseBlank), "a\u{3000}|");
+    }
+
+    #[test]
+    fn erasing_to_either_end_keeps_the_other_side() {
+        assert_eq!(after("ab|cd", Edit::EraseToStart), "|cd");
+        assert_eq!(after("ab|cd", Edit::EraseToEnd), "ab|");
+    }
+
+    #[test]
+    fn moving_does_not_count_as_a_change() {
+        let mut field = at("ab|c");
+        assert!(!field.apply(Edit::Left) && !field.apply(Edit::WordRight) && !field.apply(Edit::Start));
+        assert!(!field.apply(Edit::Backspace), "nothing before the cursor");
+        assert!(field.apply(Edit::Delete));
+    }
+
+    #[test]
+    fn every_edit_stays_on_a_character_boundary() {
+        let edits = [
+            Edit::Left,
+            Edit::Right,
+            Edit::WordLeft,
+            Edit::WordRight,
+            Edit::Start,
+            Edit::End,
+            Edit::Backspace,
+            Edit::Delete,
+            Edit::EraseWord,
+            Edit::DeleteWord,
+            Edit::EraseBlank,
+            Edit::EraseToStart,
+            Edit::EraseToEnd,
+        ];
+        let text = "é 日本語 🐣 naïve-x";
+        for start in text.char_indices().map(|(i, _)| i).chain([text.len()]) {
+            for first in edits {
+                for second in edits {
+                    let mut field = Field { text: text.to_owned(), cursor: start };
+                    field.apply(first);
+                    field.apply(second);
+                    assert!(field.text.is_char_boundary(field.cursor), "{first:?} then {second:?} from {start}");
+                    field.insert("x");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn wide_characters_are_one_step() {
+        assert_eq!(after("日本語|", Edit::Left), "日本|語");
+        assert_eq!(after("日本語|", Edit::Backspace), "日本|");
+        assert_eq!(after("|🐣a", Edit::Delete), "|a");
+        assert_eq!(after("日本 語|", Edit::EraseWord), "日本 |");
+    }
+}

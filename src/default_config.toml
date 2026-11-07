@@ -1,6 +1,6 @@
-# pdfviewer configuration: these are the built-in defaults.
+# yapdf configuration: these are the built-in defaults.
 #
-# Copy only what you want to change to ~/.config/pdfviewer/config.toml. Your file is merged over
+# Copy only what you want to change to ~/.config/yapdf/config.toml. Your file is merged over
 # this one, and it is reloaded while the viewer runs. A binding list under [keys] replaces that
 # action's default list.
 #
@@ -157,3 +157,19 @@ toggle_links = ["gl"]
 toggle_fullscreen = ["<A-f>"]
 reload = ["R"]
 quit = ["q", "ZQ", "ZZ", "<C-w>"]
+open = ["<C-t>"]         # the desktop's file chooser
+# Editing in the bars and the contents filter, and nowhere else: `<left>` still scrolls in the
+# document. A key that types a character can't be used here.
+edit_left = ["<left>"]
+edit_right = ["<right>"]
+edit_word_left = ["<C-left>", "<A-b>"]
+edit_word_right = ["<C-right>", "<A-f>"]
+edit_start = ["<home>", "<C-a>"]
+edit_end = ["<end>", "<C-e>"]
+edit_backspace = ["<bs>", "<S-bs>"]
+edit_delete = ["<del>"]
+edit_erase_word = ["<C-bs>", "<A-bs>"]
+edit_delete_word = ["<C-del>", "<A-d>"]
+edit_erase_blank = ["<C-w>"]          # back to the last space: all of a path at once
+edit_erase_to_start = ["<C-u>"]
+edit_erase_to_end = ["<C-k>"]

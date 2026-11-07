@@ -184,7 +184,7 @@ impl App {
     fn fill_rects(&self, painter: &Painter, view: &View, page: usize, rects: &[[f32; 4]], color: Color) {
         let t = view.transform(&self.doc.layout, page);
         for r in rects {
-            painter.rect_filled(t.rect(*r), 1.0, color.egui());
+            painter.rect_filled(t.rect(*r), 0.0, color.egui());
         }
     }
 
@@ -227,7 +227,7 @@ impl App {
             Annotation::Highlight { page, rects, color, .. } => {
                 let t = view.transform(&self.doc.layout, *page);
                 for r in rects {
-                    painter.rect_filled(t.rect(*r), 1.0, translucent(*color, 110));
+                    painter.rect_filled(t.rect(*r), 0.0, translucent(*color, 110));
                 }
             }
             Annotation::Stroke { page, points, color, width, .. } => self.draw_stroke(painter, view, *page, points, *color, *width),
@@ -257,7 +257,7 @@ impl App {
     fn draw_note(&self, painter: &Painter, view: &View, page: usize, at: [f32; 2], color: [u8; 3]) {
         let t = view.transform(&self.doc.layout, page);
         let icon = t.rect([at[0], at[1], at[0] + NOTE_SIDE, at[1] + NOTE_SIDE]);
-        painter.rect_filled(icon, 2.0 * view.zoom, Color32::from_rgb(color[0], color[1], color[2]));
+        painter.rect_filled(icon, 0.0, Color32::from_rgb(color[0], color[1], color[2]));
         let line = Stroke::new(1.5 * view.zoom, Color32::from_black_alpha(150));
         for row in [0.3, 0.5, 0.7] {
             let y = icon.top() + icon.height() * row;
@@ -283,8 +283,8 @@ impl App {
         let size = galley.size() + Vec2::splat(12.0);
         let beside = Rect::from_min_size(icon.right_top() + vec2(6.0, 0.0), size);
         let area = if beside.right() > view.rect.right() { beside.translate(vec2(-(size.x + icon.width() + 12.0), 0.0)) } else { beside };
-        painter.rect_filled(area, 4.0, theme.ui_background.egui());
-        painter.rect_stroke(area, 4.0, Stroke::new(1.0, theme.ui_accent.egui()), egui::StrokeKind::Inside);
+        painter.rect_filled(area, 0.0, theme.ui_background.egui());
+        painter.rect_stroke(area, 0.0, Stroke::new(1.0, theme.ui_accent.egui()), egui::StrokeKind::Inside);
         painter.galley(area.min + Vec2::splat(6.0), galley, theme.ui_text.egui());
     }
 
@@ -338,7 +338,7 @@ impl App {
             let at = view.transform(&self.doc.layout, target.page).point([target.rect[0], target.rect[1]]);
             let galley = painter.layout_no_wrap(rest.to_owned(), font.clone(), theme.hint_text.egui());
             let box_rect = clear_of(previous, Rect::from_min_size(at, galley.size() + vec2(2.0, 0.0)));
-            painter.rect_filled(box_rect, 2.0, theme.hint_background.egui());
+            painter.rect_filled(box_rect, 0.0, theme.hint_background.egui());
             painter.galley(box_rect.min + vec2(1.0, 0.0), galley, theme.hint_text.egui());
             previous = Some(box_rect);
         }
@@ -353,8 +353,8 @@ impl App {
         }
         let Some(portal) = self.closest_portal().cloned() else { return };
         let builder = ViewportBuilder::default()
-            .with_title("pdfviewer portal")
-            .with_app_id("pdfviewer-portal")
+            .with_title("yapdf portal")
+            .with_app_id("yapdf-portal")
             .with_inner_size([self.config.portal.width, self.config.portal.height])
             .with_decorations(self.config.view.decorations);
         ctx.show_viewport_immediate(ViewportId::from_hash_of("portal"), builder, |ui, _| self.portal_ui(ui, &portal));
