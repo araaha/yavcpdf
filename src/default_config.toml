@@ -1,0 +1,159 @@
+# pdfviewer configuration: these are the built-in defaults.
+#
+# Copy only what you want to change to ~/.config/pdfviewer/config.toml. Your file is merged over
+# this one, and it is reloaded while the viewer runs. A binding list under [keys] replaces that
+# action's default list.
+#
+# Colours live in the themes: `background` is what shows around and between the pages, and `page`
+# is the sheet itself. To change one, set just that key, for example:
+#
+#   [themes.dark]
+#   background = "#000000"
+
+theme = "dark"            # a name under [themes]; `toggle_theme` cycles through them
+font = "MesloLGS NF"      # any fontconfig name; "" keeps the built-in interface font
+font_size = 20.0
+
+[view]
+page_gap = 6.0            # points between pages
+fit_width_ratio = 0.6     # `fit_width` fills this share of the window
+zoom_step = 1.2
+min_zoom = 0.1
+max_zoom = 16.0
+scroll_step = 60.0        # h/j/k/l, in interface pixels
+prefetch_pages = 2        # pages rendered ahead of and behind the view
+texture_budget_mb = 256
+smartcase = true          # an upper-case letter makes a search case sensitive
+decorations = false       # window title bar
+restore_position = true   # reopen a document where you left it
+highlight_links = true    # tint links to places in the document; `toggle_links` turns it off
+
+[statusbar]
+visible = true
+# Sections are separated by " | ". A section whose fields are all empty is dropped.
+# Fields: {page} {pages} {label} {percent} {zoom} {chapter} {title} {file} {mode} {pending}
+#         {search} {selection} {message}
+left = "Page {page} / {pages} | {chapter}"
+right = "{mode} | {pending} | {selection} | {search} | {message} | {file}"
+
+[hints]
+alphabet = "asdfghjklqwertyuiopzxcvbnm"
+font_size = 10.0
+
+[hotbar]
+position = "bottom"       # top, bottom, left or right
+colors = ["#fabd2f", "#83a598", "#b8bb26", "#fb4934", "#d3869b"]
+stroke_width = 2.0        # points
+fill_size = 12.0          # size of fill & sign text and marks, in points
+date_format = "%Y-%m-%d"  # the fill & sign date, as strftime
+border = 1.0              # width of its outline in the theme's ui_accent; 0 for none
+
+[overview]
+width = 0.8               # share of the view, from 0 to 1
+height = 0.5
+x = 0.0                   # where its centre is, from -1 (left) to 1 (right)
+y = 0.0                   # from -1 (top) to 1 (bottom)
+
+[portal]
+width = 720.0
+height = 480.0
+
+[themes.dark]
+background = "#1d1d1d"        # behind the pages
+page = "#242424"
+page_text = "#ebdbb2"
+recolor = true                # false shows the document's own colours
+ui_background = "#242424"
+ui_text = "#ebdbb2"
+ui_accent = "#83a598"
+hint_background = "#83a598"
+hint_text = "#242424"
+search = "#458588aa"
+search_current = "#fabd2faa"
+selection = "#83a59888"
+link = "#0000ff55"            # links to places in the document
+
+[themes.light]
+background = "#d5c4a1"
+page = "#ebdbb2"
+page_text = "#242424"
+recolor = true
+ui_background = "#ebdbb2"
+ui_text = "#242424"
+ui_accent = "#458588"
+hint_background = "#458588"
+hint_text = "#ebdbb2"
+search = "#45858866"
+search_current = "#d79921aa"
+selection = "#45858866"
+link = "#0000ff33"
+
+[keys]
+cancel = ["<esc>", "<C-c>"]
+scroll_down = ["j", "<down>"]
+scroll_up = ["k", "<up>"]
+scroll_left = ["h", "<left>"]
+scroll_right = ["l", "<right>"]
+half_down = ["<C-d>"]
+half_up = ["<C-u>"]
+screen_down = ["<C-f>", "<space>"]
+screen_up = ["<C-b>", "<S-space>"]
+next_page = ["J", "<pagedown>"]
+prev_page = ["K", "<pageup>"]
+goto_first = ["gg", "<home>"]
+goto_last = ["G", "<end>"]
+edge_left = ["0", "^"]
+edge_right = ["$"]
+center = ["zz"]
+zoom_in = ["=", "+"]
+zoom_out = ["-"]
+fit_width = ["W"]
+fit_height = ["H"]
+search_forward = ["/"]
+search_backward = ["?"]
+search_next = ["n"]
+search_prev = ["N"]
+set_mark = ["m"]
+goto_mark = ["'", "`"]
+jump_back = ["<A-o>"]
+jump_forward = ["<A-i>"]
+command = [":"]
+hint_select = ["f", "<A-w>"]
+hint_link = ["F", "<A-n>"]
+yank = ["y"]
+portal = ["p"]
+smart_jump = ["gd", "<C-]>"]
+overview = ["go", "<A-c>"]
+goto_overview = ["<cr>"]
+overview_next = ["<C-A-pagedown>"]
+overview_prev = ["<C-A-pageup>"]
+goto_portal = ["gp"]
+delete_portal = ["dp"]
+edit_portal = ["P"]
+toggle_portal_window = ["<f12>"]
+toggle_toc = ["<tab>"]
+toggle_statusbar = ["<C-s>"]
+toggle_hotbar = ["tt"]
+tool_highlight = ["th"]
+tool_draw = ["td"]
+tool_erase = ["te"]
+tool_note = ["tn"]
+tool_fill = ["tf"]
+fill_text = ["tT"]
+fill_date = ["tD"]
+fill_check = ["tC"]
+fill_cross = ["tX"]
+fill_dot = ["tO"]
+fill_line = ["tL"]
+fill_sign = ["tS"]
+tool_width_down = ["["]
+tool_width_up = ["]"]
+delete_annotation = ["dh"]
+undo = ["u"]
+redo = ["U"]
+toggle_theme = ["T"]
+toggle_light_dark = ["<C-r>"]
+toggle_links = ["gl"]
+toggle_fullscreen = ["<A-f>"]
+reload = ["R"]
+quit = ["q", "ZQ", "ZZ", "<C-w>"]
