@@ -1,6 +1,6 @@
-# yapdf configuration: these are the built-in defaults.
+# yavcpdf configuration: these are the built-in defaults.
 #
-# Copy only what you want to change to ~/.config/yapdf/config.toml. Your file is merged over
+# Copy only what you want to change to ~/.config/yavcpdf/config.toml. Your file is merged over
 # this one, and it is reloaded while the viewer runs. A binding list under [keys] replaces that
 # action's default list.
 #

@@ -1,7 +1,7 @@
 # Attribution
 
-This file lists the third-party assets compiled into the yapdf binary through its dependencies. The
-yapdf source itself contains no third-party assets. Each was checked against the dependency tree
+This file lists the third-party assets compiled into the yavcpdf binary through its dependencies. The
+yavcpdf source itself contains no third-party assets. Each was checked against the dependency tree
 (`cargo tree -e features`) and the bytes of a build of the binary. The pdfcraft crates and the
 patched crates are taken from https://github.com/storytold/pdfcraft at the commit pinned in
 `Cargo.toml`, the egui crates from https://github.com/storytold/egui. Licence texts are summarised in

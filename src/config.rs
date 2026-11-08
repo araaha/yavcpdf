@@ -163,7 +163,7 @@ impl Config {
     /// The user's config file.
     pub fn path() -> PathBuf {
         let base = std::env::var_os("XDG_CONFIG_HOME").filter(|v| !v.is_empty()).map_or_else(|| home().join(".config"), PathBuf::from);
-        base.join("yapdf/config.toml")
+        base.join("yavcpdf/config.toml")
     }
 
     /// Builds the config from the text of a user file.

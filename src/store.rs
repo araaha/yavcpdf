@@ -216,10 +216,10 @@ pub fn save_signature(dir: &Path, strokes: &[Vec<[f32; 2]>]) -> Result<(), Strin
     std::fs::rename(&temporary, &file).map_err(fail)
 }
 
-/// `$XDG_DATA_HOME/yapdf`.
+/// `$XDG_DATA_HOME/yavcpdf`.
 pub fn data_dir() -> PathBuf {
     let base = std::env::var_os("XDG_DATA_HOME").filter(|v| !v.is_empty()).map_or_else(|| home().join(".local/share"), PathBuf::from);
-    base.join("yapdf")
+    base.join("yavcpdf")
 }
 
 /// Moves a folder of the program's old name to its new one. One already there is left alone, and
@@ -231,13 +231,24 @@ fn move_folder(old: &Path, new: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
-/// Brings along the settings and saved data of a version from before the rename to yapdf.
+/// The folder a new one is adopted from: the first of `candidates` that exists, unless the new
+/// one is already there (even as a file or a dangling link), when nothing moves.
+fn adoption_source(new: &Path, candidates: &[PathBuf]) -> Option<PathBuf> {
+    if new.symlink_metadata().is_ok() {
+        return None;
+    }
+    candidates.iter().find(|old| old.is_dir()).cloned()
+}
+
+/// Brings along the settings and saved data of a version from before the rename to yavcpdf: from
+/// the yapdf folders, or else the older pdfviewer ones.
 pub fn adopt_old_folders() {
     let config = Config::path();
     for new in [config.parent().map(Path::to_owned), Some(data_dir())].into_iter().flatten() {
-        let old = new.with_file_name("pdfviewer");
+        let candidates = [new.with_file_name("yapdf"), new.with_file_name("pdfviewer")];
+        let Some(old) = adoption_source(&new, &candidates) else { continue };
         if let Err(e) = move_folder(&old, &new) {
-            eprintln!("yapdf: couldn't move {} to {}: {e}", old.display(), new.display());
+            eprintln!("yavcpdf: couldn't move {} to {}: {e}", old.display(), new.display());
         }
     }
 }
@@ -353,7 +364,7 @@ mod tests {
 
     fn scratch_folders(name: &str) -> (Scratch, PathBuf, PathBuf) {
         let scratch = Scratch::new(name);
-        let (old, new) = (scratch.0.join("pdfviewer"), scratch.0.join("yapdf"));
+        let (old, new) = (scratch.0.join("pdfviewer"), scratch.0.join("yavcpdf"));
         (scratch, old, new)
     }
 
@@ -386,12 +397,61 @@ mod tests {
         assert!(!new.exists());
     }
 
+    /// Makes the named folders (each holding a marker file) beside `yavcpdf`, and says what
+    /// `adoption_source` chooses, as the name of the folder.
+    fn chosen(name: &str, existing: &[&str]) -> Option<String> {
+        let scratch = Scratch::new(name);
+        for folder in existing {
+            std::fs::create_dir_all(scratch.0.join(folder)).unwrap();
+        }
+        let new = scratch.0.join("yavcpdf");
+        let candidates = [new.with_file_name("yapdf"), new.with_file_name("pdfviewer")];
+        adoption_source(&new, &candidates).and_then(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()))
+    }
+
+    #[test]
+    fn only_yapdf_existing_is_adopted() {
+        assert_eq!(chosen("adopt-yapdf", &["yapdf"]).as_deref(), Some("yapdf"));
+    }
+
+    #[test]
+    fn only_pdfviewer_existing_is_adopted() {
+        assert_eq!(chosen("adopt-pdfviewer", &["pdfviewer"]).as_deref(), Some("pdfviewer"));
+    }
+
+    #[test]
+    fn yapdf_wins_over_pdfviewer_and_pdfviewer_is_left_alone() {
+        let scratch = Scratch::new("adopt-both");
+        let (yapdf, viewer, new) = (scratch.0.join("yapdf"), scratch.0.join("pdfviewer"), scratch.0.join("yavcpdf"));
+        std::fs::create_dir_all(&yapdf).unwrap();
+        std::fs::create_dir_all(&viewer).unwrap();
+        std::fs::write(yapdf.join("a"), "yapdf").unwrap();
+        std::fs::write(viewer.join("a"), "viewer").unwrap();
+        let source = adoption_source(&new, &[yapdf.clone(), viewer.clone()]).unwrap();
+        assert_eq!(source, yapdf);
+        move_folder(&source, &new).unwrap();
+        assert_eq!(std::fs::read_to_string(new.join("a")).unwrap(), "yapdf");
+        assert_eq!(std::fs::read_to_string(viewer.join("a")).unwrap(), "viewer");
+        assert!(!yapdf.exists());
+    }
+
+    #[test]
+    fn an_existing_yavcpdf_means_nothing_moves() {
+        assert_eq!(chosen("adopt-existing", &["yavcpdf", "yapdf", "pdfviewer"]), None);
+        assert_eq!(chosen("adopt-existing-only", &["yavcpdf"]), None);
+    }
+
+    #[test]
+    fn with_no_old_folder_there_is_nothing_to_adopt() {
+        assert_eq!(chosen("adopt-none", &[]), None);
+    }
+
     /// A scratch directory removed at the end of the test.
     struct Scratch(PathBuf);
 
     impl Scratch {
         fn new(name: &str) -> Self {
-            let dir = std::env::temp_dir().join(format!("yapdf-test-{name}-{}", std::process::id()));
+            let dir = std::env::temp_dir().join(format!("yavcpdf-test-{name}-{}", std::process::id()));
             let _ = std::fs::remove_dir_all(&dir);
             std::fs::create_dir_all(&dir).unwrap();
             Self(dir)

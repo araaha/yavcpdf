@@ -10,7 +10,7 @@ use pdfcraft_render::PageInfo;
 
 use crate::store::{Annotation, MarkKind, NOTE_SIDE, mark_rect};
 
-const AUTHOR: &str = "yapdf";
+const AUTHOR: &str = "yavcpdf";
 const BLACK: [f64; 3] = [0.0; 3];
 
 impl MarkKind {
@@ -103,7 +103,7 @@ fn add_all(doc: &mut Document, pages: &[PageInfo], annotations: &[Annotation]) -
         style.color = color.unwrap_or(style.color);
         style.width = width.unwrap_or(style.width);
         let new = NewAnnotation { page: annotation.page(), shape, style, contents, author: AUTHOR.to_owned() };
-        let meta = Meta { date: Some(date.clone()), id: format!("yapdf-{}", annotation.id()) };
+        let meta = Meta { date: Some(date.clone()), id: format!("yavcpdf-{}", annotation.id()) };
         add_annotation(doc, &new, &meta).map_err(|e| format!("page {}: {e:?}", annotation.page() + 1))?;
     }
     Ok(())
@@ -236,7 +236,7 @@ mod tests {
     #[test]
     fn the_copy_goes_beside_the_document_and_never_over_it() {
         assert_eq!(default_path(Path::new("/a/form.pdf")), PathBuf::from("/a/form-annotated.pdf"));
-        let dir = std::env::temp_dir().join(format!("yapdf-export-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("yavcpdf-export-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let (original, copy, free) = (dir.join("a.pdf"), dir.join("b.pdf"), dir.join("c.pdf"));
         std::fs::write(&original, b"a").unwrap();

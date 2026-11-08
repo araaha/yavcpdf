@@ -535,7 +535,7 @@ impl App {
     }
 
     pub fn set_title(&self, ctx: &egui::Context) {
-        ctx.send_viewport_cmd_to(egui::ViewportId::ROOT, egui::ViewportCommand::Title(format!("{} - yapdf", self.doc.file_name())));
+        ctx.send_viewport_cmd_to(egui::ViewportId::ROOT, egui::ViewportCommand::Title(format!("{} - yavcpdf", self.doc.file_name())));
     }
 
     /// Picks up a changed config file.

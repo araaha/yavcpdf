@@ -1,11 +1,11 @@
-# yapdf
+# yavcpdf
 
 A minimal, keyboard-driven PDF viewer. The whole window is the document, with a status line at the
 bottom. It uses PdfCraft's render engine, and its annotation writer for `:export`, and nothing else
 from the PdfCraft app.
 
     cargo build --release
-    target/release/yapdf [--page N] [--password PW] [--geometry WxH[+X+Y]]
+    target/release/yavcpdf [--page N] [--password PW] [--geometry WxH[+X+Y]]
                          [--fullscreen|--no-fullscreen] [--statusbar|--no-statusbar] [file.pdf]
 
 With no file it reopens the last document. It reloads the PDF when the file changes.
@@ -85,7 +85,7 @@ pointer is on it, and all of them show while the tool is in hand. Click a note t
 
 **Fill & sign.** Pick an item and click where it goes, or press `f` and pick a word to put it just
 after that word. The first signature asks you to draw one on a pad and is kept for every document
-in `~/.local/share/yapdf/signature.json`, readable by you alone; `:sign` draws a new one. Move
+in `~/.local/share/yavcpdf/signature.json`, readable by you alone; `:sign` draws a new one. Move
 something by undoing it and placing it again.
 
 **Portals.** Press `p` where you are reading, go to the target, press `p` again. The view returns,
@@ -103,7 +103,7 @@ cancelled, and also if none could be shown.
 
 ## Configuration
 
-`~/.config/yapdf/config.toml`, reloaded while the viewer runs. Put only what you want to change
+`~/.config/yavcpdf/config.toml`, reloaded while the viewer runs. Put only what you want to change
 in it: [`src/default_config.toml`](src/default_config.toml) holds every setting with its default.
 Colours are in the themes, and one key is enough to change one:
 
@@ -121,18 +121,17 @@ with PdfCraft's, and runs the tests and clippy. If it reports a difference in th
 
 ## Install
 
-    install -Dm755 target/release/yapdf ~/.local/bin/yapdf
-    install -Dm644 yapdf.desktop ~/.local/share/applications/yapdf.desktop
-    xdg-mime default yapdf.desktop application/pdf    # to make it the default
+    install -Dm755 target/release/yavcpdf ~/.local/bin/yavcpdf
+    install -Dm644 yavcpdf.desktop ~/.local/share/applications/yavcpdf.desktop
+    xdg-mime default yavcpdf.desktop application/pdf    # to make it the default
 
 ## What is stored where
 
-Position, marks, portals and annotations are kept in `~/.local/share/yapdf/{hash}.json`. The PDF
+Position, marks, portals and annotations are kept in `~/.local/share/yavcpdf/{hash}.json`. The PDF
 itself is never changed, so other viewers don't show them. A file keeps its data when it moves, and
 when it is rebuilt at the same path.
 
-This program was called pdfviewer before 0.2. On its first run it moves `~/.config/pdfviewer` and
-`~/.local/share/pdfviewer` to their new names, unless those already exist.
+This program was called yapdf before 0.3 and pdfviewer before 0.2. On its first run it moves the old `~/.config` and `~/.local/share` folders to their new names, unless those already exist.
 
 `:export` is how annotations leave the viewer: it writes a copy with all of them in it as PDF
 annotations, as `{name}-annotated.pdf` beside the document unless given a path. It won't replace a

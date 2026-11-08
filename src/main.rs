@@ -1,4 +1,4 @@
-//! yapdf: a minimal, keyboard-driven PDF viewer on the PdfCraft render engine.
+//! yavcpdf: a minimal, keyboard-driven PDF viewer on the PdfCraft render engine.
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
 mod actions;
@@ -27,12 +27,12 @@ use std::process::ExitCode;
 use config::Config;
 use doc::Doc;
 
-const USAGE: &str = "usage: yapdf [--page N] [--password PW] [--geometry WxH[+X+Y]]
+const USAGE: &str = "usage: yavcpdf [--page N] [--password PW] [--geometry WxH[+X+Y]]
              [--fullscreen|--no-fullscreen] [--statusbar|--no-statusbar] [file.pdf]
 
 With no file, the document opened last is opened again.
 --geometry sets the window size in points, and optionally its position.
-The configuration is ~/.config/yapdf/config.toml.";
+The configuration is ~/.config/yavcpdf/config.toml.";
 
 #[derive(Debug, Default, PartialEq)]
 struct Args {
@@ -133,12 +133,12 @@ fn run(args: Args) -> Result<(), String> {
         config.statusbar.visible = on;
     }
     let doc = Doc::open(&path, args.password.as_deref(), config.active_theme(), config.view.page_gap)?;
-    let title = format!("{} - yapdf", doc.file_name());
+    let title = format!("{} - yavcpdf", doc.file_name());
     let (width, height) = args.geometry.map_or((1280, 800), |g| g.size);
     // Sizes and offsets are capped at 16384 by parse_geometry, so they are exact in f32.
     let mut viewport = egui::ViewportBuilder::default()
         .with_title(title)
-        .with_app_id("yapdf")
+        .with_app_id("yavcpdf")
         .with_decorations(config.view.decorations)
         .with_inner_size([width as f32, height as f32])
         .with_fullscreen(config.view.fullscreen);
@@ -147,14 +147,14 @@ fn run(args: Args) -> Result<(), String> {
     }
     let options = eframe::NativeOptions { viewport, renderer: eframe::Renderer::Glow, ..Default::default() };
     let page = args.page;
-    eframe::run_native("yapdf", options, Box::new(move |cc| Ok(Box::new(app::App::new(cc, config, doc, page, warning))))).map_err(|e| e.to_string())
+    eframe::run_native("yavcpdf", options, Box::new(move |cc| Ok(Box::new(app::App::new(cc, config, doc, page, warning))))).map_err(|e| e.to_string())
 }
 
 fn main() -> ExitCode {
     let args = match parse_args(std::env::args().skip(1)) {
         Ok(args) => args,
         Err(e) => {
-            eprintln!("yapdf: {e}\n{USAGE}");
+            eprintln!("yavcpdf: {e}\n{USAGE}");
             return ExitCode::from(2);
         }
     };
@@ -165,7 +165,7 @@ fn main() -> ExitCode {
     match run(args) {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
-            eprintln!("yapdf: {e}");
+            eprintln!("yavcpdf: {e}");
             ExitCode::FAILURE
         }
     }

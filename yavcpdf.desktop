@@ -1,11 +1,11 @@
 [Desktop Entry]
 Type=Application
-Name=yapdf
+Name=yavcpdf
 GenericName=PDF Viewer
 Comment=A minimal, keyboard-driven PDF viewer
-Exec=yapdf %f
+Exec=yavcpdf %f
 Icon=application-pdf
 Terminal=false
 Categories=Office;Viewer;
 MimeType=application/pdf;
-StartupWMClass=yapdf
+StartupWMClass=yavcpdf

@@ -298,7 +298,7 @@ mod tests {
 
     impl Scratch {
         fn new(name: &str) -> Self {
-            let root = std::env::temp_dir().join(format!("yapdf-complete-{name}-{}", std::process::id()));
+            let root = std::env::temp_dir().join(format!("yavcpdf-complete-{name}-{}", std::process::id()));
             let _ = std::fs::remove_dir_all(&root);
             std::fs::create_dir_all(root.join("sub")).unwrap();
             for file in ["a.pdf", "B.PDF", "c.txt", ".hidden.pdf"] {
@@ -431,7 +431,7 @@ mod tests {
         let found = complete("edit ~/s", &[], home).unwrap();
         assert_eq!((found.start, found.candidates), (5, strings(&["~/sub/"])));
         assert_eq!(complete("edit ~", &[], home).unwrap().candidates, ["~/"]);
-        assert!(complete("edit /nonexistent-dir-for-yapdf/x", &[], home).is_none());
+        assert!(complete("edit /nonexistent-dir-for-yavcpdf/x", &[], home).is_none());
     }
 
     #[test]
@@ -541,17 +541,17 @@ mod tests {
     #[test]
     fn a_lone_match_of_a_cut_short_listing_is_taken_by_the_next_tab() {
         // The directory is not read: the stored cycle alone decides, so the second Tab inserts.
-        let before = "e /nonexistent-dir-for-yapdf/z";
+        let before = "e /nonexistent-dir-for-yavcpdf/z";
         let mut cycle = Some(Cycle {
             start: 2,
-            candidates: strings(&["/nonexistent-dir-for-yapdf/z1.pdf"]),
+            candidates: strings(&["/nonexistent-dir-for-yavcpdf/z1.pdf"]),
             shown: None,
             before: before.to_owned(),
             after: String::new(),
             incomplete: true,
         });
         let applied = tab(&mut cycle, before, "", false, &[], Path::new("/")).unwrap();
-        assert_eq!(applied.before, "e /nonexistent-dir-for-yapdf/z1.pdf");
+        assert_eq!(applied.before, "e /nonexistent-dir-for-yavcpdf/z1.pdf");
         assert!(applied.message.is_none());
     }
 
@@ -622,9 +622,9 @@ mod tests {
     #[test]
     fn a_missing_directory_gives_nothing_and_leaves_no_cycle() {
         let mut cycle = None;
-        assert!(tab(&mut cycle, "e /nonexistent-dir-for-yapdf/", "", false, &[], Path::new("/")).is_none());
+        assert!(tab(&mut cycle, "e /nonexistent-dir-for-yavcpdf/", "", false, &[], Path::new("/")).is_none());
         assert!(cycle.is_none());
-        assert!(candidates("export /nonexistent-dir-for-yapdf/a/").is_empty());
+        assert!(candidates("export /nonexistent-dir-for-yavcpdf/a/").is_empty());
         let scratch = Scratch::new("notdir");
         // A file used as a directory is unreadable too.
         assert!(candidates(&format!("export {}/c.txt/", scratch.path())).is_empty());

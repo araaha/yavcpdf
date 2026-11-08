@@ -353,8 +353,8 @@ impl App {
         }
         let Some(portal) = self.closest_portal().cloned() else { return };
         let builder = ViewportBuilder::default()
-            .with_title("yapdf portal")
-            .with_app_id("yapdf-portal")
+            .with_title("yavcpdf portal")
+            .with_app_id("yavcpdf-portal")
             .with_inner_size([self.config.portal.width, self.config.portal.height])
             .with_decorations(self.config.view.decorations);
         ctx.show_viewport_immediate(ViewportId::from_hash_of("portal"), builder, |ui, _| self.portal_ui(ui, &portal));
