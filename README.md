@@ -41,7 +41,7 @@ Every binding can be changed under `[keys]` in the config. A count works before 
 | `go` `Alt-c` | overview by hint; right click does it with the mouse |
 | `Tab` | table of contents (`j` `k`, `/` filters, `Enter`); see below for a PDF with no bookmarks |
 | `p` `gp` `dp` `P` `F12` | make, go to, delete and edit a portal; portal window |
-| `tt` | hotbar |
+| `tt` | shows or hides the hotbar, also while a tool is in hand (the tool stays in hand) |
 | `th` `td` `te` `tn` | highlight, draw, erase, sticky note tool (shows the hotbar) |
 | `tf` | fill & sign tool |
 | `tT` `tD` `tC` `tX` `tO` `tL` `tS` | fill & sign: text, date, check, cross, dot, line, signature |
@@ -98,6 +98,8 @@ cancelled, and also if none could be shown.
 
 **Commands.** `:{page}`, `:q`, `:w`, `:e {file}`, `:open [file]`, `:noh`, `:theme {name}`, `:zoom {percent}`,
 `:reload`, `:toc`, `:hotbar`, `:marks`, `:sign`, `:export [file]`, `:export! [file]`.
+`Tab` completes command names, theme names and file paths; more `Tab`s cycle through the candidates, and
+`Shift-Tab` goes back. `:e` and `:open` list only folders and PDFs. Tab in the `:` bar is fixed, not set under `[keys]`.
 
 ## Configuration
 

@@ -113,6 +113,7 @@ impl App {
     fn paste(&mut self, text: &str) {
         let Mode::Bar(bar) = &mut self.mode else { return };
         bar.field.insert(text.lines().next().unwrap_or(""));
+        bar.completion = None;
         let kind = bar.kind;
         self.bar_changed(kind);
     }
@@ -166,6 +167,10 @@ impl App {
     fn bar_key(&mut self, ctx: &egui::Context, stroke: &Stroke) {
         let Mode::Bar(bar) = &mut self.mode else { return };
         let kind = bar.kind;
+        let tab = stroke.key == "tab" && !stroke.ctrl && !stroke.alt;
+        if !tab {
+            bar.completion = None;
+        }
         if self.keymap.cancels(stroke) {
             let bar = bar.clone();
             self.bar_cancel(bar);
@@ -178,6 +183,11 @@ impl App {
                 self.bar_cancel(bar);
             } else if bar.field.apply(edit) {
                 self.bar_changed(kind);
+            }
+        } else if tab && kind == BarKind::Command {
+            let themes: Vec<String> = self.config.themes.keys().cloned().collect();
+            if let Some(message) = crate::complete::tab_field(&mut bar.field, &mut bar.completion, stroke.shift, &themes) {
+                self.say(message);
             }
         } else if let Some(c) = stroke.text() {
             bar.field.insert(c.encode_utf8(&mut [0; 4]));

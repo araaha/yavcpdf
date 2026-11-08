@@ -124,6 +124,8 @@ pub struct Bar {
     pub origin: Anchor,
     /// The search the bar's replaces, to go back to on escape.
     pub previous: Option<Search>,
+    /// The run of Tabs in progress, ended by any other key. Boxed to keep `Mode` small.
+    pub completion: Option<Box<crate::complete::Cycle>>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -253,6 +255,37 @@ impl Watcher {
     }
 }
 
+/// Whether the hotbar shows. `tt` always flips what is seen and records the
+/// choice in both fields. `asked` is what shows with no tool in hand;
+/// `hidden_with_tool` is the hotbar hidden while a tool is in hand, which keeps
+/// the tool. Picking a tool shows the hotbar; dropping one leaves it shown only
+/// if the last `tt` showed it.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct HotbarState {
+    asked: bool,
+    hidden_with_tool: bool,
+}
+
+impl HotbarState {
+    pub fn visible(&self, tool_in_hand: bool) -> bool {
+        if tool_in_hand { !self.hidden_with_tool } else { self.asked }
+    }
+
+    pub fn toggle(&mut self, tool_in_hand: bool) {
+        let show = !self.visible(tool_in_hand);
+        self.asked = show;
+        self.hidden_with_tool = !show;
+    }
+
+    pub fn tool_picked(&mut self) {
+        self.hidden_with_tool = false;
+    }
+
+    pub fn tool_dropped(&mut self) {
+        self.hidden_with_tool = false;
+    }
+}
+
 pub struct App {
     pub config: Config,
     pub keymap: Keymap,
@@ -283,7 +316,7 @@ pub struct App {
     pub selection: Option<Selection>,
     pub drag_anchor: Option<(usize, usize)>,
     pub tool: Option<Tool>,
-    pub hotbar_shown: bool,
+    pub hotbar: HotbarState,
     pub color: usize,
     pub stroke_width: f32,
     pub stroke: Option<(usize, Vec<[f32; 2]>)>,
@@ -359,7 +392,7 @@ impl App {
             selection: None,
             drag_anchor: None,
             tool: None,
-            hotbar_shown: false,
+            hotbar: HotbarState::default(),
             color: 0,
             stroke: None,
             fill: FillItem::Text,
@@ -741,5 +774,77 @@ impl eframe::App for App {
     fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
         let [r, g, b] = self.config.active_theme().background.rgb();
         [f32::from(r) / 255.0, f32::from(g) / 255.0, f32::from(b) / 255.0, 1.0]
+    }
+}
+
+#[cfg(test)]
+mod hotbar_tests {
+    use super::HotbarState;
+
+    #[test]
+    fn toggle_without_a_tool_shows_and_hides() {
+        let mut h = HotbarState::default();
+        assert!(!h.visible(false));
+        h.toggle(false);
+        assert!(h.visible(false));
+        h.toggle(false);
+        assert!(!h.visible(false));
+    }
+
+    #[test]
+    fn picking_a_tool_shows_and_toggle_hides_it_keeping_the_tool() {
+        let mut h = HotbarState::default();
+        h.tool_picked();
+        assert!(h.visible(true));
+        h.toggle(true);
+        assert!(!h.visible(true));
+        h.toggle(true);
+        assert!(h.visible(true));
+    }
+
+    #[test]
+    fn picking_again_shows_a_hidden_hotbar() {
+        let mut h = HotbarState::default();
+        h.tool_picked();
+        h.toggle(true);
+        h.tool_picked();
+        assert!(h.visible(true));
+    }
+
+    #[test]
+    fn dropping_the_tool_returns_to_the_last_tt_choice() {
+        let mut h = HotbarState::default();
+        h.tool_picked();
+        h.toggle(true);
+        h.tool_dropped();
+        assert!(!h.visible(false));
+        h.toggle(false);
+        h.tool_picked();
+        h.toggle(true);
+        h.tool_dropped();
+        assert!(!h.visible(false));
+    }
+
+    #[test]
+    fn show_pick_hide_drop_leaves_it_hidden() {
+        let mut h = HotbarState::default();
+        h.toggle(false);
+        h.tool_picked();
+        assert!(h.visible(true));
+        h.toggle(true);
+        assert!(!h.visible(true));
+        h.tool_dropped();
+        assert!(!h.visible(false));
+    }
+
+    #[test]
+    fn pick_hide_show_drop_leaves_it_visible() {
+        let mut h = HotbarState::default();
+        h.tool_picked();
+        h.toggle(true);
+        h.toggle(true);
+        assert!(h.visible(true));
+        h.tool_dropped();
+        assert!(h.visible(false));
     }
 }

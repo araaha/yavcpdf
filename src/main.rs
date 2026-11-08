@@ -5,6 +5,7 @@ mod actions;
 mod app;
 mod cache;
 mod chrome;
+mod complete;
 mod config;
 mod contents;
 mod doc;

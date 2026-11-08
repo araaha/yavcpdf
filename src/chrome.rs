@@ -366,9 +366,9 @@ impl App {
         Rect::from_min_size(min, size)
     }
 
-    /// Shown when asked for and whenever a tool is in hand.
+    /// Shown as `HotbarState` says: asked for, or a tool in hand and not hidden.
     fn draw_hotbar(&mut self, ui: &egui::Ui) {
-        if !self.hotbar_shown && self.tool.is_none() {
+        if !self.hotbar.visible(self.tool.is_some()) {
             return;
         }
         let ctx = ui.ctx().clone();

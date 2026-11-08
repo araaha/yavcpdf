@@ -184,7 +184,7 @@ impl App {
     fn open_bar(&mut self, kind: BarKind) {
         let previous = if matches!(kind, BarKind::Search { .. }) { self.search.clone() } else { None };
         let origin = self.view.anchor(&self.doc.layout);
-        self.mode = Mode::Bar(Bar { kind, field: Field::default(), origin, previous });
+        self.mode = Mode::Bar(Bar { kind, field: Field::default(), origin, previous, completion: None });
     }
 
     fn run_modes(&mut self, ctx: &egui::Context, action: Action) -> bool {
@@ -366,6 +366,11 @@ impl App {
     }
 
     pub fn set_tool(&mut self, tool: Option<Tool>) {
+        if tool.is_some() {
+            self.hotbar.tool_picked();
+        } else {
+            self.hotbar.tool_dropped();
+        }
         self.tool = tool;
         self.stroke = None;
     }
@@ -424,7 +429,7 @@ impl App {
 
     fn open_entry(&mut self, entry: Entry, text: String) {
         let origin = self.view.anchor(&self.doc.layout);
-        self.mode = Mode::Bar(Bar { kind: BarKind::Entry(entry), field: Field::new(text), origin, previous: None });
+        self.mode = Mode::Bar(Bar { kind: BarKind::Entry(entry), field: Field::new(text), origin, previous: None, completion: None });
     }
 
     /// Opens a note for editing.
@@ -711,7 +716,7 @@ impl App {
     fn run_toggle(&mut self, ctx: &egui::Context, action: Action) {
         match action {
             Action::ToggleStatusbar => self.statusbar_visible = !self.statusbar_visible,
-            Action::ToggleHotbar => self.hotbar_shown = !self.hotbar_shown,
+            Action::ToggleHotbar => self.hotbar.toggle(self.tool.is_some()),
             Action::ToggleTheme => self.next_theme(),
             Action::ToggleLightDark => self.toggle_light_dark(),
             Action::ToggleLinks => self.links_shown = !self.links_shown,
@@ -989,7 +994,7 @@ impl App {
             "zoom" => self.command_zoom(argument),
             "reload" => self.run(ctx, Action::Reload, None),
             "toc" => self.open_toc(),
-            "hotbar" => self.hotbar_shown = !self.hotbar_shown,
+            "hotbar" => self.hotbar.toggle(self.tool.is_some()),
             "export" => self.command_export(argument, false),
             "export!" => self.command_export(argument, true),
             "sign" => self.mode = Mode::Sign(SignPad::default()),
