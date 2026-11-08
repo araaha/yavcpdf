@@ -4,8 +4,8 @@ This file lists the third-party assets compiled into the yavcpdf binary through 
 yavcpdf source itself contains no third-party assets. Each was checked against the dependency tree
 (`cargo tree -e features`) and the bytes of a build of the binary. The pdfcraft crates and the
 patched crates are taken from https://github.com/storytold/pdfcraft at the commit pinned in
-`Cargo.toml`, the egui crates from https://github.com/storytold/egui. Licence texts are summarised in
-[NOTICE](NOTICE).
+`Cargo.toml`, the egui crates from https://github.com/storytold/egui. The full licence texts are in
+[licenses/](licenses/), as pointed to by [NOTICE](NOTICE).
 
 ## Compiled in through dependencies (21)
 
@@ -13,7 +13,7 @@ patched crates are taken from https://github.com/storytold/pdfcraft at the commi
 |---|---|---|---|---|---|---|
 | `epaint_default_fonts` 0.37.0 | `fonts/Ubuntu-Light.ttf` | Ubuntu Light | Canonical Ltd. / Dalton Maag | Ubuntu-font-1.0 | https://design.ubuntu.com/font | egui fallback fonts (eframe feature default_fonts) |
 | `epaint_default_fonts` 0.37.0 | `fonts/Hack-Regular.ttf` | Hack Regular | Source Foundry Authors (derived from Bitstream Vera / DejaVu) | MIT AND Bitstream-Vera | https://github.com/source-foundry/Hack | egui fallback fonts (eframe feature default_fonts) |
-| `epaint_default_fonts` 0.37.0 | `fonts/egui-icons.ttf` | egui icons (monochrome emoji-icon-font subset) | John Slegers | MIT | https://github.com/jslegers/emoji-icon-font | Small special-icon subset embedded by egui default_fonts; retained in FontDefinitions::default(). Provenance: https://github.com/storytold/egui/blob/6d518fc799681571963842f95b55a6b68431b15a/crates/epaint_default_fonts/fonts/egui-icons.txt; complete MIT copyright and permission text in NOTICE. |
+| `epaint_default_fonts` 0.37.0 | `fonts/egui-icons.ttf` | egui icons (monochrome emoji-icon-font subset) | John Slegers | MIT | https://github.com/jslegers/emoji-icon-font | Small special-icon subset embedded by egui default_fonts; retained in FontDefinitions::default(). Provenance: https://github.com/storytold/egui/blob/6d518fc799681571963842f95b55a6b68431b15a/crates/epaint_default_fonts/fonts/egui-icons.txt; complete MIT copyright and permission text in NOTICE and licenses/egui-emoji-icon-font-mit-license.txt. |
 | `hayro-interpret` 0.7.0 | `src/font/generated/metrics.rs` | Standard-14 font metrics and encodings (as Rust tables) (non-visual data, AGENTS.md §1.1) | Adobe (Core 14 AFM metrics, PDF specification encodings); tables by The Hayro Authors | MIT OR Apache-2.0 | ISO 32000-2 Annex D; Adobe Core14 AFM files (via vendored hayro-interpret) | Glyph widths and encodings for non-embedded standard fonts. Non-visual data, allowed by AGENTS.md §1.1 |
 | `hayro-interpret` 0.7.0 | `assets/FoxitDingbats.pfb` | FoxitDingbats (standard-14 substitute font) | Foxit Software Inc. / PDFium Authors | BSD-3-Clause | https://pdfium.googlesource.com/pdfium (via hayro-interpret 0.7.0 assets/) | Renders non-embedded standard-14 fonts |
 | `hayro-interpret` 0.7.0 | `assets/FoxitFixed.pfb` | FoxitFixed (standard-14 substitute font) | Foxit Software Inc. / PDFium Authors | BSD-3-Clause | https://pdfium.googlesource.com/pdfium (via hayro-interpret 0.7.0 assets/) | Renders non-embedded standard-14 fonts |

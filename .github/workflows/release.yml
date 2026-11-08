@@ -47,6 +47,7 @@ jobs:
           name="yavcpdf-${GITHUB_REF_NAME//\//-}-x86_64-linux"
           mkdir "$name"
           cp target/release/yavcpdf README.md yavcpdf.desktop LICENSE-MIT LICENSE-APACHE NOTICE ATTRIBUTION.md "$name/"
+          cp -r licenses "$name/"
           tar czf "$name.tar.gz" "$name"
           sha256sum "$name.tar.gz" > "$name.tar.gz.sha256"
           echo "PACKAGE=$name" >> "$GITHUB_ENV"

@@ -13,22 +13,23 @@ This binary bundles third-party material under its own licenses, listed below. T
 source, license) is in ATTRIBUTION.md. Only what is compiled into the binary is listed here.
 
 - hayro (rendering, from PdfCraft's vendor/ directory) — Apache-2.0 OR MIT. Its `embed-fonts` feature bundles the
-  Foxit standard-14 Type 1 fonts under BSD-3-Clause ("Copyright 2014 PDFium Authors"), and its
-  `embed-cmaps` feature, through hayro-cmap, bundles Adobe CMap resources under BSD-3-Clause.
+  Foxit standard-14 Type 1 fonts under BSD-3-Clause ("Copyright 2014 PDFium Authors"; licenses/Foxit-LICENSE.txt), and its
+  `embed-cmaps` feature, through hayro-cmap, bundles Adobe CMap resources under BSD-3-Clause (licenses/CMap-LICENSE.txt).
 - lopdf (document inspection, from PdfCraft's vendor/ directory) — MIT.
-- egui default fonts (epaint_default_fonts, via eframe) — Ubuntu Light (Ubuntu Font Licence 1.0),
-  Hack (MIT / Bitstream Vera licence), and the egui-icons subset of emoji-icon-font (MIT).
-- Colour profile in hayro-interpret — CGATS001Compat-v2-micro.icc (CC0-1.0, Clinton Ingram).
+- egui default fonts (epaint_default_fonts, via eframe) — Ubuntu Light (Ubuntu Font Licence 1.0,
+  licenses/egui-UFL.txt), Hack (MIT / Bitstream Vera licence, licenses/egui-Hack-Regular.txt), and the
+  egui-icons subset of emoji-icon-font (MIT, licenses/egui-emoji-icon-font-mit-license.txt).
+- Colour profile in hayro-interpret — CGATS001Compat-v2-micro.icc (CC0-1.0, Clinton Ingram; licenses/CGATS-CC0-LICENSE.txt).
 
 Required notices:
 
   Foxit standard-14 substitute fonts (hayro-interpret, assets/*.pfb):
     Copyright 2014 PDFium Authors. All rights reserved. Original code copyright 2014 Foxit Software Inc.
-    Redistributed under the BSD-3-Clause licence in assets/LICENSE_FOXIT of hayro-interpret.
+    Redistributed under the BSD-3-Clause licence in licenses/Foxit-LICENSE.txt (assets/LICENSE_FOXIT of hayro-interpret).
 
   CMap resources (bundled by hayro-cmap; character-mapping data, not visual assets):
     Copyright 1990-2023 Adobe. All rights reserved. Redistributed under the BSD-3-Clause licence
-    (https://github.com/adobe-type-tools/cmap-resources/blob/master/LICENSE.txt). Neither the name of
+    in licenses/CMap-LICENSE.txt (https://github.com/adobe-type-tools/cmap-resources/blob/master/LICENSE.txt). Neither the name of
     Adobe nor the names of its contributors are used to endorse or promote this product.
 
 Vendored by PdfCraft (vendor/ in https://github.com/storytold/pdfcraft, patched):
