@@ -2,22 +2,67 @@
 name = "yapdf"
 description = "A minimal, keyboard-driven PDF viewer"
 version = "0.2.0"
-edition.workspace = true
-license.workspace = true
+edition = "2024"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/araaha/yavcpdf"
 
-[lints]
-workspace = true
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+cognitive_complexity = "deny"
+too_many_arguments = "deny"
+wildcard_imports = "deny"
+dbg_macro = "warn"
+todo = "warn"
 
 [dependencies]
-pdfcraft-annot = { workspace = true }
-pdfcraft-cos = { workspace = true }
-pdfcraft-render = { workspace = true }
+# The three pdfcraft revs below and the pdfcraft revs under [patch.crates-io] must be the same commit.
+# Change them together, with scripts/update-pdfcraft.sh.
+pdfcraft-annot = { git = "https://github.com/storytold/pdfcraft", rev = "82c2009d0959dbf99dd5802cb8197c92763fb55e" }
+pdfcraft-cos = { git = "https://github.com/storytold/pdfcraft", rev = "82c2009d0959dbf99dd5802cb8197c92763fb55e" }
+pdfcraft-render = { git = "https://github.com/storytold/pdfcraft", rev = "82c2009d0959dbf99dd5802cb8197c92763fb55e" }
 bytemuck = { version = "1", features = ["extern_crate_alloc"] }
-chrono = { workspace = true, features = ["clock"] }
-eframe = { workspace = true, features = ["default_fonts", "glow", "wayland", "x11", "clipboard"] }
-egui = { workspace = true, features = ["bytemuck", "default_fonts"] }
-rfd = { workspace = true }
-serde = { workspace = true }
-serde_json = { workspace = true }
+chrono = { version = "0.4.45", default-features = false, features = ["std", "clock"] }
+eframe = { version = "0.37", default-features = false, features = ["default_fonts", "glow", "wayland", "x11", "clipboard"] }
+egui = { version = "0.37", features = ["bytemuck", "default_fonts"] }
+rfd = "0.17"
+serde = { version = "1", features = ["derive", "rc"] }
+serde_json = "1"
 sha2 = "0.10"
 toml = "1"
+
+[profile.dev.package."*"]
+opt-level = 2
+debug = false
+
+[profile.dev]
+opt-level = 1
+debug = "line-tables-only"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+
+# These must match the [patch.crates-io] list in PdfCraft's root Cargo.toml at the rev used above.
+# The pdfcraft revs here move together with the dependencies, through scripts/update-pdfcraft.sh.
+[patch.crates-io]
+hayro-interpret = { git = "https://github.com/storytold/pdfcraft", rev = "82c2009d0959dbf99dd5802cb8197c92763fb55e" }
+hayro = { git = "https://github.com/storytold/pdfcraft", rev = "82c2009d0959dbf99dd5802cb8197c92763fb55e" }
+hayro-syntax = { git = "https://github.com/storytold/pdfcraft", rev = "82c2009d0959dbf99dd5802cb8197c92763fb55e" }
+hayro-cmap = { git = "https://github.com/storytold/pdfcraft", rev = "82c2009d0959dbf99dd5802cb8197c92763fb55e" }
+hayro-postscript = { git = "https://github.com/storytold/pdfcraft", rev = "82c2009d0959dbf99dd5802cb8197c92763fb55e" }
+hayro-jbig2 = { git = "https://github.com/storytold/pdfcraft", rev = "82c2009d0959dbf99dd5802cb8197c92763fb55e" }
+lopdf = { git = "https://github.com/storytold/pdfcraft", rev = "82c2009d0959dbf99dd5802cb8197c92763fb55e" }
+vello_common = { git = "https://github.com/storytold/pdfcraft", rev = "82c2009d0959dbf99dd5802cb8197c92763fb55e" }
+vello_cpu = { git = "https://github.com/storytold/pdfcraft", rev = "82c2009d0959dbf99dd5802cb8197c92763fb55e" }
+ecolor = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
+emath = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
+epaint = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
+epaint_default_fonts = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
+egui = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
+egui-winit = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
+egui-wgpu = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
+egui_glow = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
+eframe = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
+winit = { git = "https://github.com/storytold/winit.git", rev = "a517b3846ee8457d84ee4975110bfda6797c44dc" }

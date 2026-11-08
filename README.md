@@ -4,7 +4,7 @@ A minimal, keyboard-driven PDF viewer. The whole window is the document, with a 
 bottom. It uses PdfCraft's render engine, and its annotation writer for `:export`, and nothing else
 from the PdfCraft app.
 
-    cargo build --release -p yapdf
+    cargo build --release
     target/release/yapdf [--page N] [--password PW] [--geometry WxH[+X+Y]]
                          [--fullscreen|--no-fullscreen] [--statusbar|--no-statusbar] [file.pdf]
 
@@ -111,10 +111,18 @@ Colours are in the themes, and one key is enough to change one:
     background = "#000000"    # around and between the pages
     link = "#0000ff55"        # links to places in the document
 
+## Engine
+
+The viewer uses PdfCraft's engine crates (https://github.com/storytold/pdfcraft), pinned to a commit
+in `Cargo.toml`. To update, run `scripts/update-pdfcraft.sh [rev]`; without a rev it takes the
+current `main`. It changes every pdfcraft rev in `Cargo.toml` together, compares `[patch.crates-io]`
+with PdfCraft's, and runs the tests and clippy. If it reports a difference in the patch list, change
+`[patch.crates-io]` to match upstream's and run it again.
+
 ## Install
 
     install -Dm755 target/release/yapdf ~/.local/bin/yapdf
-    install -Dm644 apps/yapdf/yapdf.desktop ~/.local/share/applications/yapdf.desktop
+    install -Dm644 yapdf.desktop ~/.local/share/applications/yapdf.desktop
     xdg-mime default yapdf.desktop application/pdf    # to make it the default
 
 ## What is stored where
