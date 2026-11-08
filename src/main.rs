@@ -122,10 +122,12 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Args, String> {
 
 fn run(args: Args) -> Result<(), String> {
     // First, as the last document and the config are both read from these.
-    store::adopt_old_folders();
+    let adoption = store::adopt_old_folders();
     let path = args.file.or_else(store::last_document).ok_or(USAGE)?;
     let path = std::fs::canonicalize(&path).map_err(|e| format!("{}: {e}", path.display()))?;
     let (mut config, warning) = Config::load();
+    // A move that failed would otherwise only reach stderr, which nobody sees from a launcher.
+    let warning = adoption.into_iter().chain(warning).reduce(|a, b| format!("{a}; {b}"));
     if let Some(on) = args.fullscreen {
         config.view.fullscreen = on;
     }

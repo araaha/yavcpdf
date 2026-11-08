@@ -240,17 +240,28 @@ fn adoption_source(new: &Path, candidates: &[PathBuf]) -> Option<PathBuf> {
     candidates.iter().find(|old| old.is_dir()).cloned()
 }
 
+/// Adopts `new` from the first of `candidates` that exists. The message says what failed and
+/// where the old files are.
+fn adopt_folder(new: &Path, candidates: &[PathBuf]) -> Option<String> {
+    let old = adoption_source(new, candidates)?;
+    let e = move_folder(&old, new).err()?;
+    Some(format!("couldn't move {} to {}: {e}; your old data is still there", old.display(), new.display()))
+}
+
 /// Brings along the settings and saved data of a version from before the rename to yavcpdf: from
-/// the yapdf folders, or else the older pdfviewer ones.
-pub fn adopt_old_folders() {
+/// the yapdf folders, or else the older pdfviewer ones. Returns a message for each folder that
+/// couldn't be moved, which are also printed to stderr.
+pub fn adopt_old_folders() -> Vec<String> {
     let config = Config::path();
+    let mut problems = Vec::new();
     for new in [config.parent().map(Path::to_owned), Some(data_dir())].into_iter().flatten() {
         let candidates = [new.with_file_name("yapdf"), new.with_file_name("pdfviewer")];
-        let Some(old) = adoption_source(&new, &candidates) else { continue };
-        if let Err(e) = move_folder(&old, &new) {
-            eprintln!("yavcpdf: couldn't move {} to {}: {e}", old.display(), new.display());
+        if let Some(problem) = adopt_folder(&new, &candidates) {
+            eprintln!("yavcpdf: {problem}");
+            problems.push(problem);
         }
     }
+    problems
 }
 
 pub fn content_key(bytes: &[u8]) -> String {
@@ -407,6 +418,35 @@ mod tests {
         let new = scratch.0.join("yavcpdf");
         let candidates = [new.with_file_name("yapdf"), new.with_file_name("pdfviewer")];
         adoption_source(&new, &candidates).and_then(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()))
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_failed_move_says_what_failed_and_that_the_old_data_is_still_there() {
+        use std::os::unix::fs::PermissionsExt;
+        let scratch = Scratch::new("adopt-fails");
+        let (old, new) = (scratch.0.join("yapdf"), scratch.0.join("yavcpdf"));
+        std::fs::create_dir_all(&old).unwrap();
+        std::fs::set_permissions(&scratch.0, std::fs::Permissions::from_mode(0o555)).unwrap();
+        let message = adopt_folder(&new, std::slice::from_ref(&old));
+        let moved = new.exists();
+        std::fs::set_permissions(&scratch.0, std::fs::Permissions::from_mode(0o755)).unwrap();
+        if moved {
+            return; // running as root: the read-only parent didn't stop the move
+        }
+        let message = message.unwrap();
+        assert!(message.starts_with(&format!("couldn't move {} to {}: ", old.display(), new.display())), "{message}");
+        assert!(message.ends_with("your old data is still there"), "{message}");
+        assert!(old.is_dir());
+    }
+
+    #[test]
+    fn a_successful_move_has_no_message() {
+        let scratch = Scratch::new("adopt-ok");
+        let (old, new) = (scratch.0.join("yapdf"), scratch.0.join("yavcpdf"));
+        std::fs::create_dir_all(&old).unwrap();
+        assert_eq!(adopt_folder(&new, &[old]), None);
+        assert!(new.is_dir());
     }
 
     #[test]
