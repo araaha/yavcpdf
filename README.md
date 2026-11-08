@@ -125,6 +125,15 @@ with PdfCraft's, and runs the tests and clippy. If it reports a difference in th
     install -Dm644 yavcpdf.desktop ~/.local/share/applications/yavcpdf.desktop
     xdg-mime default yavcpdf.desktop application/pdf    # to make it the default
 
+### Upgrading from yapdf
+
+If the old `yapdf` binary and `yapdf.desktop` stay installed as the PDF handler, yapdf 0.2 can
+recreate `~/.local/share/yapdf` after yavcpdf has moved it, and your data ends up in two folders.
+Remove them and make yavcpdf the handler:
+
+    rm ~/.local/bin/yapdf ~/.local/share/applications/yapdf.desktop
+    xdg-mime default yavcpdf.desktop application/pdf
+
 ## What is stored where
 
 Position, marks, portals and annotations are kept in `~/.local/share/yavcpdf/{hash}.json`. The PDF
