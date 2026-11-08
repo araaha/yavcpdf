@@ -77,6 +77,7 @@ pub struct ViewConfig {
     pub decorations: bool,
     pub restore_position: bool,
     pub highlight_links: bool,
+    pub fullscreen: bool,
 }
 
 #[derive(Clone, Debug, Deserialize)]

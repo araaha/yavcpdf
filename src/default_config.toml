@@ -27,6 +27,7 @@ smartcase = true          # an upper-case letter makes a search case sensitive
 decorations = false       # window title bar
 restore_position = true   # reopen a document where you left it
 highlight_links = true    # tint links to places in the document; `toggle_links` turns it off
+fullscreen = false        # start in fullscreen; `toggle_fullscreen` switches
 
 [statusbar]
 visible = true

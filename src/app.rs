@@ -376,7 +376,7 @@ impl App {
             jump_index: 0,
             pending_portal: None,
             portal_window: false,
-            fullscreen: false,
+            fullscreen: config.view.fullscreen,
             message: None,
             watcher,
             config,

@@ -5,9 +5,18 @@ bottom. It uses PdfCraft's render engine, and its annotation writer for `:export
 from the PdfCraft app.
 
     cargo build --release -p yapdf
-    target/release/yapdf [--page N] [--password PW] [file.pdf]
+    target/release/yapdf [--page N] [--password PW] [--geometry WxH[+X+Y]]
+                         [--fullscreen|--no-fullscreen] [--statusbar|--no-statusbar] [file.pdf]
 
 With no file it reopens the last document. It reloads the PDF when the file changes.
+
+`--geometry 1000x700` sets the window's inner size in points, and `--geometry 1000x700+40+30` also
+sets its position. Width and height are 1 to 16384 and the offsets are 0 to 16384 (no negative offsets: X11's offsets from
+the right or bottom edge are not supported). On Wayland the compositor decides where a window goes,
+so `+X+Y` may be ignored. `--fullscreen` / `--no-fullscreen` override `view.fullscreen` and
+`--statusbar` / `--no-statusbar` override `statusbar.visible` for this launch; the last one given wins.
+`view.fullscreen` and `statusbar.visible` only take effect at startup; a config reload does not
+re-apply them. The window is limited to the monitor's size.
 
 ## Keys
 
