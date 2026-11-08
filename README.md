@@ -4,7 +4,7 @@ A minimal, keyboard-driven PDF viewer. The whole window is the document, with a 
 bottom. It uses PdfCraft's render engine, and its annotation writer for `:export`, and nothing else
 from the PdfCraft app.
 
-    cargo build --release
+    cargo build --release --locked
     target/release/yavcpdf [--page N] [--password PW] [--geometry WxH[+X+Y]]
                          [--fullscreen|--no-fullscreen] [--statusbar|--no-statusbar] [file.pdf]
 

@@ -408,7 +408,7 @@ mod tests {
         assert!(!new.exists());
     }
 
-    /// Makes the named folders (each holding a marker file) beside `yavcpdf`, and says what
+    /// Makes the named (empty) folders beside `yavcpdf`, and says what
     /// `adoption_source` chooses, as the name of the folder.
     fn chosen(name: &str, existing: &[&str]) -> Option<String> {
         let scratch = Scratch::new(name);
