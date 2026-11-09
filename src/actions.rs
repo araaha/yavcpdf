@@ -8,7 +8,7 @@ use egui::Pos2;
 use pdfcraft_render::LinkTarget;
 
 use crate::app::{
-    App, Bar, BarKind, Edit, Entry, EntryKind, FillItem, Fit, Landing, MarkOp, Mode, PendingPortal, Selection, SignPad, TocState, Tool,
+    App, Bar, BarKind, Edit, Entry, EntryKind, FillItem, Fit, Landing, MarkOp, Mode, PasswordState, PendingPortal, Selection, SignPad, TocState, Tool,
 };
 use crate::config::expand_home;
 use crate::doc::{dest_point, dest_y};
@@ -16,6 +16,7 @@ use crate::field::Field;
 use crate::form::Report;
 use crate::hint::{self, HintState, Purpose, Target, TargetKind};
 use crate::keymap::Action;
+use crate::protect::{Job, Security};
 use crate::search::Search;
 use crate::smart::{Line, Reference, find_definitions, lines_of, references_in, touches};
 use crate::store::{self, Annotation, MarkKind, NOTE_SIDE, Portal};
@@ -214,6 +215,8 @@ impl App {
             Action::DeleteAnnotation => self.mode = Mode::Hint(HintState::new(Purpose::DeleteAnnotation)),
             Action::ToggleToc => self.open_toc(),
             Action::Open => self.choose_file(ctx),
+            Action::Protect => self.command_protect(Job::Protect, "", false),
+            Action::Unprotect => self.command_protect(Job::Unprotect, "", false),
             Action::Quit => ctx.send_viewport_cmd_to(egui::ViewportId::ROOT, egui::ViewportCommand::Close),
             _ => return false,
         }
@@ -582,16 +585,86 @@ impl App {
             "" => crate::export::default_path(&self.doc.path),
             given => expand_home(given),
         };
-        if let Some(refusal) = crate::export::refusal(&self.doc.path, &path, force) {
+        if let Some(refusal) = crate::export::refusal(&self.doc.path, &path, force, "export") {
             self.say(refusal);
             return;
         }
         let (bytes, pages) = (self.doc.bytes.clone(), &self.doc.info.pages);
-        let result = crate::export::export(bytes, self.doc.password(), pages, &self.side.annotations, &self.side.form, &self.side.hidden, &path);
+        let result =
+            crate::export::export(bytes, self.doc.password(), pages, &self.side.annotations, &self.side.form, &self.side.hidden, &path, force);
         self.say(match result {
             Ok(report) => exported_message(self.side.annotations.len(), report, &path),
             Err(e) => format!("export failed: {e}"),
         });
+    }
+
+    /// Starts a protected or unprotected copy of the document: asks for what is needed first.
+    fn command_protect(&mut self, job: Job, argument: &str, force: bool) {
+        debug_assert!(!self.locked);
+        let path = match argument {
+            "" => crate::protect::default_path(&self.doc.path, job),
+            given => expand_home(given),
+        };
+        if let Some(refusal) = crate::export::refusal(&self.doc.path, &path, force, job.command()) {
+            self.say(refusal);
+            return;
+        }
+        let secured = match crate::protect::security(self.doc.bytes.clone(), self.doc.password()) {
+            Ok(secured) => secured,
+            Err(e) => {
+                self.say(format!("{} failed: {e}", job.command()));
+                return;
+            }
+        };
+        match (job, secured) {
+            (Job::Unprotect, Security::None) => self.say("not password protected"),
+            (Job::Unprotect, Security::Owner) => self.write_copy(job, &path, force, None, ""),
+            (_, Security::UserOnly) => self.mode = Mode::Password(PasswordState::owner(self.doc.path.clone(), job, path, force)),
+            (Job::Protect, _) => self.mode = Mode::Password(PasswordState::new_password(path, force, None, None)),
+        }
+    }
+
+    /// Writes the copy at `path`, with `password` as its password when it is protected, and keeps
+    /// the annotations and form values of the document for it.
+    pub fn write_copy(&mut self, job: Job, path: &Path, force: bool, owner: Option<&str>, password: &str) {
+        debug_assert!(!self.locked);
+        self.mode = Mode::Normal;
+        // The file may have appeared while the passwords were typed.
+        if let Some(refusal) = crate::export::refusal(&self.doc.path, path, force, job.command()) {
+            self.say(refusal);
+            return;
+        }
+        let (bytes, open) = (self.doc.bytes.clone(), self.doc.password());
+        let made = match job {
+            Job::Protect => crate::protect::random_seed().and_then(|seed| crate::protect::protect(bytes.clone(), open, owner, password, seed)),
+            Job::Unprotect => crate::protect::unprotect(bytes.clone(), open, owner),
+        };
+        let written = made.and_then(|copy| crate::export::write_atomic(path, &copy, force, self.document_mode()).map(|()| copy));
+        let copy = match written {
+            Ok(copy) => copy,
+            Err(e) => {
+                self.say(format!("{} failed: {e}", job.command()));
+                return;
+            }
+        };
+        let signed = crate::protect::is_signed(bytes, self.doc.password());
+        let mut side = self.side.clone();
+        side.anchor = Some(self.view.anchor(&self.doc.layout));
+        side.zoom = Some(self.view.zoom);
+        let kept = crate::protect::copy_sidecar(self.locked, &self.store, &copy, path, &side);
+        self.say(copy_message(job, path, signed, kept.err()));
+    }
+
+    /// The permission bits of the open document, for a copy of it to have as well.
+    #[cfg(unix)]
+    fn document_mode(&self) -> Option<u32> {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::metadata(&self.doc.path).ok().map(|m| m.permissions().mode() & 0o777)
+    }
+
+    #[cfg(not(unix))]
+    fn document_mode(&self) -> Option<u32> {
+        None
     }
 
     // Smart jump.
@@ -1038,6 +1111,10 @@ impl App {
             "hotbar" => self.hotbar.toggle(self.tool.is_some()),
             "export" => self.command_export(argument, false),
             "export!" => self.command_export(argument, true),
+            "protect" => self.command_protect(Job::Protect, argument, false),
+            "protect!" => self.command_protect(Job::Protect, argument, true),
+            "unprotect" => self.command_protect(Job::Unprotect, argument, false),
+            "unprotect!" => self.command_protect(Job::Unprotect, argument, true),
             "clearform" => self.clear_form(),
             "sign" => self.mode = Mode::Sign(SignPad::default()),
             "marks" => {
@@ -1141,6 +1218,17 @@ impl App {
             _ => self.say("usage: :zoom <percent>"),
         }
     }
+}
+
+/// What writing a protected or unprotected copy says for itself.
+fn copy_message(job: Job, path: &Path, signed: bool, unkept: Option<String>) -> String {
+    let what = match job {
+        Job::Protect => "a password-protected copy",
+        Job::Unprotect => "a copy without a password",
+    };
+    let signatures = if signed { "; its signatures no longer verify" } else { "" };
+    let sidecar = unkept.map_or_else(String::new, |e| format!("; couldn't keep its annotations: {e}"));
+    format!("wrote {what} to {}{signatures}{sidecar}", path.display())
 }
 
 /// What an export says for itself.

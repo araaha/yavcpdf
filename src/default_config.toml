@@ -136,7 +136,7 @@ overview_next = ["<C-A-pagedown>"]
 overview_prev = ["<C-A-pageup>"]
 goto_portal = ["gp"]
 delete_portal = ["dp"]
-edit_portal = ["P"]
+edit_portal = ["ep"]
 toggle_portal_window = ["<f12>"]
 toggle_toc = ["<tab>"]
 toggle_statusbar = ["<C-s>"]
@@ -166,6 +166,8 @@ toggle_fullscreen = ["<A-f>"]
 reload = ["R"]
 quit = ["q", "ZQ", "ZZ", "<C-w>"]
 open = ["<C-t>"]         # the desktop's file chooser
+protect = ["Pp"]          # a copy with a password
+unprotect = ["Pu"]        # a copy without one
 # Editing in the bars, the contents filter and the password field, and nowhere else: `<left>` still scrolls in the
 # document. A key that types a character can't be used here.
 edit_left = ["<left>"]

@@ -19,6 +19,7 @@ mod input;
 mod keymap;
 mod menu;
 mod overview;
+mod protect;
 mod search;
 mod smart;
 mod store;

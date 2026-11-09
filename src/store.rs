@@ -246,6 +246,11 @@ impl Store {
         Self { dir, key }
     }
 
+    /// Whether a sidecar is saved under this key.
+    pub fn exists(&self) -> bool {
+        self.file().exists()
+    }
+
     fn file(&self) -> PathBuf {
         self.dir.join(format!("{}.json", self.key))
     }

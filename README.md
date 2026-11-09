@@ -53,6 +53,7 @@ Table of Contents
     * [Portals](#portals)
     * [Opening files](#opening-files)
     * [Password-protected PDFs](#password-protected-pdfs)
+    * [Protecting a copy with a password](#protecting-a-copy-with-a-password)
     * [Commands and the `:` menu](#commands-and-the--menu)
     * [Editing text](#editing-text)
 * [Configuration](#configuration)
@@ -263,7 +264,8 @@ choose a colour instead, so counts such as `42G` don't work then.
 | <kbd>g</kbd> <kbd>d</kbd>, <kbd>Ctrl</kbd>+<kbd>]</kbd> | Smart jump by hint; middle click does it with the mouse |
 | <kbd>g</kbd> <kbd>o</kbd>, <kbd>Alt</kbd>+<kbd>C</kbd> | Overview by hint; right click does it with the mouse |
 | <kbd>Tab</kbd> | Table of contents (<kbd>j</kbd> <kbd>k</kbd>, <kbd>/</kbd> filters, <kbd>Enter</kbd>) |
-| <kbd>p</kbd> / <kbd>g</kbd> <kbd>p</kbd> / <kbd>d</kbd> <kbd>p</kbd> / <kbd>P</kbd> / <kbd>F12</kbd> | Make, go to, delete and edit a portal; portal window |
+| <kbd>p</kbd> / <kbd>g</kbd> <kbd>p</kbd> / <kbd>d</kbd> <kbd>p</kbd> / <kbd>e</kbd> <kbd>p</kbd> / <kbd>F12</kbd> | Make, go to, delete and edit a portal; portal window |
+| <kbd>P</kbd> <kbd>p</kbd> / <kbd>P</kbd> <kbd>u</kbd> | Write a copy with a password, or without one, [beside the document](#protecting-a-copy-with-a-password) |
 | <kbd>t</kbd> <kbd>t</kbd> | Show or hide the hotbar, also while a tool is in hand (the tool stays in hand) |
 | <kbd>t</kbd> <kbd>h</kbd> / <kbd>t</kbd> <kbd>d</kbd> / <kbd>t</kbd> <kbd>e</kbd> / <kbd>t</kbd> <kbd>n</kbd> | Highlight, draw, erase, sticky note tool (shows the hotbar) |
 | <kbd>t</kbd> <kbd>f</kbd> | Fill & sign tool |
@@ -433,6 +435,36 @@ the open document; at startup, with none to fall back to, it quits. The page,
 the hotbar and the `:` bar don't respond while the menu is open. The password is
 kept in memory only, and nothing is saved for the document until it is open.
 
+### Protecting a copy with a password
+
+<kbd>P</kbd> <kbd>p</kbd> (`:protect`) writes a copy of the document with a
+password, and <kbd>P</kbd> <kbd>u</kbd> (`:unprotect`) a copy without its
+password. Both only write a copy: the open document is never changed, and there
+is no way to protect it in place.
+
+- **Where.** `:protect [FILE]` and `:unprotect [FILE]` write to `FILE` (`~/` is
+  your home folder), or beside the document as `<name>-protected.pdf` and
+  `<name>-unprotected.pdf`. An existing file is not replaced unless the command
+  is `:protect!` or `:unprotect!`. The document itself is never replaced, `!` or not.
+- **The password.** A menu asks for the new password, then for it again. It is
+  both the password that opens the copy and the owner password, AES-256 with
+  nothing restricted. An empty password is refused. Protecting a document that
+  already has a password changes it. `:unprotect` says "not password protected"
+  for a document with none.
+- **The owner password.** A document opened with a user password alone can't
+  have its password changed or removed without the owner password, so the menu
+  asks for that first, and a wrong one keeps the menu open. A document opened as
+  its owner, or whose two passwords are the same, doesn't ask.
+- **Cancelling.** <kbd>Esc</kbd> cancels at any step, and nothing is written
+  until the password has been typed twice (or the owner password accepted, for
+  `:unprotect`). A wrong owner password keeps the menu open with "wrong owner
+  password".
+- **Signatures.** The copy is a rewrite of the file, so a digital signature in the
+  document no longer verifies in it. The message says so when there is one.
+- **Annotations and form values** are not written into the PDF: use `:export`
+  for that. The copy still opens in yavcpdf with the annotations, form values,
+  marks and portals the document has now.
+
 ### Commands and the `:` menu
 
 | Command | Action |
@@ -450,6 +482,8 @@ kept in memory only, and nothing is saved for the document until it is open.
 | `:marks` | List the marks |
 | `:sign` | Draw a new signature |
 | `:export [FILE]`, `:export! [FILE]` | Write a copy with the annotations and the filled-in form; `!` replaces an existing file |
+| `:protect [FILE]`, `:protect! [FILE]` | Write a copy with a password; `!` replaces an existing file |
+| `:unprotect [FILE]`, `:unprotect! [FILE]` | Write a copy without its password; `!` replaces an existing file |
 | `:clearform` | Forget everything filled into the form (undoable) |
 
 `:` also opens a menu of the commands and of nearly every action, each with its
@@ -476,7 +510,7 @@ keys on the right.
 - **Auto-highlight.** Without a choice, an entry is highlighted only on the
   first word: when it is exactly what you typed, or the only name that
   continues it (same case) and is not one to run by accident. `q`, `quit`,
-  `q!`, `wq`, `x`, `export`, `export!` and the `delete_*` actions are never
+  `q!`, `wq`, `x`, `export`, `export!`, `protect`, `protect!`, `unprotect`, `unprotect!` and the `delete_*` actions are never
   picked that way; they run only when typed in full.
 - **Text after the cursor.** <kbd>Enter</kbd> runs exactly what is typed, and
   nothing is highlighted.

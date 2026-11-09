@@ -4121,6 +4121,7 @@ dependencies = [
  "chrono",
  "eframe",
  "egui",
+ "getrandom 0.4.3",
  "pdfcraft-annot",
  "pdfcraft-cos",
  "pdfcraft-forms",

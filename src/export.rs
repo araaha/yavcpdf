@@ -138,17 +138,60 @@ pub fn default_path(document: &Path) -> PathBuf {
     document.with_file_name(format!("{stem}-annotated.pdf"))
 }
 
-/// Why `path` can't be written, if it can't.
-pub fn refusal(document: &Path, path: &Path, force: bool) -> Option<String> {
+/// Why `path` can't be written by `command` (`export`, `protect`...), if it can't.
+pub fn refusal(document: &Path, path: &Path, force: bool, command: &str) -> Option<String> {
     let same = |a: &Path, b: &Path| matches!((a.canonicalize(), b.canonicalize()), (Ok(a), Ok(b)) if a == b);
     if same(document, path) {
-        return Some("export writes a copy, not over the document itself".to_owned());
+        return Some(format!("{command} writes a copy, not over the document itself"));
     }
-    (path.exists() && !force).then(|| format!("{} exists: use :export! to replace it", path.display()))
+    (path.exists() && !force).then(|| format!("{} exists: use :{command}! to replace it", path.display()))
+}
+
+/// Writes `bytes` to `path`, whole or not at all: through a hidden temporary file beside it, made
+/// new, with permission bits `mode` on unix when given. An existing `path` is replaced only when
+/// `replace` is set; otherwise it is never clobbered, even if it appeared in the meantime.
+pub fn write_atomic(path: &Path, bytes: &[u8], replace: bool, mode: Option<u32>) -> Result<(), String> {
+    use std::io::Write;
+    let fail = |e: std::io::Error| format!("{}: {e}", path.display());
+    let name = path.file_name().ok_or_else(|| format!("{}: not a file name", path.display()))?;
+    let mut hidden = std::ffi::OsString::from(".");
+    hidden.push(name);
+    hidden.push(format!(".{}.tmp", std::process::id()));
+    let temporary = path.with_file_name(hidden);
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    if let Some(mode) = mode {
+        std::os::unix::fs::OpenOptionsExt::mode(&mut options, mode);
+    }
+    #[cfg(not(unix))]
+    let _ = mode;
+    let mut file = options.open(&temporary).map_err(fail)?;
+    let published = (|| {
+        file.write_all(bytes)?;
+        file.sync_all()?;
+        drop(file);
+        if replace {
+            return std::fs::rename(&temporary, path);
+        }
+        match std::fs::hard_link(&temporary, path) {
+            Ok(()) => std::fs::remove_file(&temporary),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => Err(e),
+            // No hard links here: best effort.
+            Err(_) if path.symlink_metadata().is_ok() => Err(std::io::ErrorKind::AlreadyExists.into()),
+            Err(_) => std::fs::rename(&temporary, path),
+        }
+    })();
+    if let Err(e) = published {
+        let _ = std::fs::remove_file(&temporary);
+        return Err(fail(e));
+    }
+    Ok(())
 }
 
 /// Writes the document with `annotations`, the filled-in `form` and the widgets `hidden` shows or
 /// hides to `path`, whole or not at all.
+#[allow(clippy::too_many_arguments)]
 pub fn export(
     bytes: Arc<Vec<u8>>,
     password: Option<&str>,
@@ -157,14 +200,12 @@ pub fn export(
     form: &BTreeMap<String, FormValue>,
     hidden: &Hidden,
     path: &Path,
+    replace: bool,
 ) -> Result<Report, String> {
     // The document came from a stranger, and a panic here must not cost the user their work.
     let written = catch_unwind(AssertUnwindSafe(|| with_annotations(bytes, password, pages, annotations, form, hidden)));
     let (written, report) = written.map_err(|_| "the document could not be written".to_owned())??;
-    let temporary = path.with_extension("pdf.tmp");
-    let fail = |e: std::io::Error| format!("{}: {e}", path.display());
-    std::fs::write(&temporary, written).map_err(fail)?;
-    std::fs::rename(&temporary, path).map_err(fail)?;
+    write_atomic(path, &written, replace, None)?;
     Ok(report)
 }
 
@@ -266,10 +307,10 @@ mod tests {
         let (original, copy, free) = (dir.join("a.pdf"), dir.join("b.pdf"), dir.join("c.pdf"));
         std::fs::write(&original, b"a").unwrap();
         std::fs::write(&copy, b"b").unwrap();
-        assert!(refusal(&original, &original, true).is_some(), "not even when forced");
-        assert!(refusal(&original, &copy, false).is_some());
-        assert!(refusal(&original, &copy, true).is_none());
-        assert!(refusal(&original, &free, false).is_none());
+        assert!(refusal(&original, &original, true, "export").is_some(), "not even when forced");
+        assert!(refusal(&original, &copy, false, "export").is_some());
+        assert!(refusal(&original, &copy, true, "export").is_none());
+        assert!(refusal(&original, &free, false, "export").is_none());
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
@@ -366,7 +407,7 @@ mod tests {
         let before = std::fs::read(&src).unwrap();
         let mut form = BTreeMap::new();
         form.insert("name".to_owned(), FormValue::Text("Ada".into()));
-        let report = export(Arc::new(before.clone()), None, &[page(0)], &[], &form, &Hidden::new(), &out).unwrap();
+        let report = export(Arc::new(before.clone()), None, &[page(0)], &[], &form, &Hidden::new(), &out, true).unwrap();
         assert_eq!(report.filled, 1);
         assert_eq!(std::fs::read(&src).unwrap(), before);
         assert!(out.exists());

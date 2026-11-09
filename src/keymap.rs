@@ -84,6 +84,8 @@ pub enum Action {
     Reload,
     Quit,
     Open,
+    Protect,
+    Unprotect,
     EditLeft,
     EditRight,
     EditWordLeft,
@@ -102,7 +104,7 @@ pub enum Action {
 
 impl Action {
     /// Every action, in declaration order. `the_list_of_actions_is_complete` keeps it whole.
-    pub const ALL: [Self; 85] = [
+    pub const ALL: [Self; 87] = [
         Self::Cancel,
         Self::ScrollDown,
         Self::ScrollUp,
@@ -174,6 +176,8 @@ impl Action {
         Self::Reload,
         Self::Quit,
         Self::Open,
+        Self::Protect,
+        Self::Unprotect,
         Self::EditLeft,
         Self::EditRight,
         Self::EditWordLeft,
@@ -265,6 +269,8 @@ impl Action {
             Self::Reload => "reload",
             Self::Quit => "quit",
             Self::Open => "open",
+            Self::Protect => "protect",
+            Self::Unprotect => "unprotect",
             Self::EditLeft => "edit_left",
             Self::EditRight => "edit_right",
             Self::EditWordLeft => "edit_word_left",
@@ -661,6 +667,42 @@ mod tests {
         assert_eq!(p.feed(&map, stroke("i")), Some((Action::HintForm, None)));
         assert_eq!(type_keys(&mut p, &map, "gi"), Some((Action::ToggleFields, None)));
         assert_eq!(type_keys(&mut p, &map, "gl"), Some((Action::ToggleLinks, None)));
+    }
+
+    #[test]
+    fn p_and_e_prefixes_protect_and_edit_portal() {
+        let map = default_keymap();
+        assert_eq!(map.exact(&[stroke("P"), stroke("p")]), Some(Action::Protect));
+        assert_eq!(map.exact(&[stroke("P"), stroke("u")]), Some(Action::Unprotect));
+        assert_eq!(map.exact(&[stroke("e"), stroke("p")]), Some(Action::EditPortal));
+        assert_eq!(map.exact(&[stroke("P")]), None);
+        assert_eq!(map.exact(&[stroke("e")]), None);
+        let mut p = Pending::default();
+        assert_eq!(p.feed(&map, stroke("P")), None);
+        assert_eq!(p.tick(&map, Instant::now() + Duration::from_secs(5)), (None, None));
+        assert_eq!(type_keys(&mut p, &map, "u"), Some((Action::Unprotect, None)));
+        assert_eq!(p.feed(&map, stroke("e")), None);
+        assert_eq!(p.tick(&map, Instant::now() + Duration::from_secs(5)), (None, None));
+        assert_eq!(type_keys(&mut p, &map, "p"), Some((Action::EditPortal, None)));
+        assert_eq!(type_keys(&mut p, &map, "Pp"), Some((Action::Protect, None)));
+        // An unbound second key ends the sequence without an action.
+        assert_eq!(type_keys(&mut p, &map, "Pz"), None);
+        assert_eq!(p.display(), "");
+    }
+
+    #[test]
+    fn no_other_default_binding_starts_with_p_or_e() {
+        let map = default_keymap();
+        let mut found: Vec<(String, Action)> = map
+            .binds
+            .iter()
+            .filter(|(seq, _)| seq[0] == stroke("P") || seq[0] == stroke("e"))
+            .map(|(seq, a)| (seq.iter().map(Stroke::notation).collect::<String>(), *a))
+            .collect();
+        found.sort();
+        assert_eq!(found, vec![("Pp".to_owned(), Action::Protect), ("Pu".to_owned(), Action::Unprotect), ("ep".to_owned(), Action::EditPortal)]);
+        assert_eq!(Action::from_name("protect"), Some(Action::Protect));
+        assert_eq!(Action::from_name("unprotect"), Some(Action::Unprotect));
     }
 
     #[test]

@@ -17,6 +17,7 @@ use crate::form::{FormChange, FormState, HideChange};
 use crate::hint::HintState;
 use crate::keymap::{Keymap, Pending};
 use crate::overview::Overview;
+use crate::protect::Job;
 use crate::search::Search;
 use crate::smart::Reference;
 use crate::store::{self, Annotation, Sidecar, Store, Strokes};
@@ -198,10 +199,38 @@ pub enum Mode {
     Password(PasswordState),
 }
 
-/// The password menu: the file that wants a password, and what was typed so far.
-#[derive(Clone)]
+/// What the password menu is asking for.
+#[derive(Clone, PartialEq, Eq)]
+pub enum Purpose {
+    /// The password that opens the file.
+    Open,
+    /// The owner password of the open document, before `job` writes the copy at `target`.
+    Owner { job: Job, target: PathBuf, force: bool },
+    /// The new password of the copy at `target`. `owner` is the owner password of the document, when
+    /// it had to be asked for.
+    New { target: PathBuf, force: bool, owner: Option<String> },
+    /// The new password again, `first` being the first time.
+    Confirm { target: PathBuf, force: bool, owner: Option<String>, first: String },
+}
+
+/// What typing in a step of the new password leads to.
+#[derive(PartialEq, Eq)]
+pub enum Entered {
+    /// Nothing moves: the notice says why.
+    Notice(String),
+    /// The menu goes on to the next question.
+    Next(PasswordState),
+    /// The copy is to be written.
+    Write { target: PathBuf, force: bool, owner: Option<String>, password: String },
+}
+
+/// The password menu: the file it is about, and what was typed so far.
+#[derive(Clone, PartialEq, Eq)]
 pub struct PasswordState {
+    /// The file whose name the header gives: the one that wants a password, the document asked the
+    /// owner password of, or the copy being given a new one.
     pub path: PathBuf,
+    pub purpose: Purpose,
     pub field: Field,
     /// What went wrong with the last try.
     pub notice: Option<String>,
@@ -209,20 +238,92 @@ pub struct PasswordState {
 
 impl PasswordState {
     pub fn new(path: PathBuf, notice: Option<&str>) -> Self {
-        Self { path, field: Field::default(), notice: notice.map(str::to_owned) }
+        Self { path, purpose: Purpose::Open, field: Field::default(), notice: notice.map(str::to_owned) }
+    }
+
+    /// The question of the owner password of `document`, before `job` writes `target`.
+    pub fn owner(document: PathBuf, job: Job, target: PathBuf, force: bool) -> Self {
+        Self { path: document, purpose: Purpose::Owner { job, target, force }, field: Field::default(), notice: None }
+    }
+
+    /// The question of the new password of the copy at `target`.
+    pub fn new_password(target: PathBuf, force: bool, owner: Option<String>, notice: Option<&str>) -> Self {
+        Self { path: target.clone(), purpose: Purpose::New { target, force, owner }, field: Field::default(), notice: notice.map(str::to_owned) }
     }
 
     /// What the header of the menu says.
     pub fn header(&self) -> String {
         let name = self.path.file_name().map_or_else(|| self.path.display().to_string(), |n| n.to_string_lossy().into_owned());
-        format!("Password for {name}")
+        match self.purpose {
+            Purpose::Open => format!("Password for {name}"),
+            Purpose::Owner { .. } => format!("Owner password for {name}"),
+            Purpose::New { .. } => format!("New password for {name}"),
+            Purpose::Confirm { .. } => "Type it again".to_owned(),
+        }
+    }
+
+    /// What typing a new password, or the same again, leads to.
+    pub fn entered(&self) -> Entered {
+        let typed = self.field.text.clone();
+        match &self.purpose {
+            Purpose::New { target, force, owner }
+                if typed.is_empty() || pdfcraft_cos::effective_password(pdfcraft_cos::Algorithm::Aes256, &typed).is_empty() =>
+            {
+                Entered::Next(Self::new_password(target.clone(), *force, owner.clone(), Some("the password is empty")))
+            }
+            Purpose::New { target, force, owner } => Entered::Next(Self {
+                path: self.path.clone(),
+                purpose: Purpose::Confirm { target: target.clone(), force: *force, owner: owner.clone(), first: typed },
+                field: Field::default(),
+                notice: None,
+            }),
+            Purpose::Confirm { target, force, owner, first } if *first == typed => {
+                Entered::Write { target: target.clone(), force: *force, owner: owner.clone(), password: typed }
+            }
+            Purpose::Confirm { target, force, owner, .. } => {
+                Entered::Next(Self::new_password(target.clone(), *force, owner.clone(), Some("the passwords don't match")))
+            }
+            Purpose::Open | Purpose::Owner { .. } => Entered::Notice("not a new password".to_owned()),
+        }
+    }
+}
+
+/// Written by hand, for the password it holds.
+impl std::fmt::Debug for Entered {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Notice(notice) => f.debug_tuple("Notice").field(notice).finish(),
+            Self::Next(state) => f.debug_tuple("Next").field(state).finish(),
+            Self::Write { target, force, .. } => f.debug_struct("Write").field("target", target).field("force", force).finish_non_exhaustive(),
+        }
+    }
+}
+
+/// Written by hand so that what was typed, and the passwords asked for before, can never reach a
+/// log through `{:?}`.
+impl std::fmt::Debug for Purpose {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Open => f.write_str("Open"),
+            Self::Owner { job, target, force } => f.debug_struct("Owner").field("job", job).field("target", target).field("force", force).finish(),
+            Self::New { target, force, owner } => {
+                f.debug_struct("New").field("target", target).field("force", force).field("owner", &owner.is_some()).finish()
+            }
+            Self::Confirm { target, force, owner, .. } => {
+                f.debug_struct("Confirm").field("target", target).field("force", force).field("owner", &owner.is_some()).finish_non_exhaustive()
+            }
+        }
     }
 }
 
 /// Written by hand so that what was typed can never reach a log through `{:?}`.
 impl std::fmt::Debug for PasswordState {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("PasswordState").field("path", &self.path).field("notice", &self.notice).finish_non_exhaustive()
+        f.debug_struct("PasswordState")
+            .field("path", &self.path)
+            .field("purpose", &self.purpose)
+            .field("notice", &self.notice)
+            .finish_non_exhaustive()
     }
 }
 
@@ -658,6 +759,12 @@ impl App {
     /// Tries what was typed in the password menu: the document opens, or the menu says why not.
     pub fn password_submit(&mut self, ctx: &egui::Context) {
         let Mode::Password(state) = &self.mode else { return };
+        if let Purpose::Owner { job, target, force } = state.purpose.clone() {
+            return self.owner_submit(job, target, force, state.field.text.clone());
+        }
+        if state.purpose != Purpose::Open {
+            return self.new_password_submit();
+        }
         let (path, password) = (state.path.clone(), state.field.text.clone());
         let same_file = path == self.doc.path && !self.locked;
         let notice = match Doc::open(&path, Some(&password), self.config.active_theme(), self.config.view.page_gap) {
@@ -665,14 +772,40 @@ impl App {
             Err(OpenFailure::Other(e)) => e,
             Err(_) => "wrong password".to_owned(),
         };
+        self.password_notice(notice);
+    }
+
+    fn password_notice(&mut self, notice: String) {
         if let Mode::Password(state) = &mut self.mode {
             state.notice = Some(notice);
         }
     }
 
+    /// The owner password of the document was typed: the copy is written, or the new password asked for.
+    fn owner_submit(&mut self, job: Job, target: PathBuf, force: bool, owner: String) {
+        if let Err(e) = crate::protect::check_owner(self.doc.bytes.clone(), self.doc.password(), &owner) {
+            return self.password_notice(e);
+        }
+        match job {
+            Job::Protect => self.mode = Mode::Password(PasswordState::new_password(target, force, Some(owner), None)),
+            Job::Unprotect => self.write_copy(Job::Unprotect, &target, force, Some(&owner), ""),
+        }
+    }
+
+    /// The new password was typed, or typed again.
+    fn new_password_submit(&mut self) {
+        let Mode::Password(state) = &self.mode else { return };
+        match state.entered() {
+            Entered::Notice(notice) => self.password_notice(notice),
+            Entered::Next(next) => self.mode = Mode::Password(next),
+            Entered::Write { target, force, owner, password } => self.write_copy(Job::Protect, &target, force, owner.as_deref(), &password),
+        }
+    }
+
     /// Closes the password menu: the open document stays, and with none there is nothing to show.
     pub fn password_cancel(&mut self, ctx: &egui::Context) {
-        if self.locked {
+        let opening = matches!(&self.mode, Mode::Password(s) if s.purpose == Purpose::Open);
+        if self.locked && opening {
             ctx.send_viewport_cmd_to(egui::ViewportId::ROOT, egui::ViewportCommand::Close);
         } else {
             self.mode = Mode::Normal;
@@ -1085,8 +1218,127 @@ mod hotbar_tests {
 
 #[cfg(test)]
 mod password_tests {
-    use super::{PasswordState, Sidecar, Store, save_sidecar};
+    use super::{Entered, PasswordState, Purpose, Sidecar, Store, save_sidecar};
+    use crate::protect::Job;
     use std::path::PathBuf;
+
+    fn typed(mut state: PasswordState, text: &str) -> PasswordState {
+        state.field.insert(text);
+        state
+    }
+
+    fn target() -> PathBuf {
+        PathBuf::from("/a/b/copy.pdf")
+    }
+
+    #[test]
+    fn each_purpose_has_its_header() {
+        let owner = PasswordState::owner(PathBuf::from("/a/b/doc.pdf"), Job::Protect, target(), false);
+        assert_eq!(owner.header(), "Owner password for doc.pdf");
+        let new = PasswordState::new_password(target(), false, None, None);
+        assert_eq!(new.header(), "New password for copy.pdf");
+        let Entered::Next(confirm) = typed(new, "pw").entered() else { panic!("no confirmation") };
+        assert_eq!(confirm.header(), "Type it again");
+        assert_eq!(PasswordState::new(PathBuf::from("/a/x.pdf"), None).purpose, Purpose::Open);
+    }
+
+    #[test]
+    fn a_new_password_is_typed_twice_and_not_empty() {
+        let new = PasswordState::new_password(target(), false, Some("owner".to_owned()), None);
+        let Entered::Next(again) = new.entered() else { panic!("empty goes on") };
+        assert_eq!(again.notice.as_deref(), Some("the password is empty"));
+        assert_eq!(again.header(), "New password for copy.pdf");
+        let Entered::Next(confirm) = typed(new, "pw").entered() else { panic!("no confirmation") };
+        assert_eq!(confirm.notice, None);
+        let Entered::Next(back) = typed(confirm.clone(), "other").entered() else { panic!("mismatch goes back") };
+        assert_eq!(back.notice.as_deref(), Some("the passwords don't match"));
+        assert!(matches!(&back.purpose, Purpose::New { owner: Some(o), .. } if o == "owner"));
+        assert!(back.field.text.is_empty());
+        let Entered::Write { target: written, owner, password, .. } = typed(confirm, "pw").entered() else { panic!("matching writes") };
+        assert_eq!((written, owner.as_deref(), password.as_str()), (target(), Some("owner"), "pw"));
+    }
+
+    #[test]
+    fn a_password_that_prepares_to_nothing_is_empty() {
+        // A soft hyphen: mapped to nothing by SASLprep.
+        let new = typed(PasswordState::new_password(target(), false, None, None), "\u{00AD}");
+        let Entered::Next(again) = new.entered() else { panic!("goes back") };
+        assert_eq!(again.notice.as_deref(), Some("the password is empty"));
+        assert!(matches!(again.purpose, Purpose::New { .. }));
+    }
+
+    #[test]
+    fn the_force_of_the_command_reaches_the_write() {
+        let new = typed(PasswordState::new_password(target(), true, None, None), "a");
+        let Entered::Next(confirm) = new.entered() else { panic!("goes on") };
+        let Entered::Write { force, .. } = typed(confirm, "a").entered() else { panic!("writes") };
+        assert!(force);
+    }
+
+    #[test]
+    fn no_purpose_prints_a_secret() {
+        let secrets = ["s3cret-typed", "s3cret-first", "s3cret-owner"];
+        let owner = Some(secrets[2].to_owned());
+        let new = PasswordState::new_password(target(), false, owner.clone(), None);
+        let confirm = PasswordState {
+            purpose: Purpose::Confirm { target: target(), force: false, owner: owner.clone(), first: secrets[1].to_owned() },
+            ..new.clone()
+        };
+        let ask = PasswordState::owner(PathBuf::from("/a/doc.pdf"), Job::Unprotect, target(), false);
+        let write = typed(confirm.clone(), secrets[1]).entered();
+        for state in [new, confirm, ask, PasswordState::new(target(), None)] {
+            let state = typed(state, secrets[0]);
+            for shown in [format!("{state:?}"), format!("{:?}", state.purpose), format!("{:?}", state.entered())] {
+                assert!(secrets.iter().all(|s| !shown.contains(s)), "{shown}");
+            }
+        }
+        let shown = format!("{write:?}");
+        assert!(secrets.iter().all(|s| !shown.contains(s)), "{shown}");
+    }
+
+    #[test]
+    fn the_protect_sequence_walks_from_new_to_write() {
+        let owner = Some("s3cret-owner".to_owned());
+        let new = PasswordState::new_password(target(), false, owner.clone(), None);
+        assert_eq!(new.header(), "New password for copy.pdf");
+        let Entered::Next(empty) = new.entered() else { panic!("empty gives a notice") };
+        assert_eq!(empty.notice.as_deref(), Some("the password is empty"));
+        assert_eq!(empty.header(), "New password for copy.pdf");
+        let Entered::Next(confirm) = typed(new, "a").entered() else { panic!("a goes to confirm") };
+        assert!(matches!(&confirm.purpose, Purpose::Confirm { first, .. } if first == "a"));
+        assert_eq!(confirm.header(), "Type it again");
+        assert!(confirm.field.text.is_empty());
+        let Entered::Next(back) = typed(confirm.clone(), "b").entered() else { panic!("mismatch goes back") };
+        assert!(matches!(&back.purpose, Purpose::New { .. }));
+        assert_eq!(back.notice.as_deref(), Some("the passwords don't match"));
+        assert!(back.field.text.is_empty());
+        assert_eq!(back.header(), "New password for copy.pdf");
+        let Entered::Write { target: t, owner: o, password, .. } = typed(confirm, "a").entered() else { panic!("match writes") };
+        assert_eq!((t, o, password.as_str()), (target(), owner, "a"));
+    }
+
+    #[test]
+    fn no_state_of_the_sequence_prints_what_was_typed_or_the_owner() {
+        let secrets = ["zz-typed-1", "zz-owner-2"];
+        let owner = Some(secrets[1].to_owned());
+        let new = typed(PasswordState::new_password(target(), false, owner, None), secrets[0]);
+        let Entered::Next(confirm) = new.entered() else { panic!("goes on") };
+        let confirm = typed(confirm, secrets[0]);
+        let write = confirm.entered();
+        let Entered::Next(mismatch) = typed(PasswordState { field: Default::default(), ..confirm.clone() }, "other").entered() else {
+            panic!("goes back")
+        };
+        for shown in [
+            format!("{new:?}"),
+            format!("{confirm:?}"),
+            format!("{:?}", confirm.purpose),
+            format!("{write:?}"),
+            format!("{mismatch:?}"),
+            format!("{:?}", mismatch.purpose),
+        ] {
+            assert!(secrets.iter().all(|s| !shown.contains(s)), "{shown}");
+        }
+    }
 
     #[test]
     fn a_locked_document_saves_nothing() {
