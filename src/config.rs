@@ -162,8 +162,7 @@ fn merge(base: &mut toml::Table, over: toml::Table) {
 impl Config {
     /// The user's config file.
     pub fn path() -> PathBuf {
-        let base = std::env::var_os("XDG_CONFIG_HOME").filter(|v| !v.is_empty()).map_or_else(|| home().join(".config"), PathBuf::from);
-        base.join("yavcpdf/config.toml")
+        user_dir("XDG_CONFIG_HOME", ".config").join("config.toml")
     }
 
     /// Builds the config from the text of a user file.
@@ -224,8 +223,46 @@ fn first_line(text: &str) -> &str {
     text.lines().find(|l| !l.trim().is_empty()).unwrap_or(text)
 }
 
+#[cfg(not(windows))]
 pub fn home() -> PathBuf {
     std::env::var_os("HOME").map_or_else(|| PathBuf::from("."), PathBuf::from)
+}
+
+#[cfg(windows)]
+pub fn home() -> PathBuf {
+    let set = |name| std::env::var_os(name).filter(|v| !v.is_empty());
+    set("USERPROFILE").or_else(|| set("HOME")).map_or_else(|| PathBuf::from("."), PathBuf::from)
+}
+
+/// The yavcpdf folder for settings or data: under `$xdg` when that is set and not empty, else the
+/// platform's usual place (`unix_base` under the home folder on Linux, `%APPDATA%` on Windows,
+/// `~/Library/Application Support` on macOS).
+pub fn user_dir(xdg: &str, unix_base: &str) -> PathBuf {
+    let base = std::env::var_os(xdg).filter(|v| !v.is_empty()).map_or_else(|| default_base(unix_base), PathBuf::from);
+    base.join("yavcpdf")
+}
+
+#[cfg(windows)]
+fn default_base(_unix_base: &str) -> PathBuf {
+    std::env::var_os("APPDATA").filter(|v| !v.is_empty()).map_or_else(|| home().join("AppData").join("Roaming"), PathBuf::from)
+}
+
+#[cfg(target_os = "macos")]
+fn default_base(_unix_base: &str) -> PathBuf {
+    home().join("Library/Application Support")
+}
+
+#[cfg(not(any(windows, target_os = "macos")))]
+fn default_base(unix_base: &str) -> PathBuf {
+    home().join(unix_base)
+}
+
+/// A typed path, with a leading `~/` (and `~\` on Windows) meaning the home folder.
+pub fn expand_home(given: &str) -> PathBuf {
+    let rest = given.strip_prefix("~/");
+    #[cfg(windows)]
+    let rest = rest.or_else(|| given.strip_prefix("~\\"));
+    rest.map_or_else(|| PathBuf::from(given), |rest| home().join(rest))
 }
 
 #[cfg(test)]
@@ -264,5 +301,47 @@ mod tests {
         assert_eq!(Color::try_from("#01020304".to_owned()).unwrap().0, [1, 2, 3, 4]);
         assert!(Color::try_from("#12345".to_owned()).is_err());
         assert!(Color::try_from("#éééé".to_owned()).is_err());
+    }
+}
+
+#[cfg(all(test, not(any(windows, target_os = "macos"))))]
+mod port_tests {
+    use super::*;
+
+    #[test]
+    fn expand_home_cases() {
+        let h = home();
+        assert_eq!(expand_home("~"), PathBuf::from("~"));
+        assert_eq!(expand_home("~/x"), h.join("x"));
+        assert_eq!(expand_home("~/"), h.join(""));
+        assert_eq!(expand_home("~/a/b"), h.join("a/b"));
+        assert_eq!(expand_home("~user"), PathBuf::from("~user"));
+        assert_eq!(expand_home("~user/x"), PathBuf::from("~user/x"));
+        assert_eq!(expand_home("/abs"), PathBuf::from("/abs"));
+        assert_eq!(expand_home("rel"), PathBuf::from("rel"));
+        assert_eq!(expand_home(""), PathBuf::from(""));
+        // Backslash stays literal on Linux.
+        assert_eq!(expand_home("~\\x"), PathBuf::from("~\\x"));
+    }
+
+    #[test]
+    fn home_is_the_home_variable_or_dot() {
+        let expected = std::env::var_os("HOME").map_or_else(|| PathBuf::from("."), PathBuf::from);
+        assert_eq!(home(), expected);
+    }
+
+    #[test]
+    fn the_linux_default_base_is_under_home() {
+        assert_eq!(default_base(".config"), home().join(".config"));
+        assert_eq!(default_base(".local/share"), home().join(".local/share"));
+    }
+
+    #[test]
+    fn user_dir_ends_in_yavcpdf_and_follows_an_unset_variable() {
+        let unset = "YAVCPDF_TEST_SURELY_UNSET_VARIABLE";
+        assert_eq!(user_dir(unset, ".config"), home().join(".config/yavcpdf"));
+        assert_eq!(user_dir(unset, ".local/share"), home().join(".local/share/yavcpdf"));
+        // user_dir reads the environment itself and takes no values, so the set and empty
+        // cases are covered by the binary runs, not here.
     }
 }

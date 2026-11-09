@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::config::{Config, home};
+use crate::config::user_dir;
 use crate::view::Anchor;
 
 /// A link from one place in the document to another, shown beside the source.
@@ -216,52 +216,9 @@ pub fn save_signature(dir: &Path, strokes: &[Vec<[f32; 2]>]) -> Result<(), Strin
     std::fs::rename(&temporary, &file).map_err(fail)
 }
 
-/// `$XDG_DATA_HOME/yavcpdf`.
+/// `$XDG_DATA_HOME/yavcpdf`, or the platform's own place without it.
 pub fn data_dir() -> PathBuf {
-    let base = std::env::var_os("XDG_DATA_HOME").filter(|v| !v.is_empty()).map_or_else(|| home().join(".local/share"), PathBuf::from);
-    base.join("yavcpdf")
-}
-
-/// Moves a folder of the program's old name to its new one. One already there is left alone, and
-/// so is the old one then, as merging them could lose either's data.
-fn move_folder(old: &Path, new: &Path) -> std::io::Result<()> {
-    if old.is_dir() && new.symlink_metadata().is_err() {
-        std::fs::rename(old, new)?;
-    }
-    Ok(())
-}
-
-/// The folder a new one is adopted from: the first of `candidates` that exists, unless the new
-/// one is already there (even as a file or a dangling link), when nothing moves.
-fn adoption_source(new: &Path, candidates: &[PathBuf]) -> Option<PathBuf> {
-    if new.symlink_metadata().is_ok() {
-        return None;
-    }
-    candidates.iter().find(|old| old.is_dir()).cloned()
-}
-
-/// Adopts `new` from the first of `candidates` that exists. The message says what failed and
-/// where the old files are.
-fn adopt_folder(new: &Path, candidates: &[PathBuf]) -> Option<String> {
-    let old = adoption_source(new, candidates)?;
-    let e = move_folder(&old, new).err()?;
-    Some(format!("couldn't move {} to {}: {e}; your old data is still there", old.display(), new.display()))
-}
-
-/// Brings along the settings and saved data of a version from before the rename to yavcpdf: from
-/// the yapdf folders, or else the older pdfviewer ones. Returns a message for each folder that
-/// couldn't be moved, which are also printed to stderr.
-pub fn adopt_old_folders() -> Vec<String> {
-    let config = Config::path();
-    let mut problems = Vec::new();
-    for new in [config.parent().map(Path::to_owned), Some(data_dir())].into_iter().flatten() {
-        let candidates = [new.with_file_name("yapdf"), new.with_file_name("pdfviewer")];
-        if let Some(problem) = adopt_folder(&new, &candidates) {
-            eprintln!("yavcpdf: {problem}");
-            problems.push(problem);
-        }
-    }
-    problems
+    user_dir("XDG_DATA_HOME", ".local/share")
 }
 
 pub fn content_key(bytes: &[u8]) -> String {
@@ -372,119 +329,6 @@ pub fn remember_document(path: &Path) {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn scratch_folders(name: &str) -> (Scratch, PathBuf, PathBuf) {
-        let scratch = Scratch::new(name);
-        let (old, new) = (scratch.0.join("pdfviewer"), scratch.0.join("yavcpdf"));
-        (scratch, old, new)
-    }
-
-    #[test]
-    fn an_old_folder_moves_to_the_new_name_with_what_is_in_it() {
-        let (_scratch, old, new) = scratch_folders("rename-moves");
-        std::fs::create_dir_all(&old).unwrap();
-        std::fs::write(old.join("signature.json"), "kept").unwrap();
-        move_folder(&old, &new).unwrap();
-        assert!(!old.exists());
-        assert_eq!(std::fs::read_to_string(new.join("signature.json")).unwrap(), "kept");
-    }
-
-    #[test]
-    fn a_folder_already_at_the_new_name_keeps_both() {
-        let (_scratch, old, new) = scratch_folders("rename-keeps");
-        std::fs::create_dir_all(&old).unwrap();
-        std::fs::create_dir_all(&new).unwrap();
-        std::fs::write(old.join("a"), "old").unwrap();
-        std::fs::write(new.join("a"), "new").unwrap();
-        move_folder(&old, &new).unwrap();
-        assert_eq!(std::fs::read_to_string(old.join("a")).unwrap(), "old");
-        assert_eq!(std::fs::read_to_string(new.join("a")).unwrap(), "new");
-    }
-
-    #[test]
-    fn without_an_old_folder_nothing_happens() {
-        let (_scratch, old, new) = scratch_folders("rename-nothing");
-        move_folder(&old, &new).unwrap();
-        assert!(!new.exists());
-    }
-
-    /// Makes the named (empty) folders beside `yavcpdf`, and says what
-    /// `adoption_source` chooses, as the name of the folder.
-    fn chosen(name: &str, existing: &[&str]) -> Option<String> {
-        let scratch = Scratch::new(name);
-        for folder in existing {
-            std::fs::create_dir_all(scratch.0.join(folder)).unwrap();
-        }
-        let new = scratch.0.join("yavcpdf");
-        let candidates = [new.with_file_name("yapdf"), new.with_file_name("pdfviewer")];
-        adoption_source(&new, &candidates).and_then(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()))
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn a_failed_move_says_what_failed_and_that_the_old_data_is_still_there() {
-        use std::os::unix::fs::PermissionsExt;
-        let scratch = Scratch::new("adopt-fails");
-        let (old, new) = (scratch.0.join("yapdf"), scratch.0.join("yavcpdf"));
-        std::fs::create_dir_all(&old).unwrap();
-        std::fs::set_permissions(&scratch.0, std::fs::Permissions::from_mode(0o555)).unwrap();
-        let message = adopt_folder(&new, std::slice::from_ref(&old));
-        let moved = new.exists();
-        std::fs::set_permissions(&scratch.0, std::fs::Permissions::from_mode(0o755)).unwrap();
-        if moved {
-            return; // running as root: the read-only parent didn't stop the move
-        }
-        let message = message.unwrap();
-        assert!(message.starts_with(&format!("couldn't move {} to {}: ", old.display(), new.display())), "{message}");
-        assert!(message.ends_with("your old data is still there"), "{message}");
-        assert!(old.is_dir());
-    }
-
-    #[test]
-    fn a_successful_move_has_no_message() {
-        let scratch = Scratch::new("adopt-ok");
-        let (old, new) = (scratch.0.join("yapdf"), scratch.0.join("yavcpdf"));
-        std::fs::create_dir_all(&old).unwrap();
-        assert_eq!(adopt_folder(&new, &[old]), None);
-        assert!(new.is_dir());
-    }
-
-    #[test]
-    fn only_yapdf_existing_is_adopted() {
-        assert_eq!(chosen("adopt-yapdf", &["yapdf"]).as_deref(), Some("yapdf"));
-    }
-
-    #[test]
-    fn only_pdfviewer_existing_is_adopted() {
-        assert_eq!(chosen("adopt-pdfviewer", &["pdfviewer"]).as_deref(), Some("pdfviewer"));
-    }
-
-    #[test]
-    fn yapdf_wins_over_pdfviewer_and_pdfviewer_is_left_alone() {
-        let scratch = Scratch::new("adopt-both");
-        let (yapdf, viewer, new) = (scratch.0.join("yapdf"), scratch.0.join("pdfviewer"), scratch.0.join("yavcpdf"));
-        std::fs::create_dir_all(&yapdf).unwrap();
-        std::fs::create_dir_all(&viewer).unwrap();
-        std::fs::write(yapdf.join("a"), "yapdf").unwrap();
-        std::fs::write(viewer.join("a"), "viewer").unwrap();
-        let source = adoption_source(&new, &[yapdf.clone(), viewer.clone()]).unwrap();
-        assert_eq!(source, yapdf);
-        move_folder(&source, &new).unwrap();
-        assert_eq!(std::fs::read_to_string(new.join("a")).unwrap(), "yapdf");
-        assert_eq!(std::fs::read_to_string(viewer.join("a")).unwrap(), "viewer");
-        assert!(!yapdf.exists());
-    }
-
-    #[test]
-    fn an_existing_yavcpdf_means_nothing_moves() {
-        assert_eq!(chosen("adopt-existing", &["yavcpdf", "yapdf", "pdfviewer"]), None);
-        assert_eq!(chosen("adopt-existing-only", &["yavcpdf"]), None);
-    }
-
-    #[test]
-    fn with_no_old_folder_there_is_nothing_to_adopt() {
-        assert_eq!(chosen("adopt-none", &[]), None);
-    }
 
     /// A scratch directory removed at the end of the test.
     struct Scratch(PathBuf);

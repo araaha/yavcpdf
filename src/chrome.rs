@@ -46,7 +46,13 @@ fn text_line(painter: &Painter, config: &Config, at: Pos2, align: Align2, text: 
 
 /// The file of a fontconfig font.
 fn font_file(name: &str) -> Option<Vec<u8>> {
-    let output = std::process::Command::new("fc-match").args(["-f", "%{file}", name]).output().ok()?;
+    // Without fontconfig (usual on Windows and macOS) the spawn fails at once and silently.
+    let output = std::process::Command::new("fc-match")
+        .args(["-f", "%{file}", name])
+        .stdin(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .output()
+        .ok()?;
     let path = String::from_utf8(output.stdout).ok()?;
     std::fs::read(path.trim()).ok()
 }

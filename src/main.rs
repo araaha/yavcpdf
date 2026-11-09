@@ -1,4 +1,5 @@
 //! yavcpdf: a minimal, keyboard-driven PDF viewer on the PdfCraft render engine.
+#![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
 mod actions;
@@ -27,12 +28,23 @@ use std::process::ExitCode;
 use config::Config;
 use doc::Doc;
 
-const USAGE: &str = "usage: yavcpdf [--page N] [--password PW] [--geometry WxH[+X+Y]]
+const USAGE_HEAD: &str = "usage: yavcpdf [--page N] [--password PW] [--geometry WxH[+X+Y]]
              [--fullscreen|--no-fullscreen] [--statusbar|--no-statusbar] [file.pdf]
 
 With no file, the document opened last is opened again.
 --geometry sets the window size in points, and optionally its position.
-The configuration is ~/.config/yavcpdf/config.toml.";
+";
+
+#[cfg(windows)]
+const CONFIG_LINE: &str = r"The configuration is %APPDATA%\yavcpdf\config.toml.";
+#[cfg(target_os = "macos")]
+const CONFIG_LINE: &str = "The configuration is ~/Library/Application Support/yavcpdf/config.toml.";
+#[cfg(not(any(windows, target_os = "macos")))]
+const CONFIG_LINE: &str = "The configuration is ~/.config/yavcpdf/config.toml.";
+
+fn usage() -> String {
+    format!("{USAGE_HEAD}{CONFIG_LINE}")
+}
 
 #[derive(Debug, Default, PartialEq)]
 struct Args {
@@ -112,6 +124,8 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Args, String> {
             "--statusbar" => out.statusbar = Some(true),
             "--no-statusbar" => out.statusbar = Some(false),
             "--password" => out.password = Some(args.next().ok_or("--password needs a value")?),
+            // Old macOS Finder launches pass a process serial number.
+            psn if psn.starts_with("-psn_") => {}
             flag if flag.starts_with('-') && flag.len() > 1 => return Err(format!("unknown option {flag}")),
             file if out.file.is_none() => out.file = Some(PathBuf::from(file)),
             _ => return Err("only one file can be opened".to_owned()),
@@ -120,14 +134,73 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Args, String> {
     Ok(out)
 }
 
+/// With no file and no last document: a native file picker where there is no console for the usage text.
+#[cfg(any(windows, target_os = "macos"))]
+fn ask_for_file() -> Option<PathBuf> {
+    rfd::FileDialog::new().set_title("Open a PDF").add_filter("PDF", &["pdf", "PDF"]).pick_file()
+}
+
+#[cfg(not(any(windows, target_os = "macos")))]
+fn ask_for_file() -> Option<PathBuf> {
+    None
+}
+
+/// Shows a message where the user can see it, since a release build on Windows has no console.
+#[cfg(any(windows, target_os = "macos"))]
+fn show_message(level: rfd::MessageLevel, message: &str) {
+    rfd::MessageDialog::new().set_level(level).set_title("yavcpdf").set_description(message).show();
+}
+
+/// Shows the usage or an argument error in a dialog; on macOS only when not started from a terminal.
+#[cfg(any(windows, target_os = "macos"))]
+fn show_usage_dialog(level: rfd::MessageLevel, message: &str) {
+    use std::io::IsTerminal;
+    if cfg!(target_os = "macos") && std::io::stderr().is_terminal() {
+        return;
+    }
+    show_message(level, message);
+}
+
+/// Shows a fatal error in a dialog.
+#[cfg(any(windows, target_os = "macos"))]
+fn show_error(message: &str) {
+    show_message(rfd::MessageLevel::Error, message);
+}
+
+#[cfg(not(any(windows, target_os = "macos")))]
+fn show_error(_message: &str) {}
+
+/// Shows the usage text in a dialog.
+#[cfg(any(windows, target_os = "macos"))]
+fn show_help() {
+    show_usage_dialog(rfd::MessageLevel::Info, &usage());
+}
+
+#[cfg(not(any(windows, target_os = "macos")))]
+fn show_help() {}
+
+/// Drops the `\\?\` that `canonicalize` puts before a drive path on Windows, and only then.
+fn strip_verbatim_str(path: &str) -> &str {
+    match path.strip_prefix(r"\\?\") {
+        Some(rest) if matches!(rest.as_bytes(), [d, b':', b'\\', ..] if d.is_ascii_alphabetic()) => rest,
+        _ => path,
+    }
+}
+
+/// A `canonicalize`d path without the Windows verbatim prefix; unchanged elsewhere.
+pub fn strip_verbatim(path: PathBuf) -> PathBuf {
+    match path.to_str().map(strip_verbatim_str) {
+        Some(stripped) if cfg!(windows) => PathBuf::from(stripped),
+        _ => path,
+    }
+}
+
 fn run(args: Args) -> Result<(), String> {
-    // First, as the last document and the config are both read from these.
-    let adoption = store::adopt_old_folders();
-    let path = args.file.or_else(store::last_document).ok_or(USAGE)?;
-    let path = std::fs::canonicalize(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+    let Some(path) = args.file.or_else(store::last_document).or_else(ask_for_file) else {
+        return if cfg!(any(windows, target_os = "macos")) { Ok(()) } else { Err(usage()) };
+    };
+    let path = std::fs::canonicalize(&path).map(strip_verbatim).map_err(|e| format!("{}: {e}", path.display()))?;
     let (mut config, warning) = Config::load();
-    // A move that failed would otherwise only reach stderr, which nobody sees from a launcher.
-    let warning = adoption.into_iter().chain(warning).reduce(|a, b| format!("{a}; {b}"));
     if let Some(on) = args.fullscreen {
         config.view.fullscreen = on;
     }
@@ -156,18 +229,23 @@ fn main() -> ExitCode {
     let args = match parse_args(std::env::args().skip(1)) {
         Ok(args) => args,
         Err(e) => {
-            eprintln!("yavcpdf: {e}\n{USAGE}");
+            let usage = usage();
+            eprintln!("yavcpdf: {e}\n{usage}");
+            #[cfg(any(windows, target_os = "macos"))]
+            show_usage_dialog(rfd::MessageLevel::Error, &format!("{e}\n{usage}"));
             return ExitCode::from(2);
         }
     };
     if args.help {
-        println!("{USAGE}");
+        println!("{}", usage());
+        show_help();
         return ExitCode::SUCCESS;
     }
     match run(args) {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
             eprintln!("yavcpdf: {e}");
+            show_error(&e);
             ExitCode::FAILURE
         }
     }
@@ -179,6 +257,22 @@ mod tests {
 
     fn parse(args: &[&str]) -> Result<Args, String> {
         parse_args(args.iter().map(ToString::to_string))
+    }
+
+    #[test]
+    fn psn_arguments_are_ignored() {
+        assert_eq!(parse(&["-psn_0_12345"]).unwrap(), Args::default());
+        assert_eq!(parse(&["-psn_0_1", "a.pdf"]).unwrap().file, Some(PathBuf::from("a.pdf")));
+    }
+
+    #[test]
+    fn verbatim_prefix_is_stripped_only_before_a_drive() {
+        assert_eq!(strip_verbatim_str(r"\\?\C:\a\b.pdf"), r"C:\a\b.pdf");
+        assert_eq!(strip_verbatim_str(r"\\?\UNC\srv\share"), r"\\?\UNC\srv\share");
+        assert_eq!(strip_verbatim_str(r"\\?\C:"), r"\\?\C:");
+        assert_eq!(strip_verbatim_str(r"\\?\1:\a"), r"\\?\1:\a");
+        assert_eq!(strip_verbatim_str(r"C:\a"), r"C:\a");
+        assert_eq!(strip_verbatim_str("/a/b"), "/a/b");
     }
 
     #[test]

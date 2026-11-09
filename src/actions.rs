@@ -1,6 +1,6 @@
 //! What bound keys and commands do.
 use std::fmt::Write;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::mpsc::TryRecvError;
 use std::time::Instant;
 
@@ -10,7 +10,7 @@ use pdfcraft_render::LinkTarget;
 use crate::app::{
     App, Bar, BarKind, Edit, Entry, EntryKind, FillItem, Fit, Landing, MarkOp, Mode, PendingPortal, Selection, SignPad, TocState, Tool,
 };
-use crate::config::home;
+use crate::config::expand_home;
 use crate::doc::dest_y;
 use crate::field::Field;
 use crate::hint::{self, HintState, Purpose, Target, TargetKind};
@@ -557,7 +557,7 @@ impl App {
     fn command_export(&mut self, argument: &str, force: bool) {
         let path = match argument {
             "" => crate::export::default_path(&self.doc.path),
-            given => given.strip_prefix("~/").map_or_else(|| PathBuf::from(given), |rest| home().join(rest)),
+            given => expand_home(given),
         };
         if let Some(refusal) = crate::export::refusal(&self.doc.path, &path, force) {
             self.say(refusal);
@@ -955,18 +955,25 @@ impl App {
         }
     }
 
-    fn open_uri(&mut self, uri: &str) {
+    pub fn open_uri(&mut self, uri: &str) {
         let lower = uri.to_lowercase();
         if !["http://", "https://", "mailto:"].iter().any(|s| lower.starts_with(s)) {
             self.say(format!("not opening {uri}"));
             return;
         }
-        match std::process::Command::new("xdg-open").arg(uri).spawn() {
+        // The URI is one argument, never parsed by a shell.
+        #[cfg(windows)]
+        const OPENER: &str = "explorer.exe";
+        #[cfg(target_os = "macos")]
+        const OPENER: &str = "open";
+        #[cfg(not(any(windows, target_os = "macos")))]
+        const OPENER: &str = "xdg-open";
+        match std::process::Command::new(OPENER).arg(uri).spawn() {
             Ok(mut child) => {
                 std::thread::spawn(move || child.wait());
                 self.say(format!("opened {uri}"));
             }
-            Err(e) => self.say(format!("xdg-open: {e}")),
+            Err(e) => self.say(format!("{OPENER}: {e}")),
         }
     }
 
@@ -1011,8 +1018,8 @@ impl App {
             self.say("usage: :e <file>");
             return;
         }
-        let path = argument.strip_prefix("~/").map_or_else(|| PathBuf::from(argument), |rest| home().join(rest));
-        let path = std::fs::canonicalize(&path).unwrap_or(path);
+        let path = expand_home(argument);
+        let path = std::fs::canonicalize(&path).map_or(path, crate::strip_verbatim);
         if let Err(e) = self.open(ctx, &path) {
             self.say(e);
         }
