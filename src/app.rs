@@ -352,16 +352,48 @@ pub struct App {
     watcher: Watcher,
 }
 
-impl App {
-    pub fn new(cc: &eframe::CreationContext<'_>, config: Config, doc: Doc, start_page: Option<usize>, warning: Option<String>) -> Self {
-        let key = store::content_key(&doc.bytes);
+/// An opened document with its store and sidecar, prepared before the window exists.
+pub struct Opened {
+    pub doc: Doc,
+    pub store: Store,
+    pub side: Sidecar,
+    pub load_warning: Option<String>,
+}
+
+impl Opened {
+    /// Opens `path`, and loads what is saved for its contents.
+    pub fn load(path: &Path, password: Option<&str>, config: &Config) -> Result<Self, String> {
+        let bytes = Arc::new(std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?);
+        // The hash and the parsing don't depend on each other.
+        let hashing = {
+            let bytes = bytes.clone();
+            std::thread::spawn(move || store::content_key(&bytes))
+        };
+        let doc = Doc::from_bytes(path, bytes, password, config.active_theme(), config.view.page_gap);
+        // On a parse error the hashing thread is left to finish on its own.
+        let doc = doc?;
+        let key = hashing.join().map_err(|_| format!("{}: couldn't hash the document", path.display()))?;
         let store = Store::new(store::data_dir(), key);
         let (side, load_warning) = store.load(&doc.path);
+        Ok(Self { doc, store, side, load_warning })
+    }
+}
+
+impl App {
+    pub fn new(
+        cc: &eframe::CreationContext<'_>,
+        config: Config,
+        opened: Opened,
+        font: Option<Vec<u8>>,
+        start_page: Option<usize>,
+        warning: Option<String>,
+    ) -> Self {
+        let Opened { doc, store, side, load_warning } = opened;
         store::remember_document(&doc.path);
         let (keymap, key_errors) = Keymap::new(&config.keys);
         let watcher = Watcher::start(cc.egui_ctx.clone(), &doc.path);
         cc.egui_ctx.options_mut(|o| o.zoom_with_keyboard = false);
-        crate::chrome::apply_font(&cc.egui_ctx, &config);
+        crate::chrome::apply_font_bytes(&cc.egui_ctx, font);
         let now = Instant::now();
         let mut app = Self {
             statusbar_visible: config.statusbar.visible,

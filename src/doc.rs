@@ -115,6 +115,11 @@ fn flatten(items: &[OutlineItem], pages: &[PageInfo], depth: usize, out: &mut Ve
 impl Doc {
     pub fn open(path: &Path, password: Option<&str>, theme: &Theme, gap: f32) -> Result<Self, String> {
         let bytes = Arc::new(std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?);
+        Self::from_bytes(path, bytes, password, theme, gap)
+    }
+
+    /// Opens the document `bytes`, which were read from `path`.
+    pub fn from_bytes(path: &Path, bytes: Arc<Vec<u8>>, password: Option<&str>, theme: &Theme, gap: f32) -> Result<Self, String> {
         let info = inspect(bytes.clone(), password).map_err(|e| format!("{}: {e:?}", path.display()))?;
         if info.pages.is_empty() {
             return Err(format!("{}: the document has no pages", path.display()));

@@ -57,12 +57,20 @@ fn font_file(name: &str) -> Option<Vec<u8>> {
     std::fs::read(path.trim()).ok()
 }
 
+/// The bytes of the configured font, if there is one and it can be found.
+pub fn font_bytes(config: &Config) -> Option<Vec<u8>> {
+    if config.font.is_empty() { None } else { font_file(&config.font) }
+}
+
 /// Uses the configured font for all interface text.
 pub fn apply_font(ctx: &egui::Context, config: &Config) {
+    apply_font_bytes(ctx, font_bytes(config));
+}
+
+/// Uses the font in `bytes`, or the default one without it, for all interface text.
+pub fn apply_font_bytes(ctx: &egui::Context, bytes: Option<Vec<u8>>) {
     let mut fonts = FontDefinitions::default();
-    if !config.font.is_empty()
-        && let Some(bytes) = font_file(&config.font)
-    {
+    if let Some(bytes) = bytes {
         fonts.font_data.insert("ui".to_owned(), Arc::new(FontData::from_owned(bytes)));
         for family in [FontFamily::Proportional, FontFamily::Monospace] {
             fonts.families.entry(family).or_default().insert(0, "ui".to_owned());

@@ -22,11 +22,10 @@ mod smart;
 mod store;
 mod view;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use config::Config;
-use doc::Doc;
 
 const USAGE_HEAD: &str = "usage: yavcpdf [--page N] [--password PW] [--geometry WxH[+X+Y]]
              [--fullscreen|--no-fullscreen] [--statusbar|--no-statusbar] [file.pdf]
@@ -134,6 +133,12 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Args, String> {
     Ok(out)
 }
 
+/// The window title: the file's name, as `Doc::file_name` gives it.
+fn window_title(path: &Path) -> String {
+    let name = path.file_name().map_or_else(|| path.display().to_string(), |n| n.to_string_lossy().into_owned());
+    format!("{name} - yavcpdf")
+}
+
 /// With no file and no last document: a native file picker where there is no console for the usage text.
 #[cfg(any(windows, target_os = "macos"))]
 fn ask_for_file() -> Option<PathBuf> {
@@ -207,8 +212,16 @@ fn run(args: Args) -> Result<(), String> {
     if let Some(on) = args.statusbar {
         config.statusbar.visible = on;
     }
-    let doc = Doc::open(&path, args.password.as_deref(), config.active_theme(), config.view.page_gap)?;
-    let title = format!("{} - yavcpdf", doc.file_name());
+    // The document and the font don't need the window, so they load while it and its GL context are made.
+    let opening = {
+        let (path, password, config) = (path.clone(), args.password, config.clone());
+        std::thread::spawn(move || app::Opened::load(&path, password.as_deref(), &config))
+    };
+    let font = {
+        let config = config.clone();
+        std::thread::spawn(move || chrome::font_bytes(&config))
+    };
+    let title = window_title(&path);
     let (width, height) = args.geometry.map_or((1280, 800), |g| g.size);
     // Sizes and offsets are capped at 16384 by parse_geometry, so they are exact in f32.
     let mut viewport = egui::ViewportBuilder::default()
@@ -222,7 +235,16 @@ fn run(args: Args) -> Result<(), String> {
     }
     let options = eframe::NativeOptions { viewport, renderer: eframe::Renderer::Glow, ..Default::default() };
     let page = args.page;
-    eframe::run_native("yavcpdf", options, Box::new(move |cc| Ok(Box::new(app::App::new(cc, config, doc, page, warning))))).map_err(|e| e.to_string())
+    let creator: eframe::AppCreator<'_> = Box::new(move |cc| {
+        let opened = opening.join().map_err(|_| "couldn't open the document".to_owned())??;
+        let font = font.join().unwrap_or_default();
+        Ok(Box::new(app::App::new(cc, config, opened, font, page, warning)))
+    });
+    eframe::run_native("yavcpdf", options, creator).map_err(|e| match e {
+        // Without eframe's "app creation error: " prefix, so a document error reads as it always did.
+        eframe::Error::AppCreation(e) => e.to_string(),
+        e => e.to_string(),
+    })
 }
 
 fn main() -> ExitCode {
@@ -254,6 +276,29 @@ fn main() -> ExitCode {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn title_is_the_file_name() {
+        assert_eq!(window_title(Path::new("/a/b/c.pdf")), "c.pdf - yavcpdf");
+        #[cfg(unix)]
+        assert_eq!(window_title(Path::new("/")), "/ - yavcpdf");
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn title_for_unusual_paths() {
+        use std::os::unix::ffi::OsStrExt;
+        assert_eq!(window_title(Path::new("/a/my file  x.pdf")), "my file  x.pdf - yavcpdf");
+        assert_eq!(window_title(Path::new("rel.pdf")), "rel.pdf - yavcpdf");
+        assert_eq!(window_title(Path::new("/a/b/")), "b - yavcpdf");
+        assert_eq!(window_title(Path::new("/a/b/..")), "/a/b/.. - yavcpdf");
+        assert_eq!(window_title(Path::new("")), " - yavcpdf");
+        assert_eq!(window_title(Path::new("/a/\u{e9}\u{4e2d}.pdf")), "\u{e9}\u{4e2d}.pdf - yavcpdf");
+        let bad = Path::new(std::ffi::OsStr::from_bytes(b"/a/bad\xff\xfe.pdf"));
+        assert_eq!(window_title(bad), "bad\u{fffd}\u{fffd}.pdf - yavcpdf");
+        // Same name as Doc::file_name would give.
+        assert!(window_title(Path::new("/a/\n.pdf")).starts_with("\n.pdf"));
+    }
 
     fn parse(args: &[&str]) -> Result<Args, String> {
         parse_args(args.iter().map(ToString::to_string))
