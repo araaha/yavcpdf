@@ -1,7 +1,9 @@
 name: Release
 
-# A tag such as v0.1.0 builds the Linux binary and publishes it as a release. Started by hand, it
-# builds and uploads the same archive as a workflow artifact, and publishes nothing.
+# A tag such as v0.1.0 builds Linux, Windows and macOS packages and publishes them as a release.
+# Started by hand, it builds and uploads the same packages as workflow artifacts. A manual run on a
+# branch only builds; one on a tag ref publishes that tag again. The build jobs only upload
+# artifacts; the publish job is the one place that creates the release, so they cannot race.
 on:
   push:
     tags: ["v*"]
@@ -47,6 +49,7 @@ jobs:
           name="yavcpdf-${GITHUB_REF_NAME//\//-}-x86_64-linux"
           mkdir "$name"
           cp target/release/yavcpdf README.md yavcpdf.desktop LICENSE-MIT LICENSE-APACHE NOTICE ATTRIBUTION.md "$name/"
+          cp src/default_config.toml "$name/config.toml"
           cp -r licenses "$name/"
           tar czf "$name.tar.gz" "$name"
           sha256sum "$name.tar.gz" > "$name.tar.gz.sha256"
@@ -58,8 +61,236 @@ jobs:
           path: ${{ env.PACKAGE }}.tar.gz*
           if-no-files-found: error
 
-      - name: Publish
+      # The AUR source package downloads this tarball, as GitHub does not promise that its
+      # generated tag archives stay byte-identical. HEAD is the tagged commit here.
+      - name: Source tarball
         if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          git archive --format=tar.gz --prefix="yavcpdf-$version/" -o "yavcpdf-$version.tar.gz" HEAD
+          echo "SOURCE=yavcpdf-$version.tar.gz" >> "$GITHUB_ENV"
+
+      - uses: actions/upload-artifact@v4
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          name: source
+          path: ${{ env.SOURCE }}
+          if-no-files-found: error
+
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+
+      - name: Test
+        env:
+          RUST_MIN_STACK: "8388608"
+        run: cargo test --locked
+
+      - name: Build
+        env:
+          RUSTFLAGS: -C target-feature=+crt-static
+        run: cargo build --locked --release
+
+      - name: Package
+        run: |
+          name="yavcpdf-${GITHUB_REF_NAME//\//-}-x86_64-windows"
+          mkdir "$name"
+          cp target/release/yavcpdf.exe README.md LICENSE-MIT LICENSE-APACHE NOTICE ATTRIBUTION.md "$name/"
+          cp src/default_config.toml "$name/config.toml"
+          cp -r licenses "$name/"
+          7z a -tzip "$name.zip" "$name"
+          sha256sum "$name.zip" > "$name.zip.sha256"
+          echo "PACKAGE=$name" >> "$GITHUB_ENV"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.PACKAGE }}
+          path: ${{ env.PACKAGE }}.zip*
+          if-no-files-found: error
+
+  macos:
+    runs-on: macos-14
+    timeout-minutes: 60
+    env:
+      MACOSX_DEPLOYMENT_TARGET: "11.0"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          rustup target add aarch64-apple-darwin x86_64-apple-darwin
+
+      - name: Test
+        run: cargo test --locked
+
+      - name: Build
+        run: |
+          cargo build --locked --release --target aarch64-apple-darwin
+          cargo build --locked --release --target x86_64-apple-darwin
+
+      - name: Package
+        run: |
+          set -euo pipefail
+          name="yavcpdf-${GITHUB_REF_NAME//\//-}-universal-macos"
+          version=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
+          mkdir -p yavcpdf.app/Contents/MacOS yavcpdf.app/Contents/Resources
+          lipo -create -output yavcpdf.app/Contents/MacOS/yavcpdf \
+            target/aarch64-apple-darwin/release/yavcpdf target/x86_64-apple-darwin/release/yavcpdf
+          sed "s/@VERSION@/$version/g" packaging/macos/Info.plist > yavcpdf.app/Contents/Info.plist
+          cp README.md LICENSE-MIT LICENSE-APACHE NOTICE ATTRIBUTION.md yavcpdf.app/Contents/Resources/
+          cp src/default_config.toml yavcpdf.app/Contents/Resources/config.toml
+          cp -r licenses yavcpdf.app/Contents/Resources/
+          codesign --force --sign - yavcpdf.app
+          codesign --verify --verbose yavcpdf.app
+          ditto -c -k --keepParent yavcpdf.app "$name.zip"
+          shasum -a 256 "$name.zip" > "$name.zip.sha256"
+          echo "PACKAGE=$name" >> "$GITHUB_ENV"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.PACKAGE }}
+          path: ${{ env.PACKAGE }}.zip*
+          if-no-files-found: error
+
+  publish:
+    needs: [linux, windows, macos]
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" "$PACKAGE.tar.gz" "$PACKAGE.tar.gz.sha256" --verify-tag --title "yavcpdf $GITHUB_REF_NAME" --generate-notes
+          GH_REPO: ${{ github.repository }}
+        run: |
+          assets=(dist/*)
+          ls -l "${assets[@]}"
+          if gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" "${assets[@]}" --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" "${assets[@]}" --verify-tag --title "yavcpdf $GITHUB_REF_NAME" --generate-notes
+          fi
+
+  # Releases made with GITHUB_TOKEN start no other workflows, so the AUR packages are published
+  # here, once the publish job has uploaded the archives that the AUR packages download. A manual
+  # run on a tag ref uploads the assets to the existing release again and publishes that tag
+  # again. Only plain vX.Y.Z tags are published; pre-releases are skipped.
+  aur:
+    needs: publish
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    container: archlinux:base-devel
+    permissions:
+      contents: read
+    steps:
+      - name: Check the tag is a release version
+        id: tag
+        run: |
+          if printf '%s' "$GITHUB_REF_NAME" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "release=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::$GITHUB_REF_NAME is not a plain vX.Y.Z tag, so nothing is published to the AUR."
+            echo "release=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Check for the AUR key
+        id: key
+        if: steps.tag.outputs.release == 'true'
+        env:
+          AUR_KEY: ${{ secrets.AUR_KEY }}
+        run: |
+          if [ -z "$AUR_KEY" ]; then
+            echo "::notice::AUR_KEY is not set, so nothing is published to the AUR."
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@v4
+        if: steps.key.outputs.present == 'true'
+
+      - name: Install tools
+        if: steps.key.outputs.present == 'true'
+        run: pacman -Syu --noconfirm --needed git openssh curl
+
+      - name: Publish to the AUR
+        if: steps.key.outputs.present == 'true'
+        env:
+          AUR_KEY: ${{ secrets.AUR_KEY }}
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          repo="https://github.com/${GITHUB_REPOSITORY}"
+
+          # makepkg refuses to run as root.
+          useradd -m builder
+          work=/home/builder/aur
+          mkdir -p "$work" /home/builder/.ssh
+          cp -r packaging/aur/. "$work/"
+
+          # Pinned host keys, from https://aur.archlinux.org (ED25519 SHA256:RFzBCUItH9LZS0cKB5UE6ceAYhBD5C8GeOBip8Z11+4,
+          # RSA SHA256:5s5cIyReIfNNVGRFdDbe3hdYiI5OelHGpw2rOUud3Q8, ECDSA SHA256:uTa/0PndEgPZTf76e1DFqXKJEXKsn7m9ivhLQtzGOCI).
+          cat > /home/builder/.ssh/known_hosts <<'KEYS'
+          aur.archlinux.org ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEuBKrPzbawxA/k2g6NcyV5jmqwJ2s+zpgZGZ7tpLIcN
+          aur.archlinux.org ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBLMiLrP8pVi5BFX2i3vepSUnpedeiewE5XptnUnau+ZoeUOPkpoCgZZuYfpaIQfhhJJI5qgnjJmr4hyJbe/zxow=
+          aur.archlinux.org ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQDKF9vAFWdgm9Bi8uc+tYRBmXASBb5cB5iZsB7LOWWFeBrLp3r14w0/9S2vozjgqY5sJLDPONWoTTaVTbhe3vwO8CBKZTEt1AcWxuXNlRnk9FliR1/eNB9uz/7y1R0+c1Md+P98AJJSJWKN12nqIDIhjl2S1vOUvm7FNY43fU2knIhEbHybhwWeg+0wxpKwcAd/JeL5i92Uv03MYftOToUijd1pqyVFdJvQFhqD4v3M157jxS5FTOBrccAEjT+zYmFyD8WvKUa9vUclRddNllmBJdy4NyLB8SvVZULUPrP3QOlmzemeKracTlVOUG1wsDbxknF1BwSCU7CmU6UFP90kpWIyz66bP0bl67QAvlIc52Yix7pKJPbw85+zykvnfl2mdROsaT8p8R9nwCdFsBc9IiD0NhPEHcyHRwB8fokXTajk2QnGhL+zP5KnkmXnyQYOCUYo3EKMXIlVOVbPDgRYYT/XqvBuzq5S9rrU70KoI/S5lDnFfx/+lPLdtcnnEPk=
+          KEYS
+
+          # The key goes to a 0600 file and is never echoed.
+          (umask 077; printf '%s\n' "$AUR_KEY" > /home/builder/.ssh/aur)
+          unset AUR_KEY
+          chown -R builder:builder /home/builder
+
+          script=/home/builder/publish.sh
+          cat > "$script" <<'PUBLISH'
+          set -euo pipefail
+          version="$1"; repo="$2"; work="$3"; tag="v$1"
+          export GIT_SSH_COMMAND="ssh -i $HOME/.ssh/aur -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$HOME/.ssh/known_hosts"
+          git config --global user.name araaha
+          git config --global user.email ara.ahady@gmail.com
+          git config --global init.defaultBranch master
+
+          sum() { curl -fsSL "$1" | sha256sum | cut -d' ' -f1; }
+          src_sum=$(sum "$repo/releases/download/$tag/yavcpdf-$version.tar.gz")
+          bin_sum=$(sum "$repo/releases/download/$tag/yavcpdf-$tag-x86_64-linux.tar.gz")
+
+          for pkg in yavcpdf yavcpdf-bin; do
+            dir="$work/$pkg"
+            case "$pkg" in yavcpdf) s="$src_sum" ;; *) s="$bin_sum" ;; esac
+            sed -i -e "s/^pkgver=.*/pkgver=$version/" -e 's/^pkgrel=.*/pkgrel=1/' \
+              -e "s/^sha256sums=.*/sha256sums=('$s')/" "$dir/PKGBUILD"
+            (cd "$dir" && makepkg --printsrcinfo > .SRCINFO)
+
+            git clone "ssh://aur@aur.archlinux.org/$pkg.git" "$work/aur-$pkg"
+            cp "$dir/PKGBUILD" "$dir/.SRCINFO" "$work/aur-$pkg/"
+            cd "$work/aur-$pkg"
+            git add PKGBUILD .SRCINFO
+            if git diff --cached --quiet; then
+              echo "$pkg $version is already on the AUR."
+            else
+              git commit -m "Update to $version"
+              git push origin HEAD:master
+            fi
+            cd "$work"
+          done
+          PUBLISH
+          # shellcheck disable=SC2016  # $0 and $@ are meant to expand in the builder shell
+          su builder -c 'bash "$0" "$@"' -- "$script" "$version" "$repo" "$work"
