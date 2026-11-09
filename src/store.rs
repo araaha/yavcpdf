@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::config::user_dir;
-use crate::form::FormValue;
+use crate::form::{FormValue, Hidden};
 use crate::view::Anchor;
 
 /// A link from one place in the document to another, shown beside the source.
@@ -166,6 +166,10 @@ pub struct Sidecar {
     /// What was filled into the form, by the fully qualified name of the field. Only the fields
     /// that were changed are here.
     pub form: BTreeMap<String, FormValue>,
+    /// Widgets the form's show and hide buttons changed, by the fully qualified name of their
+    /// field, then their place in it: `true` is hidden. Only the widgets that differ from the
+    /// document are here.
+    pub hidden: Hidden,
     pub next_id: u64,
 }
 

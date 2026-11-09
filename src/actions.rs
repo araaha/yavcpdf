@@ -358,6 +358,9 @@ impl App {
                 Edit::Replaced { before: after, after: before }
             }
             Edit::Form(changes) => self.apply_form_edit(changes),
+            Edit::Hidden(changes) => self.apply_hidden_edit(changes),
+            // Undone in the opposite order, so that the opposite redoes them in the first.
+            Edit::Group(steps) => Edit::Group(steps.into_iter().rev().map(|s| self.apply_edit(s)).collect()),
         }
     }
 
@@ -584,7 +587,7 @@ impl App {
             return;
         }
         let (bytes, pages) = (self.doc.bytes.clone(), &self.doc.info.pages);
-        let result = crate::export::export(bytes, self.doc.password(), pages, &self.side.annotations, &self.side.form, &path);
+        let result = crate::export::export(bytes, self.doc.password(), pages, &self.side.annotations, &self.side.form, &self.side.hidden, &path);
         self.say(match result {
             Ok(report) => exported_message(self.side.annotations.len(), report, &path),
             Err(e) => format!("export failed: {e}"),

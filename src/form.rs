@@ -68,7 +68,12 @@ pub enum ButtonCmd {
     GoTo(usize),
     Uri(String),
     Submit,
-    Hide,
+    /// Shows or hides the widgets of `targets`. A target list too long to be read whole is
+    /// `Unsupported` instead.
+    Hide {
+        targets: Vec<HideTarget>,
+        hide: bool,
+    },
     /// A JavaScript action.
     Script,
     /// Some other action, or one that can't be read.
@@ -141,8 +146,80 @@ fn reset_targets(doc: &Document, action: &Dict) -> Result<Option<Vec<String>>, (
     Ok(Some(items.iter().filter_map(name).collect()))
 }
 
-/// A reset action naming more fields than this is not read.
+/// A reset or hide action naming more fields than this is not read.
 const MAX_TARGETS: usize = 10_000;
+
+/// What a hide action (`/T`, ISO 32000-2 §12.6.4.11) names.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum HideTarget {
+    /// Every widget of the field with this fully qualified name, and of the fields under it.
+    Name(String),
+    /// One widget annotation (or a field merged with its only widget).
+    Widget(ObjRef),
+}
+
+/// The targets of a hide action's `/T`: a field name, a reference to a widget or a field, or an
+/// array of them. `Err` when the list is too long to be read whole. An annotation that is no
+/// widget, and anything else, names nothing.
+fn hide_targets(doc: &Document, action: &Dict) -> Result<Vec<HideTarget>, ()> {
+    let Some(list) = action.get(b"T") else { return Ok(Vec::new()) };
+    let target = |o: &Object| match o {
+        Object::Ref(r) => match &*doc.get(*r) {
+            Object::String(s) => Some(HideTarget::Name(s.to_text())),
+            Object::Dict(d) if d.name(b"Subtype") == Some(b"Widget") => Some(HideTarget::Widget(*r)),
+            Object::Dict(d) if d.get(b"Subtype").is_none() => qualified_name(doc, *r).map(HideTarget::Name),
+            _ => None,
+        },
+        other => text_of(other).map(HideTarget::Name),
+    };
+    match &*doc.resolve(list) {
+        Object::Array(items) if items.len() > MAX_TARGETS => Err(()),
+        Object::Array(items) => Ok(items.iter().filter_map(target).collect()),
+        _ => Ok(target(list).into_iter().collect()),
+    }
+}
+
+/// The widgets that hide `targets` name, as their field's name and their place in it, in order
+/// and each once. A name is a field's own or one of its ancestors'.
+pub fn hide_widgets(all: &[Field], targets: &[HideTarget]) -> Vec<(String, usize)> {
+    let names: Vec<String> = targets.iter().filter_map(|t| if let HideTarget::Name(n) = t { Some(n.clone()) } else { None }).collect();
+    let named: HashSet<String> = if names.is_empty() { HashSet::new() } else { reset_names(all, Some(&names), false).into_iter().collect() };
+    let refs: HashSet<ObjRef> = targets.iter().filter_map(|t| if let HideTarget::Widget(r) = t { Some(*r) } else { None }).collect();
+    let mut out = Vec::new();
+    for field in all {
+        let whole = named.contains(&field.name);
+        for (wi, widget) in field.widgets.iter().enumerate() {
+            if whole || refs.contains(&widget.obj) {
+                out.push((field.name.clone(), wi));
+            }
+        }
+    }
+    out
+}
+
+/// Widgets a form's show and hide buttons changed, by their field's fully qualified name, then
+/// their place in the field: `true` is hidden.
+pub type Hidden = BTreeMap<String, BTreeMap<usize, bool>>;
+
+/// The annotation flags Hidden and NoView (ISO 32000-2 §12.5.3, Table 167): a widget with either
+/// doesn't show.
+const HIDDEN: i64 = 2;
+const NO_VIEW: i64 = 32;
+
+/// Shows or hides the widgets `hidden` names, in `doc`, whose fields are `all`. Hiding sets the
+/// Hidden flag, and showing clears it and NoView. A widget that is no longer there is left out.
+pub fn apply_hidden(doc: &mut Document, all: &[Field], hidden: &Hidden) {
+    for field in all {
+        let Some(widgets) = hidden.get(&field.name) else { continue };
+        for (wi, hide) in widgets {
+            let Some(widget) = field.widgets.get(*wi) else { continue };
+            let flags = doc.get(widget.obj).as_dict().and_then(|d| d.get(b"F").map(|f| doc.resolve(f))).and_then(|f| f.as_int()).unwrap_or(0);
+            let flags = if *hide { flags | HIDDEN } else { flags & !(HIDDEN | NO_VIEW) };
+            // A widget that isn't a dictionary can't be changed, and isn't drawn anyway.
+            let _ = doc.update_dict(widget.obj, |d| d.set(b"F", Object::Int(flags)));
+        }
+    }
+}
 
 /// The page, 0-based, that a destination (an explicit array, a dictionary with `/D`, or the name
 /// of one) is on.
@@ -269,7 +346,11 @@ pub fn button_command(doc: &Document, field: &Field, widget: usize) -> ButtonCmd
         },
         Some(b"GoTo") => a.get(b"D").and_then(|d| dest_page(doc, d, 0)).map_or(ButtonCmd::Unsupported, ButtonCmd::GoTo),
         Some(b"SubmitForm") => ButtonCmd::Submit,
-        Some(b"Hide") => ButtonCmd::Hide,
+        Some(b"Hide") => {
+            // `/H` is true unless it is false (ISO 32000-2 Table 205).
+            let hide = !matches!(get(b"H").as_deref(), Some(Object::Bool(false)));
+            hide_targets(doc, a).map_or(ButtonCmd::Unsupported, |targets| ButtonCmd::Hide { targets, hide })
+        }
         _ => ButtonCmd::Unsupported,
     }
 }
@@ -281,6 +362,8 @@ pub struct FormInfo {
     pub fields: Vec<Field>,
     /// The value each field has in the document itself.
     pub base: HashMap<String, FormValue>,
+    /// The widgets the document itself hides, by field name and place in the field.
+    pub base_hidden: HashSet<(String, usize)>,
     /// The form has been read once.
     pub ready: bool,
 }
@@ -298,6 +381,7 @@ pub struct Built {
     pub render: Option<Vec<u8>>,
     pub fields: Vec<Field>,
     pub base: HashMap<String, FormValue>,
+    pub base_hidden: HashSet<(String, usize)>,
     /// Values that couldn't be put in, with why.
     pub failed: Vec<(String, String)>,
     /// The values that were tried, to tell a failure of one from a newer value of the same field.
@@ -330,29 +414,38 @@ pub fn fill(doc: &mut Document, values: &BTreeMap<String, FormValue>) -> Filled 
     }
 }
 
-fn build_inner(bytes: Arc<Vec<u8>>, password: Option<&str>, values: &BTreeMap<String, FormValue>) -> Result<Built, String> {
+fn build_inner(bytes: Arc<Vec<u8>>, password: Option<&str>, values: &BTreeMap<String, FormValue>, hidden: &Hidden) -> Result<Built, String> {
     let mut doc = Document::open_with_password(bytes, password).map_err(|e| format!("{e:?}"))?;
     let before = fields(&doc);
     if before.is_empty() {
         return Ok(Built::default());
     }
     let base = before.iter().map(|f| (f.name.clone(), FormValue::of(f))).collect();
+    let base_hidden = hidden_widgets(&before);
     let (_, failed, recalc) = fill(&mut doc, values);
-    let now = if values.is_empty() { before } else { fields(&doc) };
+    apply_hidden(&mut doc, &before, hidden);
+    let untouched = values.is_empty() && hidden.is_empty();
+    let now = if untouched { before } else { fields(&doc) };
     // Fields that came with no look of their own, or that the form leaves for a viewer to draw.
     let shown = with_field_appearances(&doc);
-    let render = if values.is_empty() && shown.is_none() {
+    let render = if untouched && shown.is_none() {
         None
     } else {
         Some(write_incremental(shown.as_ref().unwrap_or(&doc), &SaveOptions::default()).map_err(|e| format!("{e:?}"))?)
     };
-    Ok(Built { render, fields: now, base, failed, tried: values.clone(), recalc })
+    Ok(Built { render, fields: now, base, base_hidden, failed, tried: values.clone(), recalc })
 }
 
-/// Reads the form of a document and fills it with `values`. The document came from a stranger, and
-/// a panic here must not take the viewer with it.
-pub fn build(bytes: Arc<Vec<u8>>, password: Option<&str>, values: &BTreeMap<String, FormValue>) -> Result<Built, String> {
-    catch_unwind(AssertUnwindSafe(|| build_inner(bytes, password, values))).map_err(|_| "the form could not be read".to_owned())?
+/// The widgets of `all` that don't show, by field name and place in the field.
+fn hidden_widgets(all: &[Field]) -> HashSet<(String, usize)> {
+    let each = |f: &Field| f.widgets.iter().enumerate().filter(|(_, w)| w.hidden).map(|(wi, _)| (f.name.clone(), wi)).collect::<Vec<_>>();
+    all.iter().flat_map(each).collect()
+}
+
+/// Reads the form of a document, fills it with `values` and shows or hides the widgets `hidden`
+/// names. The document came from a stranger, and a panic here must not take the viewer with it.
+pub fn build(bytes: Arc<Vec<u8>>, password: Option<&str>, values: &BTreeMap<String, FormValue>, hidden: &Hidden) -> Result<Built, String> {
+    catch_unwind(AssertUnwindSafe(|| build_inner(bytes, password, values, hidden))).map_err(|_| "the form could not be read".to_owned())?
 }
 
 /// What an export did with the form.
@@ -709,6 +802,54 @@ pub struct FormChange {
     pub after: Option<FormValue>,
 }
 
+/// A change to whether one widget shows, for undo: `None` is as the document has it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct HideChange {
+    pub name: String,
+    pub widget: usize,
+    pub before: Option<bool>,
+    pub after: Option<bool>,
+}
+
+/// What showing (`hide` false) or hiding the widgets `keys` changes, given what the document
+/// hides itself and what is stored. A widget already so is left out, and one put back as the
+/// document has it is stored as no change at all.
+pub fn hide_changes(keys: &[(String, usize)], hide: bool, base_hidden: &HashSet<(String, usize)>, stored: &Hidden) -> Vec<HideChange> {
+    let mut seen = HashSet::new();
+    let mut out = Vec::new();
+    for key in keys {
+        if !seen.insert(key) {
+            continue;
+        }
+        let (name, widget) = (key.0.clone(), key.1);
+        let own = base_hidden.contains(key);
+        let before = stored.get(&name).and_then(|w| w.get(&widget)).copied();
+        if before.unwrap_or(own) == hide {
+            continue;
+        }
+        let after = (own != hide).then_some(hide);
+        out.push(HideChange { name, widget, before, after });
+    }
+    out
+}
+
+/// Puts `change.after` into `stored`, dropping a field left with nothing.
+fn store_hidden(stored: &mut Hidden, name: &str, widget: usize, value: Option<bool>) {
+    match value {
+        Some(hide) => {
+            stored.entry(name.to_owned()).or_default().insert(widget, hide);
+        }
+        None => {
+            if let Some(widgets) = stored.get_mut(name) {
+                widgets.remove(&widget);
+                if widgets.is_empty() {
+                    stored.remove(name);
+                }
+            }
+        }
+    }
+}
+
 /// Drops the newest undo step's change of `name` to `value`: it was rejected, and undoing or
 /// redoing it would only bring it back. Gives the value the change replaced (`Some(None)` when
 /// there was none), or `None` when no step holds the change.
@@ -748,12 +889,13 @@ impl App {
     }
 
     fn start_form_job(&mut self, ctx: &egui::Context) {
-        let (bytes, password, values) = (self.doc.bytes.clone(), self.doc.password().map(str::to_owned), self.side.form.clone());
+        let (bytes, password) = (self.doc.bytes.clone(), self.doc.password().map(str::to_owned));
+        let (values, hidden) = (self.side.form.clone(), self.side.hidden.clone());
         let (send, receive) = std::sync::mpsc::channel();
         let repaint = ctx.clone();
         let work = move || {
             // The viewer may have moved on to another document by now, with nothing left to tell.
-            let _ = send.send(build(bytes, password.as_deref(), &values));
+            let _ = send.send(build(bytes, password.as_deref(), &values, &hidden));
             repaint.request_repaint();
         };
         match std::thread::Builder::new().name("form".to_owned()).spawn(work) {
@@ -799,8 +941,8 @@ impl App {
             // Not the fault of any one value, and the same again on a second try.
             self.say(format!("the calculated fields: {why}"));
         }
-        let Built { render, fields, base, .. } = built;
-        self.doc.form = FormInfo { fields, base, ready: true };
+        let Built { render, fields, base, base_hidden, .. } = built;
+        self.doc.form = FormInfo { fields, base, base_hidden, ready: true };
         let bytes = match render {
             Some(bytes) => Arc::new(bytes),
             None if Arc::ptr_eq(&self.doc.render_bytes, &self.doc.bytes) => return,
@@ -865,15 +1007,70 @@ impl App {
         Edit::Form(changes.into_iter().map(|c| FormChange { name: c.name, before: c.after, after: c.before }).collect())
     }
 
-    /// Forgets every value filled in.
+    /// Puts back what `changes` say was before, returning what undoes that.
+    pub fn apply_hidden_edit(&mut self, changes: Vec<HideChange>) -> Edit {
+        for change in &changes {
+            store_hidden(&mut self.side.hidden, &change.name, change.widget, change.before);
+        }
+        self.form_changed();
+        Edit::Hidden(changes.into_iter().map(|c| HideChange { before: c.after, after: c.before, ..c }).collect())
+    }
+
+    /// Shows or hides widgets as one undoable step, and says what became of them.
+    fn show_hide(&mut self, targets: &[HideTarget], hide: bool) {
+        let keys = hide_widgets(&self.doc.form.fields, targets);
+        if keys.is_empty() {
+            self.say("this button shows or hides nothing");
+            return;
+        }
+        let changes = hide_changes(&keys, hide, &self.doc.form.base_hidden, &self.side.hidden);
+        let (done, already) = if hide { ("hid", "already hidden") } else { ("showed", "already showing") };
+        if changes.is_empty() {
+            self.say(already);
+            return;
+        }
+        let fields: HashSet<&str> = changes.iter().map(|c| c.name.as_str()).collect();
+        let what = if fields.len() == 1 { "1 field".to_owned() } else { format!("{} fields", fields.len()) };
+        self.say(format!("{done} {what}"));
+        for change in &changes {
+            store_hidden(&mut self.side.hidden, &change.name, change.widget, change.after);
+        }
+        self.undo.push(Edit::Hidden(changes));
+        self.redo.clear();
+        self.form_changed();
+    }
+
+    /// Forgets every value filled in, and every widget shown or hidden, as one undoable step.
     pub fn clear_form(&mut self) {
         let names: Vec<String> = self.side.form.keys().cloned().collect();
-        if names.is_empty() {
+        let hidden: Vec<HideChange> = self
+            .side
+            .hidden
+            .iter()
+            .flat_map(|(name, widgets)| {
+                widgets.iter().map(|(wi, hide)| HideChange { name: name.clone(), widget: *wi, before: Some(*hide), after: None })
+            })
+            .collect();
+        if names.is_empty() && hidden.is_empty() {
             self.say("no filled-in values");
             return;
         }
-        self.change_form(names.iter().map(|n| (n.clone(), None)).collect());
-        self.say(format!("cleared {} filled-in fields", names.len()));
+        let values: Vec<FormChange> =
+            names.iter().map(|n| FormChange { name: n.clone(), before: self.side.form.get(n).cloned(), after: None }).collect();
+        self.side.form.clear();
+        self.side.hidden.clear();
+        let mut steps = Vec::new();
+        if !values.is_empty() {
+            steps.push(Edit::Form(values));
+        }
+        if !hidden.is_empty() {
+            steps.push(Edit::Hidden(hidden.clone()));
+        }
+        self.undo.push(if steps.len() == 1 { steps.remove(0) } else { Edit::Group(steps) });
+        self.redo.clear();
+        self.form_changed();
+        let shown = if hidden.is_empty() { String::new() } else { format!(", and put back {} shown or hidden widgets", hidden.len()) };
+        self.say(format!("cleared {} filled-in fields{shown}", names.len()));
     }
 
     /// The widgets that can be picked on the pages showing.
@@ -1016,7 +1213,7 @@ impl App {
             ButtonCmd::GoTo(page) => self.jump_to_page(page),
             ButtonCmd::Uri(uri) => self.open_uri(&uri),
             ButtonCmd::Submit => self.say("submitting a form isn't supported: yavcpdf never sends it anywhere"),
-            ButtonCmd::Hide => self.say("show and hide buttons aren't supported"),
+            ButtonCmd::Hide { targets, hide } => self.show_hide(&targets, hide),
             ButtonCmd::Script => self.say("this button needs JavaScript, which yavcpdf doesn't run"),
             ButtonCmd::Unsupported => self.say("this button's action isn't supported"),
             ButtonCmd::Nothing => self.say("this button does nothing"),
@@ -1106,7 +1303,7 @@ mod tests {
             ("colour", FormValue::Choice(vec!["Green".into()])),
             ("size", FormValue::Radio(Some(on.clone()))),
         ]);
-        let built = build(Arc::new(bytes), None, &set).unwrap();
+        let built = build(Arc::new(bytes), None, &set, &Hidden::new()).unwrap();
         assert!(built.failed.is_empty(), "{:?}", built.failed);
         let by = |n: &str| built.fields.iter().find(|f| f.name == n).unwrap();
         assert_eq!(FormValue::of(by("name")), FormValue::Text("Ada".into()));
@@ -1120,7 +1317,7 @@ mod tests {
 
     #[test]
     fn a_form_with_no_values_and_looks_of_its_own_renders_as_it_is() {
-        let built = build(Arc::new(form_pdf()), None, &BTreeMap::new()).unwrap();
+        let built = build(Arc::new(form_pdf()), None, &BTreeMap::new(), &Hidden::new()).unwrap();
         assert!(built.render.is_none());
         assert_eq!(built.fields.len(), 5);
     }
@@ -1128,7 +1325,7 @@ mod tests {
     #[test]
     fn a_value_that_cannot_go_in_is_reported_and_the_rest_still_do() {
         let set = values(&[("name", FormValue::Text("Ada".into())), ("nobody", FormValue::Text("x".into()))]);
-        let built = build(Arc::new(form_pdf()), None, &set).unwrap();
+        let built = build(Arc::new(form_pdf()), None, &set, &Hidden::new()).unwrap();
         assert_eq!(built.failed.len(), 1);
         assert_eq!(built.failed[0].0, "nobody");
         assert_eq!(FormValue::of(built.fields.iter().find(|f| f.name == "name").unwrap()), FormValue::Text("Ada".into()));
@@ -1136,9 +1333,9 @@ mod tests {
 
     #[test]
     fn a_document_with_no_form_has_no_fields() {
-        let built = build(Arc::new(tiny_pdf()), None, &BTreeMap::new()).unwrap();
+        let built = build(Arc::new(tiny_pdf()), None, &BTreeMap::new(), &Hidden::new()).unwrap();
         assert!(built.fields.is_empty() && built.render.is_none());
-        assert!(build(Arc::new(b"not a pdf".to_vec()), None, &BTreeMap::new()).is_err());
+        assert!(build(Arc::new(b"not a pdf".to_vec()), None, &BTreeMap::new(), &Hidden::new()).is_err());
     }
 
     #[test]
@@ -1599,7 +1796,7 @@ mod tests {
         let doc = button_with(named("SubmitForm"));
         assert_eq!(button_command(&doc, &field(&doc, "go"), 0), ButtonCmd::Submit);
         let doc = button_with(named("Hide"));
-        assert_eq!(button_command(&doc, &field(&doc, "go"), 0), ButtonCmd::Hide);
+        assert_eq!(button_command(&doc, &field(&doc, "go"), 0), ButtonCmd::Hide { targets: Vec::new(), hide: true });
         let doc = button_with(named("Launch"));
         assert_eq!(button_command(&doc, &field(&doc, "go"), 0), ButtonCmd::Unsupported);
     }
@@ -1652,6 +1849,109 @@ mod tests {
         assert_eq!(cmd(&d), ButtonCmd::Reset { fields: None, exclude: false });
         let d = button_pdf("", "");
         assert_eq!(cmd(&d), ButtonCmd::Nothing);
+    }
+
+    fn obj(num: u32) -> ObjRef {
+        ObjRef { num, generation: 0 }
+    }
+
+    #[test]
+    fn hide_actions_name_their_targets() {
+        let hide = |t: &str| cmd(&button_pdf("", &format!("/A << /S /Hide {t} >>")));
+        let name = |n: &str| HideTarget::Name(n.into());
+        assert_eq!(hide("/T (a.b)"), ButtonCmd::Hide { targets: vec![name("a.b")], hide: true });
+        assert_eq!(hide("/T (a) /H false"), ButtonCmd::Hide { targets: vec![name("a")], hide: false });
+        assert_eq!(hide("/T (a) /H true"), ButtonCmd::Hide { targets: vec![name("a")], hide: true });
+        // A widget by reference, and a field by reference, which goes by its name.
+        assert_eq!(hide("/T [(a) 5 0 R 4 0 R]"), ButtonCmd::Hide { targets: vec![name("a"), HideTarget::Widget(obj(5)), name("go")], hide: true });
+        assert_eq!(hide("/T 5 0 R"), ButtonCmd::Hide { targets: vec![HideTarget::Widget(obj(5))], hide: true });
+        // The page is no field and no widget, and a number names nothing.
+        assert_eq!(hide("/T [3 0 R 7]"), ButtonCmd::Hide { targets: Vec::new(), hide: true });
+        assert_eq!(hide(""), ButtonCmd::Hide { targets: Vec::new(), hide: true });
+        let many = format!("/T [{}]", "(x) ".repeat(MAX_TARGETS + 1));
+        assert_eq!(hide(&many), ButtonCmd::Unsupported, "a list too long to read whole");
+    }
+
+    #[test]
+    fn a_hide_target_reaches_every_widget_of_a_field_and_its_kids_or_just_one() {
+        let all = fields(&open(form_pdf()));
+        let name = |n: &str| HideTarget::Name(n.into());
+        assert_eq!(hide_widgets(&all, &[name("size")]), [("size".to_owned(), 0), ("size".to_owned(), 1)]);
+        let second = all.iter().find(|f| f.name == "size").unwrap().widgets[1].obj;
+        assert_eq!(hide_widgets(&all, &[HideTarget::Widget(second)]), [("size".to_owned(), 1)]);
+        assert_eq!(hide_widgets(&all, &[name("size"), HideTarget::Widget(second)]).len(), 2, "each widget once");
+        assert!(hide_widgets(&all, &[name("nobody"), HideTarget::Widget(obj(9999))]).is_empty());
+        let kids = named_fields(&["a", "a.b", "ab"]);
+        let hit: Vec<String> = hide_widgets(&kids, &[name("a")]).into_iter().map(|(n, _)| n).collect();
+        assert_eq!(hit, ["a", "a.b"], "a parent hides its kids, not 'ab'");
+    }
+
+    #[test]
+    fn hiding_and_showing_store_only_what_differs_from_the_document() {
+        let key = |n: &str| (n.to_owned(), 0);
+        let base: HashSet<(String, usize)> = [key("own")].into();
+        let change = |n: &str, before, after| HideChange { name: n.into(), widget: 0, before, after };
+        let none = Hidden::new();
+        assert_eq!(hide_changes(&[key("a")], true, &base, &none), [change("a", None, Some(true))]);
+        assert_eq!(hide_changes(&[key("a")], false, &base, &none), [], "already showing");
+        assert_eq!(hide_changes(&[key("own")], false, &base, &none), [change("own", None, Some(false))]);
+        assert_eq!(hide_changes(&[key("own")], true, &base, &none), [], "already hidden by the document");
+        let stored: Hidden = [("a".to_owned(), [(0, true)].into()), ("own".to_owned(), [(0, false)].into())].into();
+        assert_eq!(hide_changes(&[key("a")], false, &base, &stored), [change("a", Some(true), None)], "back as the document has it");
+        assert_eq!(hide_changes(&[key("own")], true, &base, &stored), [change("own", Some(false), None)]);
+        assert_eq!(hide_changes(&[key("a"), key("a")], false, &base, &stored).len(), 1, "each widget once");
+    }
+
+    #[test]
+    fn stored_visibility_drops_a_field_left_with_nothing() {
+        let mut stored = Hidden::new();
+        store_hidden(&mut stored, "a", 1, Some(true));
+        store_hidden(&mut stored, "a", 2, Some(false));
+        assert_eq!(stored["a"], [(1, true), (2, false)].into());
+        store_hidden(&mut stored, "a", 1, None);
+        store_hidden(&mut stored, "a", 2, None);
+        store_hidden(&mut stored, "b", 0, None);
+        assert!(stored.is_empty());
+    }
+
+    #[test]
+    fn visibility_survives_the_sidecar() {
+        let stored: Hidden = [("a.b".to_owned(), [(0, true), (3, false)].into())].into();
+        let json = serde_json::to_string(&stored).unwrap();
+        assert_eq!(serde_json::from_str::<Hidden>(&json).unwrap(), stored);
+    }
+
+    #[test]
+    fn hidden_widgets_render_hidden_and_shown_ones_show() {
+        let hidden: Hidden = [("go".to_owned(), [(0, true)].into())].into();
+        let built = build(Arc::new(form_pdf()), None, &BTreeMap::new(), &hidden).unwrap();
+        let go = |b: &Built| b.fields.iter().find(|f| f.name == "go").unwrap().widgets[0].clone();
+        assert!(go(&built).hidden && !usable(&go(&built)), "a hidden button can't be pressed");
+        assert!(built.base_hidden.is_empty(), "the document itself hides nothing");
+        let render = built.render.expect("rendered from a copy");
+        // Shown again, from a document that hides it.
+        let shown: Hidden = [("go".to_owned(), [(0, false)].into())].into();
+        let again = build(Arc::new(render), None, &BTreeMap::new(), &shown).unwrap();
+        assert!(again.base_hidden.contains(&("go".to_owned(), 0)));
+        assert!(!go(&again).hidden && usable(&go(&again)));
+    }
+
+    #[test]
+    fn showing_clears_no_view_and_hiding_keeps_the_other_flags() {
+        let flags = |widget_extra: &str, hide: bool| {
+            let mut doc = button_pdf("", widget_extra);
+            let all = fields(&doc);
+            apply_hidden(&mut doc, &all, &[("go".to_owned(), [(0, hide)].into())].into());
+            doc.get(obj(5)).as_dict().unwrap().get(b"F").and_then(Object::as_int)
+        };
+        assert_eq!(flags("/F 36", false), Some(4), "NoView and Hidden go, Print stays");
+        assert_eq!(flags("/F 4", true), Some(6));
+        assert_eq!(flags("", true), Some(2));
+        // A widget index the field doesn't have is left alone.
+        let mut doc = button_pdf("", "/F 4");
+        let all = fields(&doc);
+        apply_hidden(&mut doc, &all, &[("go".to_owned(), [(7, true)].into())].into());
+        assert_eq!(doc.get(obj(5)).as_dict().unwrap().get(b"F").and_then(Object::as_int), Some(4));
     }
 
     #[test]
@@ -1775,15 +2075,15 @@ mod tests {
         ];
         let set = values(&[("a", FormValue::Text("x".into())), ("b", FormValue::Check(true))]);
         for bytes in inputs {
-            let _ = build(Arc::new(bytes.clone()), None, &BTreeMap::new());
-            let _ = build(Arc::new(bytes), None, &set);
+            let _ = build(Arc::new(bytes.clone()), None, &BTreeMap::new(), &Hidden::new());
+            let _ = build(Arc::new(bytes), None, &set, &Hidden::new());
         }
     }
 
     #[test]
     fn non_form_pdf_with_values_has_no_fields_and_no_failures() {
         let set = values(&[("a", FormValue::Text("x".into()))]);
-        let built = build(Arc::new(tiny_pdf()), None, &set).unwrap();
+        let built = build(Arc::new(tiny_pdf()), None, &set, &Hidden::new()).unwrap();
         assert!(built.fields.is_empty());
         assert!(built.render.is_none());
     }
@@ -1794,7 +2094,7 @@ mod tests {
         let name = field(&doc, "name").obj;
         doc.update_dict(name, |d| d.set(b"Ff", Object::Int(1))).unwrap();
         let bytes = write_incremental(&doc, &SaveOptions::default()).unwrap();
-        let built = build(Arc::new(bytes), None, &values(&[("name", FormValue::Text("x".into()))])).unwrap();
+        let built = build(Arc::new(bytes), None, &values(&[("name", FormValue::Text("x".into()))]), &Hidden::new()).unwrap();
         assert_eq!(built.failed.len(), 1, "{:?}", built.failed);
     }
 
@@ -1805,17 +2105,17 @@ mod tests {
         let name = field(&doc, "name").obj;
         doc.update_dict(name, |d| d.set(b"MaxLen", Object::Int(2))).unwrap();
         let bytes = write_incremental(&doc, &SaveOptions::default()).unwrap();
-        let built = build(Arc::new(bytes), None, &values(&[("name", FormValue::Text("abcdef".into()))])).unwrap();
+        let built = build(Arc::new(bytes), None, &values(&[("name", FormValue::Text("abcdef".into()))]), &Hidden::new()).unwrap();
         eprintln!("failed={:?} value={:?}", built.failed, built.fields.iter().find(|f| f.name == "name").map(|f| f.value.clone()));
     }
 
     #[test]
     fn radio_with_unknown_state_and_choice_with_unknown_value() {
         let set = values(&[("size", FormValue::Radio(Some("XXL".into())))]);
-        let built = build(Arc::new(form_pdf()), None, &set).unwrap();
+        let built = build(Arc::new(form_pdf()), None, &set, &Hidden::new()).unwrap();
         eprintln!("radio unknown: failed={:?}", built.failed);
         let set = values(&[("colour", FormValue::Choice(vec!["Mauve".into()]))]);
-        let built = build(Arc::new(form_pdf()), None, &set).unwrap();
+        let built = build(Arc::new(form_pdf()), None, &set, &Hidden::new()).unwrap();
         eprintln!("combo unknown: failed={:?}", built.failed);
     }
 
@@ -1830,9 +2130,9 @@ mod tests {
     fn unchecking_and_clearing_through_fill() {
         let bytes = form_pdf();
         let set = values(&[("agree", FormValue::Check(true)), ("name", FormValue::Text("x".into()))]);
-        let on = build(Arc::new(bytes), None, &set).unwrap().render.unwrap();
+        let on = build(Arc::new(bytes), None, &set, &Hidden::new()).unwrap().render.unwrap();
         let set = values(&[("agree", FormValue::Check(false)), ("name", FormValue::Text(String::new()))]);
-        let off = build(Arc::new(on), None, &set).unwrap();
+        let off = build(Arc::new(on), None, &set, &Hidden::new()).unwrap();
         let by = |n: &str| FormValue::of(off.fields.iter().find(|f| f.name == n).unwrap());
         assert_eq!(by("agree"), FormValue::Check(false));
         assert_eq!(by("name"), FormValue::Text(String::new()));
@@ -1865,7 +2165,7 @@ mod tests {
     #[test]
     fn a_failed_recalculation_is_told_apart_from_a_failed_value() {
         // Nothing to recalculate here, so no error: a value alone that fails is a failure of its own.
-        let built = build(Arc::new(form_pdf()), None, &values(&[("nobody", FormValue::Text("x".into()))])).unwrap();
+        let built = build(Arc::new(form_pdf()), None, &values(&[("nobody", FormValue::Text("x".into()))]), &Hidden::new()).unwrap();
         assert!(built.recalc.is_none());
         assert_eq!(built.failed.len(), 1);
         assert_eq!(built.tried["nobody"], FormValue::Text("x".into()), "the values tried come back");
@@ -1924,7 +2224,7 @@ mod tests {
     fn hostile(field_extra: &str, widget_extra: &str, catalog_extra: &str, more: Vec<String>) -> ButtonCmd {
         let bytes = hostile_pdf(field_extra, widget_extra, catalog_extra, &more);
         guarded(move || {
-            let _ = build(Arc::new(bytes.clone()), None, &BTreeMap::new()).expect("build");
+            let _ = build(Arc::new(bytes.clone()), None, &BTreeMap::new(), &Hidden::new()).expect("build");
             let doc = open(bytes);
             button_command(&doc, &field(&doc, "go"), 0)
         })
@@ -2262,7 +2562,7 @@ mod tests {
             ("name", FormValue::Text("Ada".into())),
             ("agree", FormValue::Radio(Some("x".into()))),
         ]);
-        let built = build(Arc::new(form_pdf()), None, &vals).unwrap();
+        let built = build(Arc::new(form_pdf()), None, &vals, &Hidden::new()).unwrap();
         assert!(built.recalc.is_none(), "{:?}", built.recalc);
         let failed: Vec<&str> = built.failed.iter().map(|(n, _)| n.as_str()).collect();
         assert!(failed.contains(&"nobody"), "{failed:?}");
@@ -2283,14 +2583,14 @@ mod tests {
         assert_eq!((n, failed.len()), (0, 2));
         assert!(recalc.is_none());
         // Non-form build gives the default Built.
-        let b = build(Arc::new(tiny_pdf()), None, &values(&[("a", FormValue::Text("x".into()))])).unwrap();
+        let b = build(Arc::new(tiny_pdf()), None, &values(&[("a", FormValue::Text("x".into()))]), &Hidden::new()).unwrap();
         assert!(b.recalc.is_none() && b.failed.is_empty() && b.tried.is_empty() && b.render.is_none());
     }
 
     #[test]
     fn built_tried_echoes_the_values_when_nothing_failed() {
         let vals = values(&[("name", FormValue::Text("Bo".into())), ("agree", FormValue::Check(true))]);
-        let b = build(Arc::new(form_pdf()), None, &vals).unwrap();
+        let b = build(Arc::new(form_pdf()), None, &vals, &Hidden::new()).unwrap();
         assert!(b.failed.is_empty(), "{:?}", b.failed);
         assert!(b.recalc.is_none());
         assert_eq!(b.tried, vals);
@@ -2442,7 +2742,7 @@ mod tests {
         eprintln!("original order: {names:?}");
         assert_eq!(of.len(), 7, "{names:?}");
         let set = values(&[("t1", FormValue::Text("hello".into())), ("t2", FormValue::Text("w".into())), ("grp.x", FormValue::Text("z".into()))]);
-        let built = build(Arc::new(bytes.clone()), None, &set).unwrap();
+        let built = build(Arc::new(bytes.clone()), None, &set, &Hidden::new()).unwrap();
         assert!(built.failed.is_empty(), "{:?}", built.failed);
         let render = built.render.clone().expect("rendered");
         // The same read of the filled render bytes, as the viewer re-reads them.
@@ -2488,7 +2788,7 @@ mod tests {
         let bytes = form_pdf();
         let orig = fields(&open(bytes.clone()));
         let set = values(&[("name", FormValue::Text("Ada".into())), ("agree", FormValue::Check(true))]);
-        let built = build(Arc::new(bytes), None, &set).unwrap();
+        let built = build(Arc::new(bytes), None, &set, &Hidden::new()).unwrap();
         let k = |fs: &[Field]| fs.iter().map(|f| (f.name.clone(), f.obj, f.widgets.iter().map(|w| w.obj).collect::<Vec<_>>())).collect::<Vec<_>>();
         assert_eq!(k(&orig), k(&built.fields));
         assert_eq!(k(&orig), k(&fields(&open(built.render.unwrap()))));

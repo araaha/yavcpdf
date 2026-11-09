@@ -382,14 +382,16 @@ one with no tool in hand, and then:
 - **Buttons** do what their PDF action says, when it isn't a script: reset the
   form (it removes the values you filled in, so the fields show what the
   document itself contains; a `/DV` default value is not applied), go to the
-  next, previous, first or last page or to a place, and open a web link. Other
-  buttons say why they do nothing.
+  next, previous, first or last page or to a place, open a web link, and show
+  or hide fields. Fields shown or hidden are kept with what you filled in, and
+  a hidden field can't be filled in until it shows again. Other buttons say why
+  they do nothing.
 
 Fields that calculate their value from others with Acrobat's built-in
 calculations (sum, product, average, minimum, maximum) update when those fields
 change. A calculation written as a script does not. Undo (<kbd>u</kbd>) and redo
 (<kbd>U</kbd>) go through the changes you made, and `:clearform` forgets all of
-them at once.
+them at once, putting back the fields a button showed or hid.
 
 What you fill in is kept beside the PDF, like annotations, and the PDF is never
 changed. What you fill in can be personal, so that file is readable only by you
@@ -402,7 +404,7 @@ page may take a moment to refresh after a change.
 > not supported, and nothing is ever sent. Password fields can't be filled in,
 > as what is typed would be kept as plain text in the sidecar. Signature fields
 > aren't supported either: sign with fill & sign (<kbd>t</kbd> <kbd>f</kbd>,
-> <kbd>t</kbd> <kbd>S</kbd>). Show and hide buttons are not supported.
+> <kbd>t</kbd> <kbd>S</kbd>).
 
 ### Portals
 

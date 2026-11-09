@@ -13,7 +13,7 @@ use crate::cache::{TileCache, TileKey};
 use crate::config::Config;
 use crate::doc::{Doc, OpenFailure, placeholder_pdf};
 use crate::field::Field;
-use crate::form::{FormChange, FormState};
+use crate::form::{FormChange, FormState, HideChange};
 use crate::hint::HintState;
 use crate::keymap::{Keymap, Pending};
 use crate::overview::Overview;
@@ -266,6 +266,10 @@ pub enum Edit {
     },
     /// Values filled into the form changed.
     Form(Vec<FormChange>),
+    /// Widgets were shown or hidden by a form's button.
+    Hidden(Vec<HideChange>),
+    /// Several changes made as one step.
+    Group(Vec<Edit>),
 }
 
 /// A portal being made: from where, and whether it replaces an existing one's target.
