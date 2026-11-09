@@ -284,7 +284,7 @@ impl App {
         let beside = Rect::from_min_size(icon.right_top() + vec2(6.0, 0.0), size);
         let area = if beside.right() > view.rect.right() { beside.translate(vec2(-(size.x + icon.width() + 12.0), 0.0)) } else { beside };
         painter.rect_filled(area, 0.0, theme.ui_background.egui());
-        painter.rect_stroke(area, 0.0, Stroke::new(1.0, theme.ui_accent.egui()), egui::StrokeKind::Inside);
+        painter.rect_stroke(area, 0.0, Stroke::new(self.config.view.border, theme.ui_accent.egui()), egui::StrokeKind::Inside);
         painter.galley(area.min + Vec2::splat(6.0), galley, theme.ui_text.egui());
     }
 
@@ -388,7 +388,7 @@ impl App {
             self.config.active_theme().ui_accent.egui(),
         );
         // It often has no title bar and the same colours as the window behind it.
-        painter.rect_stroke(area.shrink(1.0), 0.0, Stroke::new(2.0, self.config.active_theme().ui_accent.egui()), egui::StrokeKind::Inside);
+        painter.rect_stroke(area, 0.0, Stroke::new(self.config.view.border, self.config.active_theme().ui_accent.egui()), egui::StrokeKind::Inside);
         // Keys typed here work as in the main window; the wheel moves this portal's target.
         let events = ctx.input(|i| i.events.clone());
         self.keys(&ctx, &events);

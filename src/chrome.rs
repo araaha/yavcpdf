@@ -242,7 +242,7 @@ impl App {
         let rect = self.pad_rect();
         let pen = egui::Stroke::new(2.0, theme.ui_text.egui());
         painter.rect_filled(rect.expand(PADDING), 0.0, theme.ui_background.egui());
-        painter.rect_stroke(rect, 0.0, egui::Stroke::new(1.0, theme.ui_accent.egui()), egui::StrokeKind::Outside);
+        painter.rect_stroke(rect, 0.0, egui::Stroke::new(self.config.view.border, theme.ui_accent.egui()), egui::StrokeKind::Outside);
         let baseline = rect.bottom() - rect.height() * 0.25;
         painter
             .line_segment([pos2(rect.left() + 16.0, baseline), pos2(rect.right() - 16.0, baseline)], egui::Stroke::new(1.0, theme.ui_accent.egui()));
@@ -390,7 +390,7 @@ impl App {
         let _ = ui.interact(rect, ui.scope_id().with("hotbar"), Sense::click_and_drag());
         let theme = self.config.active_theme().clone();
         painter.rect_filled(rect, 0.0, theme.ui_background.egui());
-        let border = egui::Stroke::new(self.config.hotbar.border, theme.ui_accent.egui());
+        let border = egui::Stroke::new(self.config.hotbar.border.unwrap_or(self.config.view.border), theme.ui_accent.egui());
         painter.rect_stroke(rect, 0.0, border, egui::StrokeKind::Inside);
         let mut at = rect.min + Vec2::splat(PADDING / 2.0);
         let mut clicked = None;

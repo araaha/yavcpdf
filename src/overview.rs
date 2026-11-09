@@ -149,7 +149,7 @@ impl App {
             let mark = Rect::from_min_size(pos2(view.rect.left(), at.y), vec2(4.0, 12.0 * view.zoom));
             painter.rect_filled(mark, 0.0, theme.ui_accent.egui());
         }
-        painter.rect_stroke(view.rect.shrink(1.0), 0.0, Stroke::new(2.0, theme.ui_accent.egui()), StrokeKind::Inside);
+        painter.rect_stroke(view.rect, 0.0, Stroke::new(self.config.view.border, theme.ui_accent.egui()), StrokeKind::Inside);
         let page = view.current_page(&self.doc.layout) + 1;
         painter.text(
             view.rect.right_bottom() - vec2(8.0, 6.0),

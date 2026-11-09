@@ -23,6 +23,8 @@ pub struct Row {
     /// In page points, y down.
     pub rect: [f32; 4],
     pub target: (usize, f32),
+    /// Whether the destination names a point on the page, not just the page.
+    pub point: bool,
 }
 
 /// The left edges in use, most used first.
@@ -131,7 +133,7 @@ pub fn entries(rows: &[Row], text_of: impl Fn(usize) -> Option<std::sync::Arc<Pa
             }
             None => {
                 let depth = lefts.iter().position(|left| (left - row.rect[0]).abs() <= ALIGNED).unwrap_or(0);
-                out.push(TocEntry { title, depth, page: row.target.0, y: row.target.1 });
+                out.push(TocEntry { title, depth, page: row.target.0, y: row.target.1, point: row.point });
             }
         }
     }
@@ -151,7 +153,7 @@ mod tests {
 
     fn row(page: usize, left: f32, line: usize, target: usize) -> Row {
         let top = 100.0 + line as f32 * 15.0;
-        Row { page, rect: [left, top, left + 300.0, top + 12.0], target: (target, 0.0) }
+        Row { page, rect: [left, top, left + 300.0, top + 12.0], target: (target, 0.0), point: true }
     }
 
     /// Chapters at 72 and sections at 90, as a word processor's export has them.
@@ -230,7 +232,7 @@ mod tests {
     #[test]
     fn a_stray_link_does_not_spoil_a_page() {
         let mut links = listing_page(1, 10);
-        links.push(Row { page: 1, rect: [289.0, 20.0, 337.0, 32.0], target: (10, 0.0) });
+        links.push(Row { page: 1, rect: [289.0, 20.0, 337.0, 32.0], target: (10, 0.0), point: true });
         assert!(contents_rows(links).len() >= 6);
     }
 
@@ -275,7 +277,7 @@ mod tests {
 
     #[test]
     fn hostile_geometry_does_not_panic() {
-        let bad = Row { page: usize::MAX, rect: [f32::NAN, f32::INFINITY, f32::NAN, f32::NEG_INFINITY], target: (usize::MAX, f32::NAN) };
+        let bad = Row { page: usize::MAX, rect: [f32::NAN, f32::INFINITY, f32::NAN, f32::NEG_INFINITY], target: (usize::MAX, f32::NAN), point: true };
         assert_eq!(contents_rows(vec![bad; 9]), vec![]);
         assert_eq!(entries(&[bad], |_| Some(page_text(&[(72.0, "x")]))), vec![]);
     }

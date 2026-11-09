@@ -78,6 +78,9 @@ pub struct ViewConfig {
     pub restore_position: bool,
     pub highlight_links: bool,
     pub fullscreen: bool,
+    pub border: f32,
+    /// Where a jump puts its target: percent of the window height, 0 at the bottom to 100 at the top.
+    pub jump_position: f32,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -112,7 +115,8 @@ pub struct HotbarConfig {
     pub stroke_width: f32,
     pub fill_size: f32,
     pub date_format: String,
-    pub border: f32,
+    /// Overrides `view.border` for the hotbar alone.
+    pub border: Option<f32>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -190,6 +194,14 @@ impl Config {
         }
         if self.view.zoom_step <= 1.0 || self.view.min_zoom <= 0.0 || self.view.max_zoom < self.view.min_zoom {
             return Err("view: zoom_step must be above 1 and min_zoom..max_zoom a positive range".to_owned());
+        }
+        for (key, width) in [("view.border", Some(self.view.border)), ("hotbar.border", self.hotbar.border)] {
+            if let Some(width) = width.filter(|w| !w.is_finite() || !(0.0..=8.0).contains(w)) {
+                return Err(format!("{key} = {width} is out of range: use 0 to 8"));
+            }
+        }
+        if !self.view.jump_position.is_finite() || !(0.0..=100.0).contains(&self.view.jump_position) {
+            return Err(format!("view.jump_position = {} is out of range: use 0 to 100", self.view.jump_position));
         }
         Ok(())
     }
@@ -293,6 +305,63 @@ mod tests {
         assert!(Config::load_str("[keys]\nno_such_action = [\"x\"]").is_err());
         assert!(Config::load_str("[view]\nno_such_setting = 1").is_err());
         assert!(Config::load_str("[themes.dark]\npage = \"red\"").is_err());
+    }
+
+    #[test]
+    fn the_border_is_shared_and_the_hotbar_can_override_it() {
+        let config = Config::load_str("").unwrap();
+        assert_eq!((config.view.border, config.hotbar.border), (1.0, None));
+        let config = Config::load_str("[view]\nborder = 3.0").unwrap();
+        assert_eq!((config.view.border, config.hotbar.border), (3.0, None));
+        let config = Config::load_str("[hotbar]\nborder = 2.0").unwrap();
+        assert_eq!((config.view.border, config.hotbar.border), (1.0, Some(2.0)));
+        assert!(Config::load_str("[view]\nborder = 0").is_ok());
+        assert!(Config::load_str("[view]\nborder = 8").is_ok());
+        let error = Config::load_str("[view]\nborder = 25").unwrap_err().to_string();
+        assert!(error.contains("view.border = 25 is out of range: use 0 to 8"), "{error}");
+    }
+
+    #[test]
+    fn the_jump_position_defaults_to_the_middle_and_must_be_a_percentage() {
+        assert_eq!(Config::load_str("").unwrap().view.jump_position, 50.0);
+        assert_eq!(Config::load_str("[view]\njump_position = 0").unwrap().view.jump_position, 0.0);
+        assert!(Config::load_str("[view]\njump_position = 100").is_ok());
+        let error = Config::load_str("[view]\njump_position = 101").unwrap_err().to_string();
+        assert!(error.contains("view.jump_position = 101 is out of range: use 0 to 100"), "{error}");
+        assert!(Config::load_str("[view]\njump_position = -1").is_err());
+    }
+
+    #[test]
+    fn jump_position_parsing_and_rejection() {
+        let pos = |v: &str| Config::load_str(&format!("[view]\njump_position = {v}"));
+        assert_eq!(pos("0").unwrap().view.jump_position, 0.0);
+        assert_eq!(pos("0.0").unwrap().view.jump_position, 0.0);
+        assert_eq!(pos("100").unwrap().view.jump_position, 100.0);
+        assert_eq!(pos("100.0").unwrap().view.jump_position, 100.0);
+        assert_eq!(pos("30").unwrap().view.jump_position, 30.0);
+        assert_eq!(pos("30.0").unwrap().view.jump_position, 30.0);
+        assert_eq!(pos("33.5").unwrap().view.jump_position, 33.5);
+        for (bad, shown) in [
+            ("-0.1", "-0.1"),
+            ("100.1", "100.1"),
+            ("nan", "NaN"),
+            ("-nan", "NaN"),
+            ("inf", "inf"),
+            ("-inf", "-inf"),
+            ("1e30", "1000000000000000000000000000000"),
+        ] {
+            let error = pos(bad).unwrap_err();
+            assert_eq!(error, format!("view.jump_position = {shown} is out of range: use 0 to 100"), "{bad}");
+        }
+        assert!(pos("\"50\"").is_err());
+    }
+
+    #[test]
+    fn a_bad_border_is_reported() {
+        for bad in ["-1.0", "9.0", "nan", "inf"] {
+            assert!(Config::load_str(&format!("[view]\nborder = {bad}")).is_err(), "view {bad}");
+            assert!(Config::load_str(&format!("[hotbar]\nborder = {bad}")).is_err(), "hotbar {bad}");
+        }
     }
 
     #[test]

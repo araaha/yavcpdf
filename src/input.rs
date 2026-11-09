@@ -245,7 +245,7 @@ impl App {
         self.mode = Mode::Normal;
         if let Some(e) = self.doc.toc.get(entry) {
             let anchor = Anchor { page: e.page, y: e.y, x: self.view.x };
-            self.jump_to(anchor);
+            if e.point { self.jump_to_point(anchor) } else { self.jump_to(anchor) }
         }
     }
 

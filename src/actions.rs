@@ -11,7 +11,7 @@ use crate::app::{
     App, Bar, BarKind, Edit, Entry, EntryKind, FillItem, Fit, Landing, MarkOp, Mode, PendingPortal, Selection, SignPad, TocState, Tool,
 };
 use crate::config::expand_home;
-use crate::doc::dest_y;
+use crate::doc::{dest_point, dest_y};
 use crate::field::Field;
 use crate::hint::{self, HintState, Purpose, Target, TargetKind};
 use crate::keymap::Action;
@@ -107,7 +107,14 @@ impl App {
         self.mark_dirty();
     }
 
-    fn jump_to_page(&mut self, page: usize) {
+    /// Goes to a point, with it at `view.jump_position` of the window height.
+    pub fn jump_to_point(&mut self, anchor: Anchor) {
+        let span = self.view.rect.height() / self.view.zoom;
+        let y = view_top(anchor.y, self.config.view.jump_position, span);
+        self.jump_to(Anchor { y, ..anchor });
+    }
+
+    pub fn jump_to_page(&mut self, page: usize) {
         let last = self.doc.layout.len() - 1;
         self.jump_to(Anchor { page: page.min(last), y: 0.0, x: self.view.x });
     }
@@ -593,7 +600,7 @@ impl App {
         self.say(reference.describe());
         match landing {
             // A little above it, with a jump back to here.
-            Landing::Jump => self.jump_to(Anchor { page, y: y - 12.0, x: self.view.x }),
+            Landing::Jump => self.jump_to_point(Anchor { page, y: y - 12.0, x: self.view.x }),
             Landing::Overview => self.open_overview(reference.describe(), places),
         }
     }
@@ -944,8 +951,9 @@ impl App {
             LinkTarget::Page(page, dest) => {
                 let (page, dest) = (*page, *dest);
                 let Some(info) = self.doc.info.pages.get(page) else { return };
-                let y = dest_y(info, dest);
-                self.jump_to(Anchor { page, y, x: self.view.x });
+                let point = dest_point(info, dest);
+                let anchor = Anchor { page, y: point.unwrap_or(0.0), x: self.view.x };
+                if point.is_some() { self.jump_to_point(anchor) } else { self.jump_to(anchor) }
             }
             LinkTarget::Uri(uri) => {
                 let uri = uri.clone();
@@ -1094,6 +1102,69 @@ impl App {
 
 /// A source anchor marks the middle of the view: the top of the view that puts it there.
 fn top_of_view(app: &App, source: Anchor) -> Anchor {
-    let half = app.view.rect.height() / app.view.zoom / 2.0;
-    Anchor { y: source.y - half, ..source }
+    let span = app.view.rect.height() / app.view.zoom;
+    Anchor { y: view_top(source.y, 50.0, span), ..source }
+}
+
+/// The top of a view `span` points tall that puts `y` at `percent` of its height: 0 is the bottom edge, 100 the top.
+fn view_top(y: f32, percent: f32, span: f32) -> f32 {
+    y - (1.0 - percent / 100.0) * span
+}
+
+#[cfg(test)]
+mod tests {
+    use super::view_top;
+    use crate::view::{Anchor, Layout, View};
+    use egui::{Rect, pos2, vec2};
+
+    #[test]
+    fn a_jump_puts_its_target_at_the_asked_height() {
+        assert_eq!(view_top(500.0, 100.0, 200.0), 500.0);
+        assert_eq!(view_top(500.0, 50.0, 200.0), 400.0);
+        assert_eq!(view_top(500.0, 0.0, 200.0), 300.0);
+        assert_eq!(view_top(500.0, 25.0, 200.0), 350.0);
+    }
+
+    #[test]
+    fn view_top_edges_fractions_and_huge_spans() {
+        assert_eq!(view_top(500.0, 0.0, 200.0), 300.0);
+        assert_eq!(view_top(500.0, 50.0, 200.0), 400.0);
+        assert_eq!(view_top(500.0, 100.0, 200.0), 500.0);
+        assert!((view_top(500.0, 33.3, 300.0) - (500.0 - 0.667 * 300.0)).abs() < 1e-3);
+        assert!((view_top(10.0, 0.1, 1000.0) - (10.0 - 0.999 * 1000.0)).abs() < 1e-2);
+        assert_eq!(view_top(500.0, 50.0, 0.0), 500.0);
+        assert_eq!(view_top(0.0, 50.0, 1e30), -5e29);
+        let huge = view_top(1.0, 0.0, f32::MAX);
+        assert!(huge.is_finite() && huge < 0.0, "{huge}");
+        assert_eq!(view_top(1.0, 100.0, f32::MAX), 1.0);
+    }
+
+    /// The jump path: `jump_to_point`'s anchor, then `View::go_to` with its clamping.
+    fn landed(layout: &Layout, page: usize, y: f32, percent: f32, window: f32) -> f32 {
+        let mut view = View::new();
+        view.rect = Rect::from_min_size(pos2(0.0, 0.0), vec2(600.0, window));
+        let span = view.rect.height() / view.zoom;
+        view.go_to(layout, Anchor { page, y: view_top(y, percent, span), x: 0.0 });
+        view.y
+    }
+
+    #[test]
+    fn a_jump_through_go_to_centres_clamps_at_the_ends() {
+        let layout = Layout::new(vec![[600.0, 800.0]; 5], 10.0);
+        // 5 pages: tops 0, 810, 1620, 2430, 3240; total 4040.
+        assert_eq!(layout.total, 4040.0);
+        // Mid-document: page 2, y 100 -> centred in an 800 window: top = 1620+100-400.
+        assert_eq!(landed(&layout, 2, 100.0, 50.0, 800.0), 1320.0);
+        assert_eq!(landed(&layout, 2, 100.0, 100.0, 800.0), 1720.0);
+        assert_eq!(landed(&layout, 2, 100.0, 0.0, 800.0), 920.0);
+        // Near the start: would be negative, clamped to 0.
+        assert_eq!(landed(&layout, 0, 100.0, 50.0, 800.0), 0.0);
+        // Near the end: clamped to total - window.
+        assert_eq!(landed(&layout, 4, 750.0, 50.0, 800.0), 3240.0);
+        // A negative anchor on a later page reaches into the previous one rather than failing.
+        assert_eq!(landed(&layout, 1, 50.0, 50.0, 800.0), 810.0 + 50.0 - 400.0);
+        // A document shorter than the window is centred whatever the percent.
+        let short = Layout::new(vec![[600.0, 300.0]], 10.0);
+        assert_eq!(landed(&short, 0, 100.0, 50.0, 800.0), -250.0);
+    }
 }

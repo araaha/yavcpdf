@@ -28,6 +28,8 @@ decorations = false       # window title bar
 restore_position = true   # reopen a document where you left it
 highlight_links = true    # tint links to places in the document; `toggle_links` turns it off
 fullscreen = false        # start in fullscreen; `toggle_fullscreen` switches
+border = 1.0              # width of the outline, 0 to 8, around the menu, hotbar, contents, signature pad, notes, overview and portal window, in the theme's ui_accent; 0 for none
+jump_position = 50        # where a jump to a link, smart jump or contents entry puts its target: percent of the window height from the bottom (0) to the top (100); 50 centres it
 
 [statusbar]
 visible = true
@@ -47,7 +49,7 @@ colors = ["#fabd2f", "#83a598", "#b8bb26", "#fb4934", "#d3869b"]
 stroke_width = 2.0        # points
 fill_size = 12.0          # size of fill & sign text and marks, in points
 date_format = "%Y-%m-%d"  # the fill & sign date, as strftime
-border = 1.0              # width of its outline in the theme's ui_accent; 0 for none
+# border = 1.0           # the hotbar's outline alone; unset, it follows view.border
 
 [overview]
 width = 0.8               # share of the view, from 0 to 1
