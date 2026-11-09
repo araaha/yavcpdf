@@ -74,6 +74,7 @@ pub enum Action {
     ToggleTheme,
     ToggleLightDark,
     ToggleLinks,
+    ToggleFields,
     SmartJump,
     Overview,
     GotoOverview,
@@ -101,7 +102,7 @@ pub enum Action {
 
 impl Action {
     /// Every action, in declaration order. `the_list_of_actions_is_complete` keeps it whole.
-    pub const ALL: [Self; 84] = [
+    pub const ALL: [Self; 85] = [
         Self::Cancel,
         Self::ScrollDown,
         Self::ScrollUp,
@@ -163,6 +164,7 @@ impl Action {
         Self::ToggleTheme,
         Self::ToggleLightDark,
         Self::ToggleLinks,
+        Self::ToggleFields,
         Self::SmartJump,
         Self::Overview,
         Self::GotoOverview,
@@ -253,6 +255,7 @@ impl Action {
             Self::ToggleTheme => "toggle_theme",
             Self::ToggleLightDark => "toggle_light_dark",
             Self::ToggleLinks => "toggle_links",
+            Self::ToggleFields => "toggle_fields",
             Self::SmartJump => "smart_jump",
             Self::Overview => "overview",
             Self::GotoOverview => "goto_overview",
@@ -646,6 +649,18 @@ mod tests {
 
     fn stroke(text: &str) -> Stroke {
         parse_sequence(text).unwrap().remove(0)
+    }
+
+    #[test]
+    fn gi_toggles_fields_gl_toggles_links_and_i_hints_a_form_at_once() {
+        let map = default_keymap();
+        assert_eq!(map.exact(&[stroke("g"), stroke("i")]), Some(Action::ToggleFields));
+        assert_eq!(map.exact(&[stroke("g"), stroke("l")]), Some(Action::ToggleLinks));
+        assert_eq!(Action::from_name("toggle_fields"), Some(Action::ToggleFields));
+        let mut p = Pending::default();
+        assert_eq!(p.feed(&map, stroke("i")), Some((Action::HintForm, None)));
+        assert_eq!(type_keys(&mut p, &map, "gi"), Some((Action::ToggleFields, None)));
+        assert_eq!(type_keys(&mut p, &map, "gl"), Some((Action::ToggleLinks, None)));
     }
 
     #[test]

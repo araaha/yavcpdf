@@ -420,6 +420,7 @@ pub struct App {
     /// When and where a click opened the choice panel, to ignore the second click of a double click.
     pub choice_opened: Option<(f64, Pos2)>,
     pub links_shown: bool,
+    pub fields_shown: bool,
     /// A reference waiting for the text of every page, to look up what it points at.
     pub smart: Option<(Reference, Landing)>,
     /// The table of contents was asked for while its printed pages were still being read.
@@ -518,6 +519,7 @@ impl App {
             stroke_width: config.hotbar.stroke_width,
             fill_size: config.hotbar.fill_size,
             links_shown: config.view.highlight_links,
+            fields_shown: config.view.highlight_fields,
             file_theme: config.theme.clone(),
             keymap,
             pending: Pending::default(),

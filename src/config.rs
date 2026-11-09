@@ -56,10 +56,17 @@ pub struct Theme {
     /// Optional, so a theme written before links were tinted still loads.
     #[serde(default = "default_link")]
     pub link: Color,
+    /// Optional, so a theme written before fields were tinted still loads.
+    #[serde(default = "default_field")]
+    pub field: Color,
 }
 
 fn default_link() -> Color {
     Color([0, 0, 255, 85])
+}
+
+fn default_field() -> Color {
+    Color([250, 189, 47, 51])
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -77,6 +84,7 @@ pub struct ViewConfig {
     pub decorations: bool,
     pub restore_position: bool,
     pub highlight_links: bool,
+    pub highlight_fields: bool,
     pub fullscreen: bool,
     pub border: f32,
     /// Where a jump puts its target: percent of the window height, 0 at the bottom to 100 at the top.
@@ -305,6 +313,28 @@ mod tests {
         assert!(Config::load_str("[keys]\nno_such_action = [\"x\"]").is_err());
         assert!(Config::load_str("[view]\nno_such_setting = 1").is_err());
         assert!(Config::load_str("[themes.dark]\npage = \"red\"").is_err());
+    }
+
+    #[test]
+    fn field_highlighting_is_on_by_default_and_can_be_turned_off() {
+        assert!(Config::load_str("").unwrap().view.highlight_fields);
+        assert!(!Config::load_str("[view]\nhighlight_fields = false").unwrap().view.highlight_fields);
+        assert!(Config::load_str("[view]\nhighlight_fields = false").unwrap().view.highlight_links);
+    }
+
+    #[test]
+    fn a_theme_without_a_field_colour_gets_the_default() {
+        let theme = "background = \"#000000\"\npage = \"#000000\"\npage_text = \"#ffffff\"\nrecolor = false\n\
+            ui_background = \"#000000\"\nui_text = \"#ffffff\"\nui_accent = \"#ffffff\"\n\
+            hint_background = \"#ffffff\"\nhint_text = \"#000000\"\nsearch = \"#ffffff\"\n\
+            search_current = \"#ffffff\"\nselection = \"#ffffff\"\n";
+        let config = Config::load_str(&format!("theme = \"mine\"\n[themes.mine]\n{theme}")).unwrap();
+        let mine = config.active_theme();
+        assert_eq!(mine.field.0, [250, 189, 47, 51]);
+        assert_eq!(mine.link.0, [0, 0, 255, 85]);
+        let config = Config::load_str(&format!("theme = \"mine\"\n[themes.mine]\n{theme}field = \"#11223344\"")).unwrap();
+        assert_eq!(config.active_theme().field.0, [0x11, 0x22, 0x33, 0x44]);
+        assert_eq!(Config::load_str("").unwrap().active_theme().field.0, [0xfa, 0xbd, 0x2f, 0x33]);
     }
 
     #[test]

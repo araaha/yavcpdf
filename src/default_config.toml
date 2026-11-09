@@ -27,6 +27,7 @@ smartcase = true          # an upper-case letter makes a search case sensitive
 decorations = false       # window title bar
 restore_position = true   # reopen a document where you left it
 highlight_links = true    # tint links to places in the document; `toggle_links` turns it off
+highlight_fields = true   # tint the fields of a form; `toggle_fields` turns it off
 fullscreen = false        # start in fullscreen; `toggle_fullscreen` switches
 border = 1.0              # width of the outline, 0 to 8, around the menu, hotbar, contents, signature pad, notes, overview and portal window, in the theme's ui_accent; 0 for none
 jump_position = 50        # where a jump to a link, smart jump or contents entry puts its target: percent of the window height from the bottom (0) to the top (100); 50 centres it
@@ -75,6 +76,7 @@ search = "#458588aa"
 search_current = "#fabd2faa"
 selection = "#83a59888"
 link = "#0000ff55"            # links to places in the document
+field = "#fabd2f33"           # form fields that can be picked with hint_form
 
 [themes.light]
 background = "#d5c4a1"
@@ -90,6 +92,7 @@ search = "#45858866"
 search_current = "#d79921aa"
 selection = "#45858866"
 link = "#0000ff33"
+field = "#d7992133"
 
 [keys]
 cancel = ["<esc>", "<C-c>"]
@@ -158,6 +161,7 @@ redo = ["U"]
 toggle_theme = ["T"]
 toggle_light_dark = ["<C-r>"]
 toggle_links = ["gl"]
+toggle_fields = ["gi"]
 toggle_fullscreen = ["<A-f>"]
 reload = ["R"]
 quit = ["q", "ZQ", "ZZ", "<C-w>"]

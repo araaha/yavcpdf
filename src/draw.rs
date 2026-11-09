@@ -201,6 +201,13 @@ impl App {
                 }
             }
         }
+        if self.fields_shown {
+            for page in shown.clone().filter(|p| self.cache.shows_page(*p)) {
+                if let Some(rects) = self.doc.form.widget_rects.get(page) {
+                    self.fill_rects(painter, view, page, rects, theme.field);
+                }
+            }
+        }
         if let Some(search) = &self.search {
             let from = search.matches.partition_point(|m| m.page < *shown.start());
             let matches = search.matches[from..].iter().enumerate().take_while(|(_, m)| m.page <= *shown.end());

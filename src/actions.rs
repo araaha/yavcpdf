@@ -744,6 +744,7 @@ impl App {
             Action::ToggleTheme => self.next_theme(),
             Action::ToggleLightDark => self.toggle_light_dark(),
             Action::ToggleLinks => self.links_shown = !self.links_shown,
+            Action::ToggleFields => self.fields_shown = !self.fields_shown,
             Action::ToggleFullscreen => {
                 self.fullscreen = !self.fullscreen;
                 ctx.send_viewport_cmd_to(egui::ViewportId::ROOT, egui::ViewportCommand::Fullscreen(self.fullscreen));

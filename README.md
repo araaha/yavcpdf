@@ -272,7 +272,7 @@ choose a colour instead, so counts such as `42G` don't work then.
 | <kbd>d</kbd> <kbd>h</kbd> | Delete an annotation by hint |
 | <kbd>u</kbd> / <kbd>U</kbd> | Undo / redo |
 | <kbd>Ctrl</kbd>+<kbd>R</kbd> / <kbd>T</kbd> | Light or dark theme / next theme |
-| <kbd>g</kbd> <kbd>l</kbd> / <kbd>Ctrl</kbd>+<kbd>S</kbd> / <kbd>Alt</kbd>+<kbd>F</kbd> | Tint on links / status line / fullscreen |
+| <kbd>g</kbd> <kbd>l</kbd> / <kbd>g</kbd> <kbd>i</kbd> / <kbd>Ctrl</kbd>+<kbd>S</kbd> / <kbd>Alt</kbd>+<kbd>F</kbd> | Tint on links / form fields / status line / fullscreen |
 | <kbd>Ctrl</kbd>+<kbd>T</kbd> | Open a file with the desktop's file chooser |
 | <kbd>R</kbd> / <kbd>:</kbd> / <kbd>q</kbd>, <kbd>Z</kbd> <kbd>Q</kbd>, <kbd>Z</kbd> <kbd>Z</kbd>, <kbd>Ctrl</kbd>+<kbd>W</kbd> | Reload / command line / quit |
 | <kbd>Esc</kbd>, <kbd>Ctrl</kbd>+<kbd>C</kbd> | Cancel: closes a bar, hints, the contents or a choice panel; otherwise takes back the last thing: keys, overview, jump, portal, selection, tool, search. Rebind it as `cancel` |

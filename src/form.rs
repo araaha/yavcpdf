@@ -364,6 +364,8 @@ pub struct FormInfo {
     pub base: HashMap<String, FormValue>,
     /// The widgets the document itself hides, by field name and place in the field.
     pub base_hidden: HashSet<(String, usize)>,
+    /// The view rectangles of the widgets that can be picked (not hidden or read-only), by page.
+    pub widget_rects: Vec<Vec<[f32; 4]>>,
     /// The form has been read once.
     pub ready: bool,
 }
@@ -467,6 +469,18 @@ pub fn usable(widget: &Widget) -> bool {
 pub fn view_rect(page: &PageInfo, rect: [f64; 4]) -> [f32; 4] {
     let (a, b) = (page.user_to_view(rect[0] as f32, rect[1] as f32), page.user_to_view(rect[2] as f32, rect[3] as f32));
     [a[0].min(b[0]), a[1].min(b[1]), a[0].max(b[0]), a[1].max(b[1])]
+}
+
+/// The view rectangles of the widgets that can be picked (not hidden or read-only), one list per page.
+pub fn widget_rects_by_page(fields: &[Field], pages: &[PageInfo]) -> Vec<Vec<[f32; 4]>> {
+    let mut out = vec![Vec::new(); pages.len()];
+    for widget in fields.iter().flat_map(|f| &f.widgets).filter(|w| usable(w)) {
+        let Some(page) = widget.page else { continue };
+        if let (Some(info), Some(rects)) = (pages.get(page), out.get_mut(page)) {
+            rects.push(view_rect(info, widget.rect));
+        }
+    }
+    out
 }
 
 /// The text of a field as one line, for the bar.
@@ -942,7 +956,8 @@ impl App {
             self.say(format!("the calculated fields: {why}"));
         }
         let Built { render, fields, base, base_hidden, .. } = built;
-        self.doc.form = FormInfo { fields, base, base_hidden, ready: true };
+        let widget_rects = widget_rects_by_page(&fields, &self.doc.info.pages);
+        self.doc.form = FormInfo { fields, base, base_hidden, widget_rects, ready: true };
         let bytes = match render {
             Some(bytes) => Arc::new(bytes),
             None if Arc::ptr_eq(&self.doc.render_bytes, &self.doc.bytes) => return,
@@ -1754,6 +1769,29 @@ mod tests {
         assert_eq!(names(reset_names(&all, some(&["name"]).as_deref(), false)), ["name"]);
         assert_eq!(reset_names(&all, some(&["name", "go"]).as_deref(), true), ["agree", "colour", "size"]);
         assert_eq!(reset_names(&all, None, false).len(), 5);
+    }
+
+    #[test]
+    fn widget_rects_are_grouped_by_page_and_only_usable_ones() {
+        let page = PageInfo { width: 600.0, height: 800.0, label: "1".into(), crop: [0.0, 0.0, 600.0, 800.0], rotation: 0 };
+        let pages = [page.clone(), page];
+        let mut all = fields(&open(form_pdf()));
+        let usable_count = all.iter().flat_map(|f| &f.widgets).filter(|w| usable(w)).count();
+        assert!(usable_count >= 2);
+        let grouped = widget_rects_by_page(&all, &pages);
+        assert_eq!(grouped.len(), 2);
+        assert_eq!(grouped[0].len(), usable_count);
+        assert!(grouped[1].is_empty());
+        let first = all[0].widgets[0].clone();
+        assert_eq!(grouped[0][0], view_rect(&pages[0], first.rect));
+        // Hidden, read-only and page-less widgets are skipped; a page out of range is ignored.
+        all[0].widgets[0].hidden = true;
+        all[1].widgets[0].read_only = true;
+        all[2].widgets[0].page = None;
+        all[3].widgets[0].page = Some(9);
+        let grouped = widget_rects_by_page(&all, &pages);
+        assert_eq!(grouped[0].len(), usable_count - 4);
+        assert!(widget_rects_by_page(&all, &[]).is_empty());
     }
 
     #[test]
