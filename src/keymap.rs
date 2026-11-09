@@ -503,6 +503,11 @@ impl Keymap {
         stroke.text().is_none() && self.binds.iter().any(|(s, a)| *a == Action::Cancel && s.as_slice() == std::slice::from_ref(stroke))
     }
 
+    /// Whether this one stroke alone is bound to `action`. Sequences are not considered.
+    pub fn is(&self, stroke: &Stroke, action: Action) -> bool {
+        self.binds.iter().any(|(s, a)| *a == action && s.as_slice() == std::slice::from_ref(stroke))
+    }
+
     /// What this one stroke does in a text field. As with `cancel`, a printable key never does
     /// anything here, so that it can still be typed.
     pub fn edit(&self, stroke: &Stroke) -> Option<Edit> {
@@ -591,6 +596,15 @@ mod tests {
 
     fn map(binds: &[(&str, Action)]) -> Keymap {
         Keymap { binds: binds.iter().map(|(k, a)| (parse_sequence(k).unwrap(), *a)).collect() }
+    }
+
+    #[test]
+    fn is_matches_a_single_stroke_binding_only() {
+        let m = map(&[("u", Action::Undo), ("gx", Action::Cancel)]);
+        assert!(m.is(&Stroke::plain("u"), Action::Undo));
+        assert!(!m.is(&Stroke::plain("u"), Action::Cancel));
+        assert!(!m.is(&Stroke::plain("g"), Action::Cancel));
+        assert!(!m.is(&Stroke::plain("x"), Action::Undo));
     }
 
     fn type_keys(p: &mut Pending, m: &Keymap, keys: &str) -> Option<(Action, Option<u32>)> {

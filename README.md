@@ -336,7 +336,9 @@ and pick a word to put it just after that word. The first signature asks you to
 draw one on a pad and is kept for every document in
 `signature.json` in the data folder (see the
 Settings folders table under Installation), readable by you alone; `:sign` draws a
-new one. Move something by undoing it and placing it again.
+new one. On the pad, draw with the mouse; the undo key (<kbd>u</kbd> by default)
+removes the last stroke, <kbd>Enter</kbd> keeps the signature and <kbd>Esc</kbd>
+cancels. Move something by undoing it and placing it again.
 
 ### Forms
 

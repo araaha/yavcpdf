@@ -105,8 +105,21 @@ pub struct Entry {
 pub struct SignPad {
     pub strokes: Strokes,
     pub drawing: bool,
+    /// Set by an undo mid-stroke: the pointer is ignored until the button is released.
+    pub wait_for_release: bool,
     /// Where to put the signature once it is drawn.
     pub place: Option<(usize, [f32; 2])>,
+}
+
+impl SignPad {
+    /// Takes off the last stroke, ending it if it is still being drawn.
+    pub fn undo_stroke(&mut self) {
+        self.strokes.pop();
+        if self.drawing {
+            self.wait_for_release = true;
+        }
+        self.drawing = false;
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -864,6 +877,25 @@ impl eframe::App for App {
 #[cfg(test)]
 mod hotbar_tests {
     use super::HotbarState;
+
+    #[test]
+    fn pad_undo_removes_one_stroke_at_a_time() {
+        let mut pad = super::SignPad { strokes: vec![vec![[0.0, 0.0]], vec![[0.1, 0.1]]], drawing: true, ..Default::default() };
+        pad.undo_stroke();
+        assert_eq!(pad.strokes.len(), 1);
+        assert!(!pad.drawing);
+        assert!(pad.wait_for_release);
+        pad.undo_stroke();
+        pad.undo_stroke();
+        assert!(pad.strokes.is_empty());
+    }
+
+    #[test]
+    fn pad_undo_waits_for_release_only_when_drawing() {
+        let mut pad = super::SignPad { strokes: vec![vec![[0.0, 0.0]]], ..Default::default() };
+        pad.undo_stroke();
+        assert!(!pad.wait_for_release);
+    }
 
     #[test]
     fn toggle_without_a_tool_shows_and_hides() {

@@ -383,8 +383,6 @@ impl App {
                 painter.add(egui::Shape::line(stroke.iter().map(on_pad).collect(), pen));
             }
         }
-        let help = "enter keeps it, backspace clears";
-        painter.text(rect.left_top() + vec2(PADDING, PADDING), Align2::LEFT_TOP, help, font(&self.config), theme.ui_accent.egui());
     }
 
     fn draw_toc(&self, painter: &Painter, state: &TocState) {

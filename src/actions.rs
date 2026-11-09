@@ -362,6 +362,13 @@ impl App {
     }
 
     fn undo_redo(&mut self, undo: bool) {
+        // The pad is modal: undo takes off a stroke and redo does nothing, whatever asked.
+        if let Mode::Sign(pad) = &mut self.mode {
+            if undo {
+                pad.undo_stroke();
+            }
+            return;
+        }
         let source = if undo { &mut self.undo } else { &mut self.redo };
         let Some(edit) = source.pop() else {
             self.say(if undo { "nothing to undo" } else { "nothing to redo" });

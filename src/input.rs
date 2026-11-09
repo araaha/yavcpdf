@@ -5,7 +5,7 @@ use crate::app::{App, Bar, BarKind, ChoiceState, Landing, Mode, Selection, TocSt
 use crate::chrome::ListLayout;
 use crate::field::{Edit, Field};
 use crate::form::{Move, clamp_selected, keep_visible, wheel_step};
-use crate::keymap::Stroke;
+use crate::keymap::{Action, Stroke};
 use crate::menu::{Menu, Outcome};
 use crate::search::Search;
 use crate::view::Anchor;
@@ -315,8 +315,8 @@ impl App {
         } else if stroke.is("cr") {
             let pad = pad.clone();
             self.sign_done(&pad);
-        } else if stroke.is("bs") {
-            pad.strokes.clear();
+        } else if self.keymap.is(stroke, Action::Undo) {
+            pad.undo_stroke();
         }
     }
 
@@ -827,6 +827,10 @@ impl App {
         let Mode::Sign(pad) = &mut self.mode else { return };
         if !response.is_pointer_button_down_on() {
             pad.drawing = false;
+            pad.wait_for_release = false;
+            return;
+        }
+        if pad.wait_for_release {
             return;
         }
         for p in pointer_path(ctx, response) {
