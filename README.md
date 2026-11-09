@@ -3,6 +3,8 @@
   <p>A minimal, keyboard-driven PDF viewer</p>
 
   [![Linux](https://img.shields.io/badge/Linux-131415?style=for-the-badge&logo=linux&logoColor=white)](#installation)
+  [![Windows](https://img.shields.io/badge/Windows-131415?style=for-the-badge&logo=data:image/svg%2bxml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCI%2BPHBhdGggZmlsbD0iI2ZmZmZmZiIgZD0iTTAgMGgxMXYxMUgwek0xMyAwaDExdjExSDEzek0wIDEzaDExdjExSDB6TTEzIDEzaDExdjExSDEzeiIvPjwvc3ZnPg==)](#installation)
+  [![macOS](https://img.shields.io/badge/macOS-131415?style=for-the-badge&logo=apple&logoColor=white)](#installation)
   [![Build status](https://img.shields.io/github/actions/workflow/status/araaha/yavcpdf/release.yml?style=for-the-badge&logo=github&logoColor=white&label=build)](https://github.com/araaha/yavcpdf/actions/workflows/release.yml)
   [![Latest release](https://img.shields.io/github/v/release/araaha/yavcpdf?style=for-the-badge&logo=github&logoColor=white)](https://github.com/araaha/yavcpdf/releases)
   [![AUR version](https://img.shields.io/aur/version/yavcpdf?style=for-the-badge&logo=archlinux&logoColor=white)](https://aur.archlinux.org/packages/yavcpdf)
