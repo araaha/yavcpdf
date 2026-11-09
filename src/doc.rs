@@ -368,6 +368,7 @@ mod tests {
             title: title.into(),
             page,
             view,
+            action: None,
             children,
             open: true,
             color: None,
@@ -421,7 +422,7 @@ mod tests {
         use pdfcraft_render::{DocInfo, Link, LinkTarget};
         let info = DocInfo {
             pages: vec![page(0, CROPS[0])],
-            links: vec![Link { page: 0, index: 0, rect: [0.0, 0.0, 10.0, 10.0], target: LinkTarget::Page(0, DestView::Fit) }],
+            links: vec![Link { page: 0, index: 0, rect: [0.0, 0.0, 10.0, 10.0], quads: Vec::new(), target: LinkTarget::Page(0, DestView::Fit) }],
             ..Default::default()
         };
         let rows = link_rows(&info);

@@ -613,6 +613,7 @@ mod tests {
             glyphs: vec![glyph("a", 5.0), glyph("fi", 5.0), glyph("b", 5.0), glyph("c", 9.0)],
             line_of: vec![0, 0, 0, 1],
             space_before: vec![false, false, true, false],
+            truncated: false,
         };
         let lines = lines_of(&text);
         assert_eq!(lines.len(), 2);

@@ -144,7 +144,7 @@ mod tests {
     fn page() -> PageText {
         let line = |s: &str, y: f32| s.chars().enumerate().map(|(i, c)| glyph(c, i as f32 * 5.0, y)).collect::<Vec<_>>();
         let glyphs: Vec<_> = line("abcd", 0.0).into_iter().chain(line("ef", 20.0)).collect();
-        PageText { glyphs, line_of: vec![0, 0, 0, 0, 1, 1], space_before: vec![false, false, true, false, false, false] }
+        PageText { glyphs, line_of: vec![0, 0, 0, 0, 1, 1], space_before: vec![false, false, true, false, false, false], truncated: false }
     }
 
     #[test]

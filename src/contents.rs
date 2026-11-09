@@ -162,7 +162,7 @@ mod tests {
     }
 
     fn page_text(lines: &[(f32, &str)]) -> Arc<PageText> {
-        let mut text = PageText { glyphs: Vec::new(), line_of: Vec::new(), space_before: Vec::new() };
+        let mut text = PageText { glyphs: Vec::new(), line_of: Vec::new(), space_before: Vec::new(), truncated: false };
         for (number, (left, line)) in lines.iter().enumerate() {
             let top = 100.0 + number as f32 * 15.0;
             let mut space = false;
