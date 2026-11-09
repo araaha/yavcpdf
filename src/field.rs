@@ -17,6 +17,9 @@ pub enum Edit {
     EraseBlank,
     EraseToStart,
     EraseToEnd,
+    /// Clears the password field. The other fields leave it alone: a typed line is edited, not
+    /// undone, and `Ctrl+U` already clears it.
+    Undo,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -58,6 +61,19 @@ impl Field {
     /// What is left of the cursor.
     pub fn before_cursor(&self) -> &str {
         self.text.get(..self.cursor).unwrap_or(&self.text)
+    }
+
+    /// Empties the field.
+    pub fn clear(&mut self) {
+        self.text.clear();
+        self.cursor = 0;
+    }
+
+    /// The same field with every character shown as a bullet, the cursor where it was.
+    pub fn masked(&self) -> Self {
+        const BULLET: char = '\u{2022}';
+        let count = |text: &str| text.chars().count();
+        Self { text: BULLET.to_string().repeat(count(&self.text)), cursor: count(self.before_cursor()) * BULLET.len_utf8() }
     }
 
     /// Puts `text` in place of what is left of the cursor, which then sits after it.
@@ -157,6 +173,7 @@ impl Field {
             Edit::EraseBlank => return self.erase_back(self.blank_left()),
             Edit::EraseToStart => return self.erase_back(0),
             Edit::EraseToEnd => return self.erase_ahead(self.text.len()),
+            Edit::Undo => {}
         }
         false
     }
@@ -291,6 +308,7 @@ mod tests {
             Edit::EraseBlank,
             Edit::EraseToStart,
             Edit::EraseToEnd,
+            Edit::Undo,
         ];
         let text = "é 日本語 🐣 naïve-x";
         for start in text.char_indices().map(|(i, _)| i).chain([text.len()]) {
@@ -312,5 +330,70 @@ mod tests {
         assert_eq!(after("日本語|", Edit::Backspace), "日本|");
         assert_eq!(after("|🐣a", Edit::Delete), "|a");
         assert_eq!(after("日本 語|", Edit::EraseWord), "日本 |");
+    }
+
+    #[test]
+    fn undo_changes_nothing_in_a_field_and_clear_empties_it() {
+        let mut field = at("ab|cd");
+        assert!(!field.apply(Edit::Undo));
+        assert_eq!(marked(&field), "ab|cd");
+        field.clear();
+        assert_eq!(marked(&field), "|");
+        field.insert("x");
+        assert_eq!(marked(&field), "x|");
+    }
+
+    #[test]
+    fn a_masked_field_shows_bullets_and_keeps_the_cursor() {
+        let masked = at("pä|ss日").masked();
+        assert_eq!(marked(&masked), "\u{2022}\u{2022}|\u{2022}\u{2022}\u{2022}");
+        assert!(!masked.text.contains(['p', 's', '日']));
+        assert_eq!(marked(&at("|").masked()), "|");
+    }
+
+    #[test]
+    fn undo_is_a_no_op_through_apply_for_every_text_and_cursor() {
+        let text = "é 日本語 🐣 naïve-x";
+        for start in text.char_indices().map(|(i, _)| i).chain([text.len()]) {
+            let mut field = Field { text: text.to_owned(), cursor: start };
+            let before = field.clone();
+            assert!(!field.apply(Edit::Undo));
+            assert_eq!(field, before);
+        }
+        let mut empty = Field::default();
+        assert!(!empty.apply(Edit::Undo));
+        assert_eq!(empty, Field::default());
+    }
+
+    #[test]
+    fn masked_counts_characters_not_bytes_at_every_cursor() {
+        let text = "pä日🐣s";
+        for (n, (start, _)) in text.char_indices().chain([(text.len(), ' ')]).enumerate() {
+            let masked = Field { text: text.to_owned(), cursor: start }.masked();
+            assert_eq!(masked.text.chars().count(), 5);
+            assert!(masked.text.chars().all(|c| c == '\u{2022}'));
+            assert_eq!(masked.before_cursor().chars().count(), n, "cursor {start}");
+            assert!(masked.text.is_char_boundary(masked.cursor));
+        }
+        // A cursor that is not on a boundary (it shouldn't happen) must not panic.
+        let odd = Field { text: "日".to_owned(), cursor: 1 }.masked();
+        assert_eq!(odd.text.chars().count(), 1);
+    }
+
+    #[test]
+    fn typing_and_editing_a_password_like_field() {
+        let mut field = Field::default();
+        field.insert("p\u{e4}ss");
+        field.insert("w\u{f6}rd");
+        assert_eq!(field.text, "p\u{e4}ssw\u{f6}rd");
+        assert!(field.apply(Edit::Backspace));
+        assert_eq!(field.text, "p\u{e4}ssw\u{f6}r");
+        field.apply(Edit::Left);
+        field.insert(" ");
+        assert_eq!(marked(&field), "p\u{e4}ssw\u{f6} |r");
+        field.clear();
+        assert_eq!((field.text.as_str(), field.cursor), ("", 0));
+        assert!(!field.apply(Edit::Backspace));
+        assert_eq!(marked(&field.masked()), "|");
     }
 }

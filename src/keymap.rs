@@ -96,11 +96,12 @@ pub enum Action {
     EditEraseBlank,
     EditEraseToStart,
     EditEraseToEnd,
+    EditUndo,
 }
 
 impl Action {
     /// Every action, in declaration order. `the_list_of_actions_is_complete` keeps it whole.
-    pub const ALL: [Self; 83] = [
+    pub const ALL: [Self; 84] = [
         Self::Cancel,
         Self::ScrollDown,
         Self::ScrollUp,
@@ -184,6 +185,7 @@ impl Action {
         Self::EditEraseBlank,
         Self::EditEraseToStart,
         Self::EditEraseToEnd,
+        Self::EditUndo,
     ];
 
     /// The name under `[keys]`, which is also what `:name` runs. The match has no catch-all, so a
@@ -273,6 +275,7 @@ impl Action {
             Self::EditEraseBlank => "edit_erase_blank",
             Self::EditEraseToStart => "edit_erase_to_start",
             Self::EditEraseToEnd => "edit_erase_to_end",
+            Self::EditUndo => "edit_undo",
         }
     }
 
@@ -304,6 +307,7 @@ impl Action {
             Self::EditEraseBlank => Edit::EraseBlank,
             Self::EditEraseToStart => Edit::EraseToStart,
             Self::EditEraseToEnd => Edit::EraseToEnd,
+            Self::EditUndo => Edit::Undo,
             _ => return None,
         })
     }
@@ -653,6 +657,9 @@ mod tests {
         assert_eq!(map.edit(&stroke("<C-del>")), Some(Edit::DeleteWord));
         assert_eq!(map.edit(&stroke("<left>")), Some(Edit::Left));
         assert_eq!(map.edit(&stroke("<bs>")), Some(Edit::Backspace));
+        assert_eq!(map.edit(&stroke("<C-z>")), Some(Edit::Undo));
+        assert_eq!(map.exact(&[stroke("<C-z>")]), None, "editing alone");
+        assert_eq!(Action::from_name("edit_undo"), Some(Action::EditUndo));
     }
 
     #[test]
@@ -781,7 +788,7 @@ mod tests {
         }
         // The last variant's discriminant is the number of variants less one, and `name` has no
         // catch-all, so the compiler makes sure that the variant is named.
-        assert_eq!(Action::EditEraseToEnd as usize + 1, Action::ALL.len());
+        assert_eq!(Action::EditUndo as usize + 1, Action::ALL.len());
         let source = include_str!("keymap.rs");
         let body = source.split_once("pub enum Action {").and_then(|(_, rest)| rest.split_once("\n}")).map_or("", |(body, _)| body);
         let declared = body.lines().map(str::trim).filter(|l| l.ends_with(',') && !l.starts_with(['#', '/'])).count();
@@ -794,6 +801,46 @@ mod tests {
         for action in [Action::Command, Action::Cancel, Action::EditLeft, Action::EditEraseToEnd] {
             assert!(!action.is_listed(), "{}", action.name());
         }
-        assert_eq!(Action::ALL.iter().filter(|a| !a.is_listed()).count(), 2 + 13);
+        assert_eq!(Action::ALL.iter().filter(|a| !a.is_listed()).count(), 2 + 14);
+    }
+
+    #[test]
+    fn edit_undo_is_ctrl_z_and_can_be_rebound_or_removed() {
+        let ctrl_z = stroke("<C-z>");
+        let config = crate::config::Config::load_str("").unwrap();
+        assert_eq!(config.keys.get(&Action::EditUndo), Some(&vec!["<C-z>".to_owned()]));
+        assert!(config.keys.iter().filter(|(a, _)| **a != Action::EditUndo).all(|(_, keys)| !keys.iter().any(|k| k == "<C-z>")));
+        let config = crate::config::Config::load_str("[keys]\nedit_undo = [\"<C-y>\"]").unwrap();
+        let (map, errors) = Keymap::new(&config.keys);
+        assert!(errors.is_empty(), "{errors:?}");
+        assert_eq!(map.edit(&ctrl_z), None);
+        assert_eq!(map.edit(&stroke("<C-y>")), Some(Edit::Undo));
+        let config = crate::config::Config::load_str("[keys]\nedit_undo = []").unwrap();
+        let (map, errors) = Keymap::new(&config.keys);
+        assert!(errors.is_empty(), "{errors:?}");
+        assert_eq!(map.edit(&ctrl_z), None);
+        // Bound to a normal-mode action by the user, it still edits in a field and acts in the document.
+        let config = crate::config::Config::load_str("[keys]\nquit = [\"<C-z>\"]").unwrap();
+        let (map, _) = Keymap::new(&config.keys);
+        assert_eq!(map.exact(std::slice::from_ref(&ctrl_z)), Some(Action::Quit));
+        assert_eq!(map.edit(&ctrl_z), Some(Edit::Undo));
+    }
+
+    #[test]
+    fn ctrl_z_is_not_a_normal_mode_action_by_default() {
+        let map = default_keymap();
+        let ctrl_z = stroke("<C-z>");
+        assert_eq!(map.exact(std::slice::from_ref(&ctrl_z)), None);
+        assert!(map.is(&stroke("<C-z>"), Action::EditUndo));
+    }
+
+    #[test]
+    fn every_action_name_round_trips_and_is_unique() {
+        let mut seen = std::collections::BTreeSet::new();
+        for action in Action::ALL {
+            assert_eq!(Action::from_name(action.name()), Some(action));
+            assert!(seen.insert(action.name()), "{}", action.name());
+        }
+        assert_eq!(seen.len(), Action::ALL.len());
     }
 }

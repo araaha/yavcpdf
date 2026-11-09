@@ -162,7 +162,7 @@ toggle_fullscreen = ["<A-f>"]
 reload = ["R"]
 quit = ["q", "ZQ", "ZZ", "<C-w>"]
 open = ["<C-t>"]         # the desktop's file chooser
-# Editing in the bars and the contents filter, and nowhere else: `<left>` still scrolls in the
+# Editing in the bars, the contents filter and the password field, and nowhere else: `<left>` still scrolls in the
 # document. A key that types a character can't be used here.
 edit_left = ["<left>"]
 edit_right = ["<right>"]
@@ -177,3 +177,4 @@ edit_delete_word = ["<C-del>", "<A-d>"]
 edit_erase_blank = ["<C-w>"]          # back to the last space: all of a path at once
 edit_erase_to_start = ["<C-u>"]
 edit_erase_to_end = ["<C-k>"]
+edit_undo = ["<C-z>"]                 # clears the password field; does nothing in the other fields

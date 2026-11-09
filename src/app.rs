@@ -11,7 +11,7 @@ use pdfcraft_render::{Pixels, RenderRequest, RequestKind};
 
 use crate::cache::{TileCache, TileKey};
 use crate::config::Config;
-use crate::doc::Doc;
+use crate::doc::{Doc, OpenFailure, placeholder_pdf};
 use crate::field::Field;
 use crate::form::{FormChange, FormState};
 use crate::hint::HintState;
@@ -195,6 +195,41 @@ pub enum Mode {
     Choice(ChoiceState),
     AwaitMark(MarkOp),
     Sign(SignPad),
+    Password(PasswordState),
+}
+
+/// The password menu: the file that wants a password, and what was typed so far.
+#[derive(Clone)]
+pub struct PasswordState {
+    pub path: PathBuf,
+    pub field: Field,
+    /// What went wrong with the last try.
+    pub notice: Option<String>,
+}
+
+impl PasswordState {
+    pub fn new(path: PathBuf, notice: Option<&str>) -> Self {
+        Self { path, field: Field::default(), notice: notice.map(str::to_owned) }
+    }
+
+    /// What the header of the menu says.
+    pub fn header(&self) -> String {
+        let name = self.path.file_name().map_or_else(|| self.path.display().to_string(), |n| n.to_string_lossy().into_owned());
+        format!("Password for {name}")
+    }
+}
+
+/// Written by hand so that what was typed can never reach a log through `{:?}`.
+impl std::fmt::Debug for PasswordState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PasswordState").field("path", &self.path).field("notice", &self.notice).finish_non_exhaustive()
+    }
+}
+
+/// Writes the sidecar, unless the document is locked: then what is shown is a stand-in for it, and
+/// writing would replace what is saved for the real one.
+fn save_sidecar(locked: bool, store: &Store, side: &Sidecar) -> Result<(), String> {
+    if locked { Ok(()) } else { store.save(side) }
 }
 
 /// A text selection between two glyphs, in reading order and inclusive.
@@ -342,6 +377,8 @@ pub struct App {
     pub store: Store,
     pub side: Sidecar,
     pub dirty: bool,
+    /// The document is a blank stand-in behind the password menu: nothing may be saved.
+    pub locked: bool,
     last_save: Instant,
 
     pub view: View,
@@ -411,24 +448,46 @@ pub struct Opened {
     pub store: Store,
     pub side: Sidecar,
     pub load_warning: Option<String>,
+    /// Set when the document wants a password: `doc` is then a blank stand-in, and this is the menu.
+    pub locked: Option<PasswordState>,
 }
 
 impl Opened {
     /// Opens `path`, and loads what is saved for its contents.
     pub fn load(path: &Path, password: Option<&str>, config: &Config) -> Result<Self, String> {
+        Self::load_in(store::data_dir(), path, password, config)
+    }
+
+    /// `load`, with the sidecars kept in `data_dir`.
+    fn load_in(data_dir: PathBuf, path: &Path, password: Option<&str>, config: &Config) -> Result<Self, String> {
         let bytes = Arc::new(std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?);
         // The hash and the parsing don't depend on each other.
         let hashing = {
             let bytes = bytes.clone();
             std::thread::spawn(move || store::content_key(&bytes))
         };
-        let doc = Doc::from_bytes(path, bytes, password, config.active_theme(), config.view.page_gap);
-        // On a parse error the hashing thread is left to finish on its own.
-        let doc = doc?;
+        let doc = match Doc::from_bytes(path, bytes, password, config.active_theme(), config.view.page_gap) {
+            Ok(doc) => doc,
+            Err(failure @ (OpenFailure::NeedsPassword | OpenFailure::WrongPassword)) => {
+                let notice = (failure == OpenFailure::WrongPassword).then_some("wrong password");
+                return Self::locked(data_dir, path, notice, config);
+            }
+            // On a parse error the hashing thread is left to finish on its own.
+            Err(OpenFailure::Other(e)) => return Err(e),
+        };
         let key = hashing.join().map_err(|_| format!("{}: couldn't hash the document", path.display()))?;
-        let store = Store::new(store::data_dir(), key);
+        let store = Store::new(data_dir, key);
         let (side, load_warning) = store.load(&doc.path);
-        Ok(Self { doc, store, side, load_warning })
+        Ok(Self { doc, store, side, load_warning, locked: None })
+    }
+
+    /// A blank page named `path`, with the password menu over it. Nothing of it is ever saved.
+    fn locked(data_dir: PathBuf, path: &Path, notice: Option<&str>, config: &Config) -> Result<Self, String> {
+        let bytes = Arc::new(placeholder_pdf());
+        let store = Store::new(data_dir, store::content_key(&bytes));
+        let doc = Doc::from_bytes(path, bytes, None, config.active_theme(), config.view.page_gap).map_err(|e| e.to_string())?;
+        let locked = Some(PasswordState::new(path.to_owned(), notice));
+        Ok(Self { doc, store, side: Sidecar::default(), load_warning: None, locked })
     }
 }
 
@@ -441,8 +500,10 @@ impl App {
         start_page: Option<usize>,
         warning: Option<String>,
     ) -> Self {
-        let Opened { doc, store, side, load_warning } = opened;
-        store::remember_document(&doc.path);
+        let Opened { doc, store, side, load_warning, locked } = opened;
+        if locked.is_none() {
+            store::remember_document(&doc.path);
+        }
         let (keymap, key_errors) = Keymap::new(&config.keys);
         let watcher = Watcher::start(cc.egui_ctx.clone(), &doc.path);
         cc.egui_ctx.options_mut(|o| o.zoom_with_keyboard = false);
@@ -472,7 +533,8 @@ impl App {
             queued: Vec::new(),
             queued_text: Vec::new(),
             slow_pages: HashSet::new(),
-            mode: Mode::Normal,
+            locked: locked.is_some(),
+            mode: locked.map_or(Mode::Normal, Mode::Password),
             search: None,
             selection: None,
             drag_anchor: None,
@@ -526,7 +588,7 @@ impl App {
     pub fn save(&mut self) {
         self.side.anchor = Some(self.view.anchor(&self.doc.layout));
         self.side.zoom = Some(self.view.zoom);
-        if let Err(e) = self.store.save(&self.side) {
+        if let Err(e) = save_sidecar(self.locked, &self.store, &self.side) {
             self.say(format!("couldn't save: {e}"));
         }
         self.dirty = false;
@@ -545,7 +607,10 @@ impl App {
             }
             _ => self.apply_fit(),
         }
-        if let Some(page) = self.start_page.take() {
+        // Behind the password menu the page asked for isn't there yet.
+        if !self.locked
+            && let Some(page) = self.start_page.take()
+        {
             self.view.go_to(&self.doc.layout, Anchor { page, y: 0.0, x: self.view.x });
         }
         self.render_zoom = self.view.zoom;
@@ -566,10 +631,55 @@ impl App {
 
     /// Replaces the document with `path`, keeping the view when it is the same file reloaded.
     pub fn open(&mut self, ctx: &egui::Context, path: &Path) -> Result<(), String> {
-        let same_file = path == self.doc.path;
+        let same_file = path == self.doc.path && !self.locked;
         let password = if same_file { self.doc.password().map(str::to_owned) } else { None };
-        let doc = Doc::open(path, password.as_deref(), self.config.active_theme(), self.config.view.page_gap)?;
+        match Doc::open(path, password.as_deref(), self.config.active_theme(), self.config.view.page_gap) {
+            Ok(doc) => self.install(ctx, doc, same_file),
+            Err(OpenFailure::NeedsPassword) => self.ask_password(path, None),
+            Err(OpenFailure::WrongPassword) => self.ask_password(path, Some("wrong password")),
+            Err(OpenFailure::Other(e)) => return Err(e),
+        }
+        Ok(())
+    }
+
+    /// Opens the password menu for `path`, over what is open.
+    fn ask_password(&mut self, path: &Path, notice: Option<&str>) {
+        self.pending.clear();
+        self.toc_waiting = false;
+        self.mode = Mode::Password(PasswordState::new(path.to_owned(), notice));
+    }
+
+    /// Tries what was typed in the password menu: the document opens, or the menu says why not.
+    pub fn password_submit(&mut self, ctx: &egui::Context) {
+        let Mode::Password(state) = &self.mode else { return };
+        let (path, password) = (state.path.clone(), state.field.text.clone());
+        let same_file = path == self.doc.path && !self.locked;
+        let notice = match Doc::open(&path, Some(&password), self.config.active_theme(), self.config.view.page_gap) {
+            Ok(doc) => return self.install(ctx, doc, same_file),
+            Err(OpenFailure::Other(e)) => e,
+            Err(_) => "wrong password".to_owned(),
+        };
+        if let Mode::Password(state) = &mut self.mode {
+            state.notice = Some(notice);
+        }
+    }
+
+    /// Closes the password menu: the open document stays, and with none there is nothing to show.
+    pub fn password_cancel(&mut self, ctx: &egui::Context) {
+        if self.locked {
+            ctx.send_viewport_cmd_to(egui::ViewportId::ROOT, egui::ViewportCommand::Close);
+        } else {
+            self.mode = Mode::Normal;
+        }
+    }
+
+    /// Makes `doc`, opened from its own path, the document shown. `same_file` keeps the view, as
+    /// for a reload.
+    fn install(&mut self, ctx: &egui::Context, doc: Doc, same_file: bool) {
+        let path = doc.path.clone();
+        let path = path.as_path();
         self.save();
+        self.locked = false;
         let key = store::content_key(&doc.bytes);
         if same_file {
             self.store = match self.store.clone().moved_to(key, &self.side) {
@@ -596,6 +706,8 @@ impl App {
             self.view.x = 0.0;
             store::remember_document(path);
             self.watcher.follow(path);
+            // A change flagged for the old file says nothing about this one.
+            self.watcher.doc_changed.store(false, Ordering::Release);
             if let Some(warning) = warning {
                 self.say(warning);
             }
@@ -614,7 +726,6 @@ impl App {
         self.reset_rendering();
         self.view.clamp(&self.doc.layout);
         self.set_title(ctx);
-        Ok(())
     }
 
     /// Forgets everything rendered, for a new document or new colours.
@@ -670,7 +781,8 @@ impl App {
         if self.watcher.config_changed.swap(false, Ordering::AcqRel) {
             self.reload_config(ctx);
         }
-        if self.watcher.doc_changed.swap(false, Ordering::AcqRel) {
+        // Behind the password menu there is nothing to reload; the change is looked at once it closes.
+        if !matches!(self.mode, Mode::Password(_)) && self.watcher.doc_changed.swap(false, Ordering::AcqRel) {
             let path = self.doc.path.clone();
             // A broken file is usually a build in progress: keep showing what is open.
             if let Err(e) = self.open(ctx, &path) {
@@ -962,5 +1074,143 @@ mod hotbar_tests {
         assert!(h.visible(true));
         h.tool_dropped();
         assert!(h.visible(false));
+    }
+}
+
+#[cfg(test)]
+mod password_tests {
+    use super::{PasswordState, Sidecar, Store, save_sidecar};
+    use std::path::PathBuf;
+
+    #[test]
+    fn a_locked_document_saves_nothing() {
+        let dir = std::env::temp_dir().join(format!("yavcpdf-locked-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let store = Store::new(dir.clone(), "key".to_owned());
+        let side = Sidecar::default();
+        save_sidecar(true, &store, &side).unwrap();
+        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 0, "locked must not write anything");
+        save_sidecar(false, &store, &side).unwrap();
+        assert!(std::fs::read_dir(&dir).unwrap().count() > 0, "unlocked saves");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_menu_names_the_file_and_never_prints_the_password() {
+        let mut state = PasswordState::new(PathBuf::from("/a/b/secret.pdf"), Some("wrong password"));
+        assert_eq!(state.header(), "Password for secret.pdf");
+        state.field.insert("hunter2");
+        let shown = format!("{state:?}");
+        assert!(!shown.contains("hunter2"), "{shown}");
+        assert_eq!(PasswordState::new(PathBuf::from("/a/b/x.pdf"), None).notice, None);
+    }
+}
+
+#[cfg(test)]
+mod locked_load_tests {
+    use super::{Opened, Sidecar, Store, save_sidecar};
+    use crate::config::Config;
+    use crate::doc::{OpenFailure, placeholder_pdf};
+    use crate::store;
+    use pdfcraft_cos::{Algorithm, Document, NewEncryption, SaveOptions, write_full};
+    use std::path::{Path, PathBuf};
+    use std::sync::Arc;
+
+    fn encrypted_bytes(password: &str) -> Vec<u8> {
+        let mut doc = Document::open(Arc::new(placeholder_pdf())).unwrap();
+        let encryption = NewEncryption {
+            algorithm: Algorithm::Aes128,
+            user_password: password,
+            owner_password: "o",
+            permissions: -4,
+            encrypt_metadata: true,
+            seed: [5; 32],
+        };
+        doc.set_encryption(&encryption).unwrap();
+        write_full(&doc, &SaveOptions::default()).unwrap()
+    }
+
+    fn listing(dir: &Path) -> Vec<String> {
+        let mut names: Vec<String> =
+            std::fs::read_dir(dir).map(|d| d.flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect()).unwrap_or_default();
+        names.sort();
+        names
+    }
+
+    fn scratch(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("yavcpdf-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn loading_an_encrypted_file_without_its_password_is_locked_and_writes_nothing() {
+        let dir = scratch("files");
+        let data = scratch("files-data");
+        let file = dir.join("secret.pdf");
+        std::fs::write(&file, encrypted_bytes("pw")).unwrap();
+        let config = Config::load_str("").unwrap();
+
+        let opened = Opened::load_in(data.clone(), &file, None, &config).unwrap();
+        let state = opened.locked.as_ref().expect("locked");
+        assert_eq!(state.path, file);
+        assert_eq!(state.notice, None);
+        assert_eq!(opened.doc.layout.len(), 1);
+        assert_eq!(opened.doc.path, file);
+        assert!(opened.doc.password().is_none());
+        assert_eq!(opened.side, Sidecar::default());
+        assert!(opened.load_warning.is_none());
+
+        let wrong = Opened::load_in(data.clone(), &file, Some("nope"), &config).unwrap();
+        assert_eq!(wrong.locked.as_ref().unwrap().notice.as_deref(), Some("wrong password"));
+        assert!(listing(&data).is_empty(), "a locked load wrote {:?}", listing(&data));
+
+        let right = Opened::load_in(data.clone(), &file, Some("pw"), &config).unwrap();
+        assert!(right.locked.is_none());
+        assert_eq!(right.doc.password(), Some("pw"));
+        assert_eq!(right.side.path, file.display().to_string());
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_dir_all(&data);
+    }
+
+    #[test]
+    fn a_locked_store_is_keyed_by_the_placeholder_and_the_unlocked_one_by_the_real_file() {
+        let dir = scratch("keys");
+        let data = scratch("keys-data");
+        let file = dir.join("secret.pdf");
+        let bytes = encrypted_bytes("pw");
+        std::fs::write(&file, &bytes).unwrap();
+        let config = Config::load_str("").unwrap();
+        let locked = Opened::load_in(data.clone(), &file, None, &config).unwrap();
+        let unlocked = Opened::load_in(data.clone(), &file, Some("pw"), &config).unwrap();
+        let real_key = store::content_key(&bytes);
+        let placeholder_key = store::content_key(&placeholder_pdf());
+        assert_ne!(real_key, placeholder_key);
+        let side = Sidecar { path: "x".into(), ..Default::default() };
+        save_sidecar(true, &Store::new(data.clone(), placeholder_key), &side).unwrap();
+        assert!(listing(&data).is_empty());
+        save_sidecar(false, &Store::new(data.clone(), real_key.clone()), &side).unwrap();
+        assert_eq!(listing(&data), vec![format!("{real_key}.json")]);
+        assert!(locked.locked.is_some() && unlocked.locked.is_none());
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_dir_all(&data);
+    }
+
+    #[test]
+    fn a_garbage_file_is_an_error_not_a_locked_document() {
+        let dir = scratch("garbage");
+        let data = scratch("garbage-data");
+        let file = dir.join("g.pdf");
+        std::fs::write(&file, b"nope").unwrap();
+        let config = Config::load_str("").unwrap();
+        let e = Opened::load_in(data.clone(), &file, None, &config).err().unwrap();
+        assert!(e.starts_with(&format!("{}: ", file.display())), "{e}");
+        let missing = Opened::load_in(data.clone(), &dir.join("none.pdf"), None, &config).err().unwrap();
+        assert!(missing.starts_with(&dir.display().to_string()), "{missing}");
+        assert_eq!(OpenFailure::NeedsPassword.to_string(), "the document needs a password");
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_dir_all(&data);
     }
 }

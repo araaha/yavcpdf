@@ -101,6 +101,7 @@ impl App {
             Mode::Toc(_) => self.toc_key(&stroke),
             Mode::Choice(_) => self.choice_key(&stroke),
             Mode::Sign(_) => self.sign_key(&stroke),
+            Mode::Password(_) => self.password_key(ctx, &stroke),
             Mode::AwaitMark(op) => {
                 let op = *op;
                 self.mode = Mode::Normal;
@@ -153,7 +154,29 @@ impl App {
 
     // The bar.
 
+    /// Every printable key types into the password, `u` included; Enter tries it and Ctrl+Z clears it.
+    fn password_key(&mut self, ctx: &egui::Context, stroke: &Stroke) {
+        let Mode::Password(state) = &mut self.mode else { return };
+        if self.keymap.cancels(stroke) {
+            self.password_cancel(ctx);
+        } else if stroke.is("cr") {
+            self.password_submit(ctx);
+        } else if let Some(edit) = self.keymap.edit(stroke) {
+            if edit == Edit::Undo {
+                state.field.clear();
+            } else {
+                state.field.apply(edit);
+            }
+        } else if let Some(c) = stroke.text() {
+            state.field.insert(c.encode_utf8(&mut [0; 4]));
+        }
+    }
+
     fn paste(&mut self, text: &str) {
+        if let Mode::Password(state) = &mut self.mode {
+            state.field.insert(text.lines().next().unwrap_or(""));
+            return;
+        }
         let Mode::Bar(bar) = &mut self.mode else { return };
         bar.field.insert(text.lines().next().unwrap_or(""));
         let kind = bar.kind;
@@ -597,6 +620,9 @@ impl App {
                 MouseWheelUnit::Page => *delta * self.view.rect.height(),
             };
             let at = ctx.input(|i| i.pointer.hover_pos());
+            if matches!(self.mode, Mode::Password(_)) {
+                continue;
+            }
             if matches!(self.mode, Mode::Choice(_)) {
                 self.wheel_choice(pixels.y, at);
             } else if at.is_some_and(|p| self.over_menu(p)) {
@@ -696,6 +722,12 @@ impl App {
     fn pointer_view(&mut self, ui: &egui::Ui) {
         let response = ui.interact(self.view.rect, ui.scope_id().with("view"), Sense::click_and_drag());
         self.hover = response.hover_pos();
+        if matches!(self.mode, Mode::Password(_)) {
+            // The page underneath gets nothing while the password is asked for.
+            self.hover = None;
+            ui.ctx().set_cursor_icon(CursorIcon::Default);
+            return;
+        }
         if matches!(self.mode, Mode::Sign(_)) {
             self.pointer_pad(ui.ctx(), &response);
             ui.ctx().set_cursor_icon(CursorIcon::Crosshair);

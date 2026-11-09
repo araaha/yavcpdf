@@ -239,7 +239,7 @@ impl App {
     pub fn pump_contents(&mut self) {
         if self.doc.contents_ready() {
             self.doc.read_contents();
-            if std::mem::take(&mut self.toc_waiting) {
+            if std::mem::take(&mut self.toc_waiting) && !matches!(self.mode, Mode::Password(_)) {
                 self.open_toc();
             }
         }
@@ -558,6 +558,7 @@ impl App {
 
     /// Keeps a drawn signature, and signs where it was asked for.
     pub fn sign_done(&mut self, pad: &SignPad) {
+        debug_assert!(!self.locked);
         self.mode = Mode::Normal;
         let Some(signature) = store::normalize_signature(&pad.strokes) else {
             self.say("nothing drawn");
@@ -573,6 +574,7 @@ impl App {
     }
 
     fn command_export(&mut self, argument: &str, force: bool) {
+        debug_assert!(!self.locked);
         let path = match argument {
             "" => crate::export::default_path(&self.doc.path),
             given => expand_home(given),
@@ -746,6 +748,7 @@ impl App {
             Action::Reload => {
                 let path = self.doc.path.clone();
                 match self.open(ctx, &path) {
+                    Ok(()) if matches!(self.mode, Mode::Password(_)) => {}
                     Ok(()) => self.say("reloaded"),
                     Err(e) => self.say(format!("reload failed: {e}")),
                 }

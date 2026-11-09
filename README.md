@@ -52,6 +52,7 @@ Table of Contents
     * [Forms](#forms)
     * [Portals](#portals)
     * [Opening files](#opening-files)
+    * [Password-protected PDFs](#password-protected-pdfs)
     * [Commands and the `:` menu](#commands-and-the--menu)
     * [Editing text](#editing-text)
 * [Configuration](#configuration)
@@ -212,13 +213,13 @@ yavcpdf [--page N] [--password PW] [--geometry WxH[+X+Y]]
 ```
 
 With no file, yavcpdf reopens the last document. It reloads the PDF when the
-file changes. On Windows, and on macOS when not started from a terminal,
+file changes. A password-protected PDF opens a [password menu](#password-protected-pdfs). On Windows, and on macOS when not started from a terminal,
 `--help` and argument errors show in a dialog, as do fatal errors.
 
 | Option | Effect |
 | --- | --- |
 | `--page N` | Open at page N |
-| `--password PW` | The password of an encrypted PDF |
+| `--password PW` | The password of an encrypted PDF; without it, or if it is wrong, a menu asks for the password |
 | `--geometry WxH[+X+Y]` | Set the window's inner size in points, and optionally its position |
 | `--fullscreen` / `--no-fullscreen` | Override `view.fullscreen` for this launch |
 | `--statusbar` / `--no-statusbar` | Override `statusbar.visible` for this launch |
@@ -417,6 +418,19 @@ there is one, so a portal backend such as `xdg-desktop-portal-termfilechooser`
 gets used. It says "no file chosen" if the chooser is cancelled, and also if
 none could be shown.
 
+### Password-protected PDFs
+
+A PDF that needs a password, at startup, with `:e` or `:open`, from the file
+chooser, or after a reload that no longer accepts the old password, opens a
+centred menu headed `Password for <file>`. Type the password, shown as bullets,
+and press <kbd>Enter</kbd>. A wrong one leaves the menu open with "wrong
+password" and what you typed. Every printable key types, <kbd>u</kbd> included,
+and the editing keys and pasting work as in the `:` bar. <kbd>Ctrl</kbd>+<kbd>Z</kbd>
+(`edit_undo`) clears the whole field. <kbd>Esc</kbd> closes the menu and keeps
+the open document; at startup, with none to fall back to, it quits. The page,
+the hotbar and the `:` bar don't respond while the menu is open. The password is
+kept in memory only, and nothing is saved for the document until it is open.
+
 ### Commands and the `:` menu
 
 | Command | Action |
@@ -483,7 +497,7 @@ keys on the right.
 ### Editing text
 
 The <kbd>/</kbd> <kbd>?</kbd> <kbd>:</kbd> bars, the note and text bars and the
-contents and choice filters have a cursor.
+contents and choice filters, and the password field, have a cursor.
 
 | Keys | Action |
 | --- | --- |
@@ -493,6 +507,7 @@ contents and choice filters have a cursor.
 | <kbd>Ctrl</kbd>+<kbd>Backspace</kbd>, <kbd>Ctrl</kbd>+<kbd>Delete</kbd> | Erase a word either side |
 | <kbd>Ctrl</kbd>+<kbd>W</kbd> | Erase back to the last space |
 | <kbd>Ctrl</kbd>+<kbd>U</kbd> <kbd>Ctrl</kbd>+<kbd>K</kbd> | Erase to either end |
+| <kbd>Ctrl</kbd>+<kbd>Z</kbd> | Clear the [password](#password-protected-pdfs) field; it does nothing in the other fields |
 
 The `edit_*` actions rebind them.
 
@@ -533,8 +548,8 @@ or `<esc>`.
 > A list under `[keys]` **replaces** all of that action's default keys.
 
 Esc and <kbd>Ctrl</kbd>+<kbd>C</kbd> are the `cancel` action. The `edit_*`
-actions (see [Editing text](#editing-text)) apply in the bars and the contents and
-choice filters only, and a key that types a character can't be used for them.
+actions (see [Editing text](#editing-text)) apply in the bars, the contents and
+choice filters and the password field only, and a key that types a character can't be used for them.
 
 ### Themes
 

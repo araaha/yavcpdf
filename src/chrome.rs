@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use egui::{Align, Align2, Color32, FontData, FontDefinitions, FontFamily, FontId, Painter, Pos2, Rect, Sense, Vec2, pos2, vec2};
 
-use crate::app::{App, Bar, BarKind, ChoiceState, EntryKind, FillItem, Mode, SignPad, TocState, Tool};
+use crate::app::{App, Bar, BarKind, ChoiceState, EntryKind, FillItem, Mode, PasswordState, SignPad, TocState, Tool};
 use crate::config::{Config, Side};
 use crate::field::Field;
 use crate::hint::Purpose;
@@ -231,6 +231,7 @@ impl App {
             Mode::Toc(state) => self.draw_toc(painter, state),
             Mode::Choice(state) => self.draw_choice(painter, state),
             Mode::Sign(pad) => self.draw_pad(painter, pad),
+            Mode::Password(state) => self.draw_password(painter, state),
             _ => {}
         }
     }
@@ -395,6 +396,27 @@ impl App {
         });
     }
 
+    /// The password menu, a panel like the contents with a header, the field and a line for what went wrong.
+    fn draw_password(&self, painter: &Painter, state: &PasswordState) {
+        let theme = self.config.active_theme();
+        let area = self.view.rect;
+        let row_height = bar_height(&self.config);
+        let size = vec2((area.width() * 0.7).min(760.0), row_height * 3.0 + PADDING * 2.0);
+        let rect = Rect::from_center_size(area.center(), size);
+        painter.rect_filled(rect, 0.0, theme.ui_background.egui());
+        painter.rect_stroke(rect, 0.0, egui::Stroke::new(self.config.view.border, theme.ui_accent.egui()), egui::StrokeKind::Inside);
+        let clipped = painter.with_clip_rect(rect.shrink(PADDING / 2.0));
+        let top = rect.top() + PADDING;
+        let header = pos2(rect.left() + PADDING, top + row_height / 2.0);
+        text_line(&clipped, &self.config, header, Align2::LEFT_CENTER, state.header(), theme.ui_accent.egui());
+        let line = Rect::from_min_size(pos2(rect.left(), top + row_height), vec2(rect.width(), row_height));
+        self.draw_field(painter, line, "> ", &state.field.masked(), theme.ui_text.egui());
+        if let Some(notice) = &state.notice {
+            let at = pos2(rect.left() + PADDING, top + row_height * 2.5);
+            text_line(&clipped, &self.config, at, Align2::LEFT_CENTER, notice, theme.ui_accent.egui());
+        }
+    }
+
     fn draw_choice(&self, painter: &Painter, state: &ChoiceState) {
         let rows = state.rows();
         let filter = (state.filtering || !state.filter.is_empty()).then_some(&state.filter);
@@ -544,7 +566,7 @@ impl App {
     /// Not while the command menu is shown: this registers widgets after the view, so it would
     /// take the clicks meant for the menu that covers it.
     fn draw_hotbar(&mut self, ui: &egui::Ui) {
-        if !self.hotbar.visible(self.tool.is_some()) || self.open_menu().is_some() {
+        if !self.hotbar.visible(self.tool.is_some()) || self.open_menu().is_some() || matches!(self.mode, Mode::Password(_)) {
             return;
         }
         let ctx = ui.ctx().clone();
