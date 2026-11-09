@@ -1,5 +1,6 @@
 //! Writing annotations into a new copy of the PDF. The document open in the viewer is never
 //! touched: this is how filled-in forms and signatures leave the viewer.
+use std::collections::BTreeMap;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -8,6 +9,7 @@ use pdfcraft_annot::{FillMark, Markup, Meta, NewAnnotation, NoteIcon, Shape, Sty
 use pdfcraft_cos::{Document, SaveOptions, write_incremental};
 use pdfcraft_render::PageInfo;
 
+use crate::form::{FormValue, Report, fill};
 use crate::store::{Annotation, MarkKind, NOTE_SIDE, mark_rect};
 
 const AUTHOR: &str = "yavcpdf";
@@ -109,11 +111,20 @@ fn add_all(doc: &mut Document, pages: &[PageInfo], annotations: &[Annotation]) -
     Ok(())
 }
 
-/// The bytes of the document with the annotations in it.
-fn with_annotations(bytes: Arc<Vec<u8>>, password: Option<&str>, pages: &[PageInfo], annotations: &[Annotation]) -> Result<Vec<u8>, String> {
+/// The bytes of the document with the form values and the annotations in it, and what became of
+/// the values.
+fn with_annotations(
+    bytes: Arc<Vec<u8>>,
+    password: Option<&str>,
+    pages: &[PageInfo],
+    annotations: &[Annotation],
+    form: &BTreeMap<String, FormValue>,
+) -> Result<(Vec<u8>, Report), String> {
     let mut doc = Document::open_with_password(bytes, password).map_err(|e| format!("{e:?}"))?;
+    let (filled, failed, recalc) = fill(&mut doc, form);
     add_all(&mut doc, pages, annotations)?;
-    write_incremental(&doc, &SaveOptions::default()).map_err(|e| format!("{e:?}"))
+    let written = write_incremental(&doc, &SaveOptions::default()).map_err(|e| format!("{e:?}"))?;
+    Ok((written, Report { filled, skipped: failed.len(), recalc }))
 }
 
 /// The copy's name when none is given: beside the document, with `-annotated` added.
@@ -131,21 +142,28 @@ pub fn refusal(document: &Path, path: &Path, force: bool) -> Option<String> {
     (path.exists() && !force).then(|| format!("{} exists: use :export! to replace it", path.display()))
 }
 
-/// Writes the document with `annotations` to `path`, whole or not at all.
-pub fn export(bytes: Arc<Vec<u8>>, password: Option<&str>, pages: &[PageInfo], annotations: &[Annotation], path: &Path) -> Result<(), String> {
+/// Writes the document with `annotations` and the filled-in `form` to `path`, whole or not at all.
+pub fn export(
+    bytes: Arc<Vec<u8>>,
+    password: Option<&str>,
+    pages: &[PageInfo],
+    annotations: &[Annotation],
+    form: &BTreeMap<String, FormValue>,
+    path: &Path,
+) -> Result<Report, String> {
     // The document came from a stranger, and a panic here must not cost the user their work.
-    let written = catch_unwind(AssertUnwindSafe(|| with_annotations(bytes, password, pages, annotations)));
-    let written = written.map_err(|_| "the document could not be written".to_owned())??;
+    let written = catch_unwind(AssertUnwindSafe(|| with_annotations(bytes, password, pages, annotations, form)));
+    let (written, report) = written.map_err(|_| "the document could not be written".to_owned())??;
     let temporary = path.with_extension("pdf.tmp");
     let fail = |e: std::io::Error| format!("{}: {e}", path.display());
     std::fs::write(&temporary, written).map_err(fail)?;
-    std::fs::rename(&temporary, path).map_err(fail)
+    std::fs::rename(&temporary, path).map_err(fail)?;
+    Ok(report)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::PathBuf;
 
     fn page(rotation: u16) -> PageInfo {
         let (width, height) = if rotation % 180 == 90 { (800.0, 600.0) } else { (600.0, 800.0) };
@@ -196,7 +214,7 @@ mod tests {
     fn every_kind_of_annotation_goes_into_the_copy() {
         let bytes = Arc::new(tiny_pdf());
         let annotations = sample();
-        let written = with_annotations(bytes.clone(), None, &[page(0)], &annotations).unwrap();
+        let written = with_annotations(bytes.clone(), None, &[page(0)], &annotations, &BTreeMap::new()).unwrap().0;
         assert!(written.starts_with(&bytes), "an incremental save keeps the original bytes");
         let copy = Document::open(Arc::new(written)).unwrap();
         assert_eq!(pdfcraft_annot::summaries(&copy).len(), annotations.len());
@@ -205,12 +223,12 @@ mod tests {
     #[test]
     fn an_annotation_on_a_page_that_is_gone_is_left_out() {
         let lost = Annotation::Mark { id: 1, page: 7, at: [1.0, 1.0], size: 12.0, mark: MarkKind::Dot };
-        assert!(with_annotations(Arc::new(tiny_pdf()), None, &[page(0)], &[lost]).is_ok());
+        assert!(with_annotations(Arc::new(tiny_pdf()), None, &[page(0)], &[lost], &BTreeMap::new()).is_ok());
     }
 
     #[test]
     fn a_damaged_document_is_an_error() {
-        assert!(with_annotations(Arc::new(b"not a pdf".to_vec()), None, &[page(0)], &sample()).is_err());
+        assert!(with_annotations(Arc::new(b"not a pdf".to_vec()), None, &[page(0)], &sample(), &BTreeMap::new()).is_err());
     }
 
     #[test]
@@ -235,7 +253,7 @@ mod tests {
 
     #[test]
     fn the_copy_goes_beside_the_document_and_never_over_it() {
-        assert_eq!(default_path(Path::new("/a/form.pdf")), PathBuf::from("/a/form-annotated.pdf"));
+        assert_eq!(default_path(Path::new("/a/form.pdf")), Path::new("/a").join("form-annotated.pdf"));
         let dir = std::env::temp_dir().join(format!("yavcpdf-export-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let (original, copy, free) = (dir.join("a.pdf"), dir.join("b.pdf"), dir.join("c.pdf"));
@@ -245,6 +263,97 @@ mod tests {
         assert!(refusal(&original, &copy, false).is_some());
         assert!(refusal(&original, &copy, true).is_none());
         assert!(refusal(&original, &free, false).is_none());
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    fn raw_form_pdf() -> Vec<u8> {
+        let objects = [
+            "<< /Type /Catalog /Pages 2 0 R /AcroForm << /Fields [4 0 R 5 0 R 6 0 R] /DA (/Helv 0 Tf 0 g) >> >>",
+            "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 600 800] /Resources << >> /Annots [4 0 R 5 0 R 6 0 R] >>",
+            "<< /Type /Annot /Subtype /Widget /FT /Tx /T (name) /MaxLen 10 /Rect [50 700 200 720] /P 3 0 R /DA (/Helv 0 Tf 0 g) >>",
+            "<< /Type /Annot /Subtype /Widget /FT /Btn /T (agree) /V /Off /AS /Off /Rect [50 660 70 680] /P 3 0 R /AP << /N << /Yes 7 0 R /Off 7 0 R >> >> >>",
+            "<< /Type /Annot /Subtype /Widget /FT /Ch /Ff 131072 /T (colour) /Opt [(Red) (Green)] /Rect [50 620 200 640] /P 3 0 R /DA (/Helv 0 Tf 0 g) >>",
+            "<< /Type /XObject /Subtype /Form /BBox [0 0 20 20] /Length 0 >>\nstream\n\nendstream",
+        ];
+        let mut out = b"%PDF-1.7\n".to_vec();
+        let mut offsets = Vec::new();
+        for (i, object) in objects.iter().enumerate() {
+            offsets.push(out.len());
+            out.extend_from_slice(format!("{} 0 obj\n{object}\nendobj\n", i + 1).as_bytes());
+        }
+        let xref = out.len();
+        out.extend_from_slice(format!("xref\n0 {}\n0000000000 65535 f \n", objects.len() + 1).as_bytes());
+        for offset in offsets {
+            out.extend_from_slice(format!("{offset:010} 00000 n \n").as_bytes());
+        }
+        out.extend_from_slice(format!("trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n", objects.len() + 1).as_bytes());
+        out
+    }
+
+    #[test]
+    fn form_values_go_into_the_copy_with_no_annotations() {
+        let bytes = Arc::new(raw_form_pdf());
+        let mut form = BTreeMap::new();
+        form.insert("name".to_owned(), FormValue::Text("Ada".into()));
+        form.insert("agree".to_owned(), FormValue::Check(true));
+        form.insert("colour".to_owned(), FormValue::Choice(vec!["Green".into()]));
+        let (written, report) = with_annotations(bytes.clone(), None, &[page(0)], &[], &form).unwrap();
+        assert_eq!(report, Report { filled: 3, skipped: 0, recalc: None });
+        assert!(written.starts_with(&bytes));
+        let copy = Document::open(Arc::new(written)).unwrap();
+        let by = |n: &str| pdfcraft_forms::fields(&copy).into_iter().find(|f| f.name == n).unwrap();
+        assert_eq!(by("name").value, ["Ada"]);
+        assert_eq!(FormValue::of(&by("agree")), FormValue::Check(true));
+        assert_eq!(by("colour").value, ["Green"]);
+        // the original is unchanged
+        let orig = Document::open(bytes).unwrap();
+        assert_eq!(pdfcraft_forms::fields(&orig).into_iter().find(|f| f.name == "name").unwrap().value.len(), 0);
+    }
+
+    #[test]
+    fn a_stored_field_that_is_gone_is_skipped_not_fatal() {
+        let mut form = BTreeMap::new();
+        form.insert("name".to_owned(), FormValue::Text("Ada".into()));
+        form.insert("vanished".to_owned(), FormValue::Text("x".into()));
+        let (written, report) = with_annotations(Arc::new(raw_form_pdf()), None, &[page(0)], &[], &form).unwrap();
+        assert_eq!(report, Report { filled: 1, skipped: 1, recalc: None });
+        let copy = Document::open(Arc::new(written)).unwrap();
+        assert_eq!(pdfcraft_forms::fields(&copy).into_iter().find(|f| f.name == "name").unwrap().value, ["Ada"]);
+    }
+
+    #[test]
+    fn form_values_on_a_document_with_no_form_are_all_skipped() {
+        let mut form = BTreeMap::new();
+        form.insert("a".to_owned(), FormValue::Text("x".into()));
+        let (_, report) = with_annotations(Arc::new(tiny_pdf()), None, &[page(0)], &[], &form).unwrap();
+        assert_eq!(report, Report { filled: 0, skipped: 1, recalc: None });
+    }
+
+    #[test]
+    fn form_values_and_annotations_together() {
+        let mut form = BTreeMap::new();
+        form.insert("name".to_owned(), FormValue::Text("Ada".into()));
+        let (written, report) = with_annotations(Arc::new(raw_form_pdf()), None, &[page(0)], &sample(), &form).unwrap();
+        assert_eq!(report.filled, 1);
+        let copy = Document::open(Arc::new(written)).unwrap();
+        assert!(pdfcraft_annot::summaries(&copy).len() >= sample().len());
+    }
+
+    #[test]
+    fn export_writes_a_file_and_leaves_the_original_alone() {
+        let dir = std::env::temp_dir().join(format!("yavcpdf-vexport-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let (src, out) = (dir.join("a.pdf"), dir.join("a-annotated.pdf"));
+        std::fs::write(&src, raw_form_pdf()).unwrap();
+        let before = std::fs::read(&src).unwrap();
+        let mut form = BTreeMap::new();
+        form.insert("name".to_owned(), FormValue::Text("Ada".into()));
+        let report = export(Arc::new(before.clone()), None, &[page(0)], &[], &form, &out).unwrap();
+        assert_eq!(report.filled, 1);
+        assert_eq!(std::fs::read(&src).unwrap(), before);
+        assert!(out.exists());
+        assert!(!dir.join("a-annotated.pdf.tmp").exists());
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }

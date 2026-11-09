@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::config::user_dir;
+use crate::form::FormValue;
 use crate::view::Anchor;
 
 /// A link from one place in the document to another, shown beside the source.
@@ -162,6 +163,9 @@ pub struct Sidecar {
     pub marks: BTreeMap<char, Anchor>,
     pub portals: Vec<Portal>,
     pub annotations: Vec<Annotation>,
+    /// What was filled into the form, by the fully qualified name of the field. Only the fields
+    /// that were changed are here.
+    pub form: BTreeMap<String, FormValue>,
     pub next_id: u64,
 }
 
@@ -279,10 +283,29 @@ impl Store {
 
     /// Writes the sidecar through a temporary file, so a crash can't leave half of one.
     pub fn save(&self, sidecar: &Sidecar) -> Result<(), String> {
-        std::fs::create_dir_all(&self.dir).map_err(|e| e.to_string())?;
+        // What was typed into a form is personal: for the user alone.
+        let mut dir = std::fs::DirBuilder::new();
+        dir.recursive(true);
+        #[cfg(unix)]
+        if !self.dir.exists() {
+            std::os::unix::fs::DirBuilderExt::mode(&mut dir, 0o700);
+        }
+        dir.create(&self.dir).map_err(|e| e.to_string())?;
         let text = serde_json::to_string_pretty(sidecar).map_err(|e| e.to_string())?;
         let temporary = self.file().with_extension("json.tmp");
-        std::fs::write(&temporary, text).map_err(|e| e.to_string())?;
+        // One left by a crash keeps its mode if it is written in place: start from none.
+        let _ = std::fs::remove_file(&temporary);
+        let mut options = std::fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
+        options
+            .open(&temporary)
+            .and_then(|mut f| {
+                std::io::Write::write_all(&mut f, text.as_bytes())?;
+                f.sync_all()
+            })
+            .map_err(|e| e.to_string())?;
         std::fs::rename(&temporary, self.file()).map_err(|e| e.to_string())
     }
 
@@ -511,5 +534,152 @@ mod tests {
         assert_eq!(content_key(b"a"), content_key(b"a"));
         assert_ne!(content_key(b"a"), content_key(b"b"));
         assert_eq!(content_key(b"a").len(), 32);
+    }
+
+    #[test]
+    fn the_key_is_the_truncated_sha256() {
+        assert_eq!(content_key(b"abc"), "ba7816bf8f01cfea414140de5dae2223");
+        assert_eq!(content_key(b""), "e3b0c44298fc1c149afbf4c8996fb924");
+    }
+
+    #[test]
+    fn an_old_sidecar_without_form_loads() {
+        let old = r#"{"path":"/a.pdf","anchor":null,"zoom":1.5,"marks":{},"portals":[],"annotations":[],"next_id":3}"#;
+        let side: Sidecar = serde_json::from_str(old).unwrap();
+        assert!(side.form.is_empty());
+        assert_eq!(side.next_id, 3);
+        let minimal: Sidecar = serde_json::from_str("{}").unwrap();
+        assert!(minimal.form.is_empty());
+    }
+
+    #[test]
+    fn form_values_survive_save_and_load() {
+        let dir = Scratch::new("vform");
+        let store = Store::new(dir.0.clone(), "k".to_owned());
+        let mut side = Sidecar { path: "/a.pdf".into(), ..Default::default() };
+        side.form.insert("a.b".into(), FormValue::Text("é\"x".into()));
+        side.form.insert("c".into(), FormValue::Check(true));
+        side.form.insert("r".into(), FormValue::Radio(Some("On".into())));
+        side.form.insert("l".into(), FormValue::Choice(vec!["1".into(), "2".into()]));
+        store.save(&side).unwrap();
+        let (back, warning) = store.load(Path::new("/a.pdf"));
+        assert!(warning.is_none());
+        assert_eq!(back.form, side.form);
+    }
+
+    #[test]
+    fn an_unknown_form_value_variant_is_set_aside_not_lost() {
+        let dir = Scratch::new("vbad");
+        let store = Store::new(dir.0.clone(), "k".to_owned());
+        std::fs::write(dir.0.join("k.json"), r#"{"path":"/a.pdf","form":{"x":{"Future":1}}}"#).unwrap();
+        let (side, warning) = store.load(Path::new("/a.pdf"));
+        assert!(warning.is_some());
+        assert!(side.form.is_empty());
+        assert!(dir.0.join("k.json.bad").exists(), "the unreadable file is kept");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_sidecar_is_for_its_user_alone() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = Scratch::new("mode");
+        let store = Store::new(dir.0.clone(), "k".to_owned());
+        let side = Sidecar { path: "/a.pdf".into(), ..Default::default() };
+        store.save(&side).unwrap();
+        store.save(&side).unwrap();
+        assert_eq!(std::fs::metadata(dir.0.join("k.json")).unwrap().permissions().mode() & 0o077, 0);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn save_is_0600_atomic_and_tightens_an_old_sidecar() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = Scratch::new("mode2");
+        let store = Store::new(dir.0.join("sub"), "k".to_owned());
+        let side = Sidecar { path: "/a.pdf".into(), ..Default::default() };
+        store.save(&side).unwrap();
+        let file = dir.0.join("sub").join("k.json");
+        assert_eq!(std::fs::metadata(&file).unwrap().permissions().mode() & 0o777, 0o600);
+        let names: Vec<_> = std::fs::read_dir(dir.0.join("sub")).unwrap().map(|e| e.unwrap().file_name().into_string().unwrap()).collect();
+        assert_eq!(names, ["k.json"], "no temporary left");
+        // An older, world-readable sidecar.
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o644)).unwrap();
+        assert_eq!(std::fs::metadata(&file).unwrap().permissions().mode() & 0o777, 0o644);
+        store.save(&side).unwrap();
+        assert_eq!(std::fs::metadata(&file).unwrap().permissions().mode() & 0o777, 0o600);
+        assert_eq!(std::fs::read_dir(dir.0.join("sub")).unwrap().count(), 1);
+        assert!(store.load(Path::new("/a.pdf")).0.path == "/a.pdf");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn save_over_a_stale_world_readable_temporary_still_ends_0600() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = Scratch::new("mode3");
+        let store = Store::new(dir.0.clone(), "k".to_owned());
+        let side = Sidecar { path: "/a.pdf".into(), ..Default::default() };
+        // A crash earlier left the temporary behind with a loose mode.
+        let tmp = dir.0.join("k.json.tmp");
+        std::fs::write(&tmp, "junk").unwrap();
+        std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o644)).unwrap();
+        store.save(&side).unwrap();
+        assert_eq!(std::fs::metadata(dir.0.join("k.json")).unwrap().permissions().mode() & 0o777, 0o600);
+        assert!(!tmp.exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_failed_save_leaves_the_old_sidecar_whole() {
+        let dir = Scratch::new("mode4");
+        let store = Store::new(dir.0.clone(), "k".to_owned());
+        let side = Sidecar { path: "/a.pdf".into(), ..Default::default() };
+        store.save(&side).unwrap();
+        let before = std::fs::read(dir.0.join("k.json")).unwrap();
+        // The temporary's name is taken by a directory: the write fails, the sidecar stays.
+        std::fs::create_dir(dir.0.join("k.json.tmp")).unwrap();
+        assert!(store.save(&side).is_err());
+        assert_eq!(std::fs::read(dir.0.join("k.json")).unwrap(), before);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_directory_at_the_temporary_path_keeps_the_old_sidecar_and_errors() {
+        let dir = Scratch::new("dirtmp");
+        let store = Store::new(dir.0.clone(), "k".to_owned());
+        let old = Sidecar { path: "/old.pdf".into(), ..Default::default() };
+        store.save(&old).unwrap();
+        let before = std::fs::read(dir.0.join("k.json")).unwrap();
+        let tmp = dir.0.join("k.json.tmp");
+        std::fs::create_dir(&tmp).unwrap();
+        std::fs::write(tmp.join("inner"), "x").unwrap();
+        let new = Sidecar { path: "/new.pdf".into(), ..Default::default() };
+        let e = store.save(&new).unwrap_err();
+        assert!(!e.is_empty());
+        assert_eq!(std::fs::read(dir.0.join("k.json")).unwrap(), before);
+        assert!(tmp.join("inner").exists(), "the directory is not touched");
+        assert_eq!(store.load(Path::new("/old.pdf")).0.path, "/old.pdf");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_missing_data_dir_is_made_0700_and_an_existing_one_is_left_alone() {
+        use std::os::unix::fs::PermissionsExt;
+        let base = Scratch::new("dirs");
+        let fresh = base.0.join("new").join("deeper");
+        let store = Store::new(fresh.clone(), "k".to_owned());
+        store.save(&Sidecar::default()).unwrap();
+        let mode = |p: &Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode(&fresh), 0o700, "the data dir");
+        assert_eq!(mode(&fresh.join("k.json")), 0o600);
+        eprintln!("parent made by recursive create has mode {:o}", mode(&base.0.join("new")));
+        assert_eq!(mode(&base.0.join("new")), 0o700, "intermediate directories too");
+        // An existing directory with other modes stays as it is.
+        for m in [0o755, 0o750, 0o777] {
+            let existing = base.0.join(format!("exists{m:o}"));
+            std::fs::create_dir(&existing).unwrap();
+            std::fs::set_permissions(&existing, std::fs::Permissions::from_mode(m)).unwrap();
+            Store::new(existing.clone(), "k".to_owned()).save(&Sidecar::default()).unwrap();
+            assert_eq!(mode(&existing), m);
+        }
     }
 }

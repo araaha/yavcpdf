@@ -8,6 +8,7 @@ use pdfcraft_render::{
 
 use crate::config::Theme;
 use crate::contents::{Row, contents_rows, entries};
+use crate::form::FormInfo;
 use crate::view::Layout;
 
 /// An outline entry, flattened for the table of contents.
@@ -24,6 +25,10 @@ pub struct TocEntry {
 pub struct Doc {
     pub path: PathBuf,
     pub bytes: Arc<Vec<u8>>,
+    /// What the pages are rendered from: the document's own bytes, or a copy with the user's form
+    /// values filled in. `bytes` stay the document's, as its key and its sidecar come from them.
+    pub render_bytes: Arc<Vec<u8>>,
+    pub form: FormInfo,
     pub info: DocInfo,
     pub layout: Layout,
     pub toc: Vec<TocEntry>,
@@ -136,6 +141,8 @@ impl Doc {
             text_pool: RenderPool::new(bytes.clone(), 2, config),
             text: vec![None; info.pages.len()],
             internal_links: internal_links(&info),
+            render_bytes: bytes.clone(),
+            form: FormInfo::default(),
             bytes,
             info,
             layout,
@@ -148,7 +155,14 @@ impl Doc {
     /// Starts rendering with the theme's colours. The caller drops what was rendered before.
     pub fn apply_theme(&mut self, theme: &Theme) {
         let config = render_config(self.password.as_ref(), theme);
-        self.pool = RenderPool::new(self.bytes.clone(), render_threads(), config);
+        self.pool = RenderPool::new(self.render_bytes.clone(), render_threads(), config);
+    }
+
+    /// Starts rendering from `bytes`, a copy of the document with a form filled in. The caller
+    /// drops what was rendered before.
+    pub fn show(&mut self, bytes: Arc<Vec<u8>>, theme: &Theme) {
+        self.render_bytes = bytes;
+        self.apply_theme(theme);
     }
 
     pub fn password(&self) -> Option<&str> {

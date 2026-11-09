@@ -44,6 +44,7 @@ pub enum Action {
     Command,
     HintSelect,
     HintLink,
+    HintForm,
     Yank,
     Portal,
     GotoPortal,
@@ -98,6 +99,194 @@ pub enum Action {
 }
 
 impl Action {
+    /// Every action, in declaration order. `the_list_of_actions_is_complete` keeps it whole.
+    pub const ALL: [Self; 83] = [
+        Self::Cancel,
+        Self::ScrollDown,
+        Self::ScrollUp,
+        Self::ScrollLeft,
+        Self::ScrollRight,
+        Self::HalfDown,
+        Self::HalfUp,
+        Self::ScreenDown,
+        Self::ScreenUp,
+        Self::NextPage,
+        Self::PrevPage,
+        Self::GotoFirst,
+        Self::GotoLast,
+        Self::EdgeLeft,
+        Self::EdgeRight,
+        Self::Center,
+        Self::ZoomIn,
+        Self::ZoomOut,
+        Self::FitWidth,
+        Self::FitHeight,
+        Self::SearchForward,
+        Self::SearchBackward,
+        Self::SearchNext,
+        Self::SearchPrev,
+        Self::SetMark,
+        Self::GotoMark,
+        Self::JumpBack,
+        Self::JumpForward,
+        Self::Command,
+        Self::HintSelect,
+        Self::HintLink,
+        Self::HintForm,
+        Self::Yank,
+        Self::Portal,
+        Self::GotoPortal,
+        Self::DeletePortal,
+        Self::EditPortal,
+        Self::TogglePortalWindow,
+        Self::ToggleToc,
+        Self::ToggleStatusbar,
+        Self::ToggleHotbar,
+        Self::ToolHighlight,
+        Self::ToolDraw,
+        Self::ToolErase,
+        Self::ToolNote,
+        Self::ToolFill,
+        Self::FillText,
+        Self::FillDate,
+        Self::FillCheck,
+        Self::FillCross,
+        Self::FillDot,
+        Self::FillLine,
+        Self::FillSign,
+        Self::ToolWidthDown,
+        Self::ToolWidthUp,
+        Self::DeleteAnnotation,
+        Self::Undo,
+        Self::Redo,
+        Self::ToggleTheme,
+        Self::ToggleLightDark,
+        Self::ToggleLinks,
+        Self::SmartJump,
+        Self::Overview,
+        Self::GotoOverview,
+        Self::OverviewNext,
+        Self::OverviewPrev,
+        Self::ToggleFullscreen,
+        Self::Reload,
+        Self::Quit,
+        Self::Open,
+        Self::EditLeft,
+        Self::EditRight,
+        Self::EditWordLeft,
+        Self::EditWordRight,
+        Self::EditStart,
+        Self::EditEnd,
+        Self::EditBackspace,
+        Self::EditDelete,
+        Self::EditEraseWord,
+        Self::EditDeleteWord,
+        Self::EditEraseBlank,
+        Self::EditEraseToStart,
+        Self::EditEraseToEnd,
+    ];
+
+    /// The name under `[keys]`, which is also what `:name` runs. The match has no catch-all, so a
+    /// new action does not compile until it is named here.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Cancel => "cancel",
+            Self::ScrollDown => "scroll_down",
+            Self::ScrollUp => "scroll_up",
+            Self::ScrollLeft => "scroll_left",
+            Self::ScrollRight => "scroll_right",
+            Self::HalfDown => "half_down",
+            Self::HalfUp => "half_up",
+            Self::ScreenDown => "screen_down",
+            Self::ScreenUp => "screen_up",
+            Self::NextPage => "next_page",
+            Self::PrevPage => "prev_page",
+            Self::GotoFirst => "goto_first",
+            Self::GotoLast => "goto_last",
+            Self::EdgeLeft => "edge_left",
+            Self::EdgeRight => "edge_right",
+            Self::Center => "center",
+            Self::ZoomIn => "zoom_in",
+            Self::ZoomOut => "zoom_out",
+            Self::FitWidth => "fit_width",
+            Self::FitHeight => "fit_height",
+            Self::SearchForward => "search_forward",
+            Self::SearchBackward => "search_backward",
+            Self::SearchNext => "search_next",
+            Self::SearchPrev => "search_prev",
+            Self::SetMark => "set_mark",
+            Self::GotoMark => "goto_mark",
+            Self::JumpBack => "jump_back",
+            Self::JumpForward => "jump_forward",
+            Self::Command => "command",
+            Self::HintSelect => "hint_select",
+            Self::HintLink => "hint_link",
+            Self::HintForm => "hint_form",
+            Self::Yank => "yank",
+            Self::Portal => "portal",
+            Self::GotoPortal => "goto_portal",
+            Self::DeletePortal => "delete_portal",
+            Self::EditPortal => "edit_portal",
+            Self::TogglePortalWindow => "toggle_portal_window",
+            Self::ToggleToc => "toggle_toc",
+            Self::ToggleStatusbar => "toggle_statusbar",
+            Self::ToggleHotbar => "toggle_hotbar",
+            Self::ToolHighlight => "tool_highlight",
+            Self::ToolDraw => "tool_draw",
+            Self::ToolErase => "tool_erase",
+            Self::ToolNote => "tool_note",
+            Self::ToolFill => "tool_fill",
+            Self::FillText => "fill_text",
+            Self::FillDate => "fill_date",
+            Self::FillCheck => "fill_check",
+            Self::FillCross => "fill_cross",
+            Self::FillDot => "fill_dot",
+            Self::FillLine => "fill_line",
+            Self::FillSign => "fill_sign",
+            Self::ToolWidthDown => "tool_width_down",
+            Self::ToolWidthUp => "tool_width_up",
+            Self::DeleteAnnotation => "delete_annotation",
+            Self::Undo => "undo",
+            Self::Redo => "redo",
+            Self::ToggleTheme => "toggle_theme",
+            Self::ToggleLightDark => "toggle_light_dark",
+            Self::ToggleLinks => "toggle_links",
+            Self::SmartJump => "smart_jump",
+            Self::Overview => "overview",
+            Self::GotoOverview => "goto_overview",
+            Self::OverviewNext => "overview_next",
+            Self::OverviewPrev => "overview_prev",
+            Self::ToggleFullscreen => "toggle_fullscreen",
+            Self::Reload => "reload",
+            Self::Quit => "quit",
+            Self::Open => "open",
+            Self::EditLeft => "edit_left",
+            Self::EditRight => "edit_right",
+            Self::EditWordLeft => "edit_word_left",
+            Self::EditWordRight => "edit_word_right",
+            Self::EditStart => "edit_start",
+            Self::EditEnd => "edit_end",
+            Self::EditBackspace => "edit_backspace",
+            Self::EditDelete => "edit_delete",
+            Self::EditEraseWord => "edit_erase_word",
+            Self::EditDeleteWord => "edit_delete_word",
+            Self::EditEraseBlank => "edit_erase_blank",
+            Self::EditEraseToStart => "edit_erase_to_start",
+            Self::EditEraseToEnd => "edit_erase_to_end",
+        }
+    }
+
+    /// The action with this name.
+    pub fn from_name(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|a| a.name() == name)
+    }
+
+    /// Whether the command menu lists this, and `:name` runs it: not `command` and `cancel`, which
+    /// only make sense from a key, and not the `edit_*` actions, which work in a text field alone.
+    pub fn is_listed(self) -> bool {
+        !matches!(self, Self::Command | Self::Cancel) && self.edit().is_none()
+    }
+
     /// What this does to a text field, if it is one of the `edit_*` actions. Those work in a text
     /// field and nowhere else, so they can share keys with what the same keys do in normal mode.
     fn edit(self) -> Option<Edit> {
@@ -537,5 +726,60 @@ mod tests {
         assert_eq!(Stroke::from_key(egui::Key::Escape, egui::Modifiers::NONE), Some(Stroke::plain("esc")));
         // Ctrl-i is its own key, not tab.
         assert_ne!(Stroke::from_key(egui::Key::I, ctrl).unwrap().key, "tab");
+    }
+
+    #[test]
+    fn every_action_name_reads_back_as_the_same_action() {
+        use serde::de::IntoDeserializer;
+        for action in Action::ALL {
+            let read = Action::deserialize(action.name().into_deserializer());
+            assert_eq!(read, Ok::<_, serde::de::value::Error>(action), "{}", action.name());
+            assert_eq!(Action::from_name(action.name()), Some(action));
+        }
+        assert_eq!(Action::from_name("no_such_action"), None);
+    }
+
+    #[test]
+    fn the_list_of_actions_has_no_duplicates() {
+        let mut names: Vec<&str> = Action::ALL.iter().map(|a| a.name()).collect();
+        names.sort_unstable();
+        names.dedup();
+        assert_eq!(names.len(), Action::ALL.len());
+    }
+
+    /// Every action has a default binding, so a variant missing from `ALL` is missing here too.
+    /// (The match in `name` does not compile without every variant, which names them all.)
+    #[test]
+    fn the_list_of_actions_is_complete() {
+        let config = crate::config::Config::load_str("").unwrap();
+        let bound: Vec<Action> = config.keys.keys().copied().collect();
+        let mut listed = Action::ALL.to_vec();
+        listed.sort_unstable();
+        assert_eq!(bound, listed);
+    }
+
+    /// `ALL` is the enum in declaration order, whether or not a variant has a default binding: each
+    /// sits at its own discriminant, and there are as many as the enum declares.
+    #[test]
+    fn the_list_of_actions_matches_the_enum_variant_for_variant() {
+        for (at, action) in Action::ALL.iter().enumerate() {
+            assert_eq!(*action as usize, at, "{} is out of place in Action::ALL", action.name());
+        }
+        // The last variant's discriminant is the number of variants less one, and `name` has no
+        // catch-all, so the compiler makes sure that the variant is named.
+        assert_eq!(Action::EditEraseToEnd as usize + 1, Action::ALL.len());
+        let source = include_str!("keymap.rs");
+        let body = source.split_once("pub enum Action {").and_then(|(_, rest)| rest.split_once("\n}")).map_or("", |(body, _)| body);
+        let declared = body.lines().map(str::trim).filter(|l| l.ends_with(',') && !l.starts_with(['#', '/'])).count();
+        assert_eq!(declared, Action::ALL.len(), "a variant of Action is missing from Action::ALL, or the other way round");
+    }
+
+    #[test]
+    fn only_some_actions_can_be_run_by_name() {
+        assert!(Action::ZoomIn.is_listed() && Action::ToggleToc.is_listed() && Action::Quit.is_listed());
+        for action in [Action::Command, Action::Cancel, Action::EditLeft, Action::EditEraseToEnd] {
+            assert!(!action.is_listed(), "{}", action.name());
+        }
+        assert_eq!(Action::ALL.iter().filter(|a| !a.is_listed()).count(), 2 + 13);
     }
 }

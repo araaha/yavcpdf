@@ -17,10 +17,11 @@ dbg_macro = "warn"
 todo = "warn"
 
 [dependencies]
-# The three pdfcraft revs below and the pdfcraft revs under [patch.crates-io] must be the same commit.
+# The four pdfcraft revs below and the pdfcraft revs under [patch.crates-io] must be the same commit.
 # Change them together, with scripts/update-pdfcraft.sh.
 pdfcraft-annot = { git = "https://github.com/storytold/pdfcraft", rev = "82c2009d0959dbf99dd5802cb8197c92763fb55e" }
 pdfcraft-cos = { git = "https://github.com/storytold/pdfcraft", rev = "82c2009d0959dbf99dd5802cb8197c92763fb55e" }
+pdfcraft-forms = { git = "https://github.com/storytold/pdfcraft", rev = "82c2009d0959dbf99dd5802cb8197c92763fb55e" }
 pdfcraft-render = { git = "https://github.com/storytold/pdfcraft", rev = "82c2009d0959dbf99dd5802cb8197c92763fb55e" }
 bytemuck = { version = "1", features = ["extern_crate_alloc"] }
 chrono = { version = "0.4.45", default-features = false, features = ["std", "clock"] }

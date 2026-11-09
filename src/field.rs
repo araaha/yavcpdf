@@ -60,6 +60,18 @@ impl Field {
         self.text.get(..self.cursor).unwrap_or(&self.text)
     }
 
+    /// Puts `text` in place of what is left of the cursor, which then sits after it.
+    pub fn replace_before_cursor(&mut self, text: &str) {
+        let end = if self.text.is_char_boundary(self.cursor) { self.cursor } else { self.text.len() };
+        self.text.replace_range(..end, text);
+        self.cursor = text.len();
+    }
+
+    /// Whether nothing is left of the field after the cursor.
+    pub fn at_end(&self) -> bool {
+        self.after_cursor().is_empty()
+    }
+
     fn after_cursor(&self) -> &str {
         self.text.get(self.cursor..).unwrap_or("")
     }
@@ -173,6 +185,19 @@ mod tests {
     #[test]
     fn a_new_field_has_its_cursor_at_the_end() {
         assert_eq!(marked(&Field::new("abc".to_owned())), "abc|");
+    }
+
+    #[test]
+    fn what_is_left_of_the_cursor_can_be_replaced() {
+        let mut field = at("th|日本");
+        field.replace_before_cursor("theme ");
+        assert_eq!(marked(&field), "theme |日本");
+    }
+
+    #[test]
+    fn at_end_is_true_only_with_nothing_after_the_cursor() {
+        assert!(at("abc|").at_end() && at("|").at_end());
+        assert!(!at("ab|c").at_end() && !at("|abc").at_end());
     }
 
     #[test]

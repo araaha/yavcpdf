@@ -97,7 +97,7 @@ cp "$tmp/Cargo.toml.new" Cargo.toml # (sed without -i: `sed -i` with no suffix i
 echo "pdfcraft rev in Cargo.toml: $rev"
 
 # 3. Re-resolve the git revs, then test.
-cargo update -p pdfcraft-render -p pdfcraft-annot -p pdfcraft-cos
+cargo update -p pdfcraft-render -p pdfcraft-annot -p pdfcraft-cos -p pdfcraft-forms
 cargo test
 cargo clippy --all-targets -- -D warnings
 echo "done: pdfcraft $rev"

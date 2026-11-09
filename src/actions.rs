@@ -13,6 +13,7 @@ use crate::app::{
 use crate::config::expand_home;
 use crate::doc::{dest_point, dest_y};
 use crate::field::Field;
+use crate::form::Report;
 use crate::hint::{self, HintState, Purpose, Target, TargetKind};
 use crate::keymap::Action;
 use crate::search::Search;
@@ -191,7 +192,8 @@ impl App {
     fn open_bar(&mut self, kind: BarKind) {
         let previous = if matches!(kind, BarKind::Search { .. }) { self.search.clone() } else { None };
         let origin = self.view.anchor(&self.doc.layout);
-        self.mode = Mode::Bar(Bar { kind, field: Field::default(), origin, previous, completion: None });
+        self.mode = Mode::Bar(Bar { kind, field: Field::default(), origin, previous, menu: None });
+        self.refresh_menu();
     }
 
     fn run_modes(&mut self, ctx: &egui::Context, action: Action) -> bool {
@@ -208,6 +210,7 @@ impl App {
             Action::SmartJump => self.mode = Mode::Hint(HintState::new(Purpose::Smart)),
             Action::Overview => self.mode = Mode::Hint(HintState::new(Purpose::Overview)),
             Action::HintLink => self.mode = Mode::Hint(HintState::new(Purpose::Link)),
+            Action::HintForm => self.mode = Mode::Hint(HintState::new(Purpose::Form)),
             Action::DeleteAnnotation => self.mode = Mode::Hint(HintState::new(Purpose::DeleteAnnotation)),
             Action::ToggleToc => self.open_toc(),
             Action::Open => self.choose_file(ctx),
@@ -354,6 +357,7 @@ impl App {
                 }
                 Edit::Replaced { before: after, after: before }
             }
+            Edit::Form(changes) => self.apply_form_edit(changes),
         }
     }
 
@@ -436,7 +440,7 @@ impl App {
 
     fn open_entry(&mut self, entry: Entry, text: String) {
         let origin = self.view.anchor(&self.doc.layout);
-        self.mode = Mode::Bar(Bar { kind: BarKind::Entry(entry), field: Field::new(text), origin, previous: None, completion: None });
+        self.mode = Mode::Bar(Bar { kind: BarKind::Entry(entry), field: Field::new(text), origin, previous: None, menu: None });
     }
 
     /// Opens a note for editing.
@@ -570,9 +574,10 @@ impl App {
             self.say(refusal);
             return;
         }
-        let result = crate::export::export(self.doc.bytes.clone(), self.doc.password(), &self.doc.info.pages, &self.side.annotations, &path);
+        let (bytes, pages) = (self.doc.bytes.clone(), &self.doc.info.pages);
+        let result = crate::export::export(bytes, self.doc.password(), pages, &self.side.annotations, &self.side.form, &path);
         self.say(match result {
-            Ok(()) => format!("exported {} annotations to {}", self.side.annotations.len(), path.display()),
+            Ok(report) => exported_message(self.side.annotations.len(), report, &path),
             Err(e) => format!("export failed: {e}"),
         });
     }
@@ -852,13 +857,15 @@ impl App {
         let purpose = state.purpose;
         let areas = self.visible_areas();
         let needs_text = matches!(purpose, Purpose::Select | Purpose::Place | Purpose::Smart | Purpose::Overview);
-        if needs_text && areas.iter().any(|(page, _)| self.doc.text[*page].is_none()) {
+        // The form is read in the background: the labels wait for it.
+        if (purpose == Purpose::Form && !self.doc.form.ready) || needs_text && areas.iter().any(|(page, _)| self.doc.text[*page].is_none()) {
             return;
         }
         let targets = match purpose {
             Purpose::Select => self.word_targets(&areas),
             Purpose::Place => self.place_targets(&areas),
             Purpose::Link => self.link_targets(&areas),
+            Purpose::Form => self.form_targets(&areas),
             Purpose::DeleteAnnotation => self.annotation_targets(&areas),
             Purpose::Smart | Purpose::Overview => {
                 let (targets, references) = self.smart_targets(&areas);
@@ -871,6 +878,7 @@ impl App {
             self.say(match purpose {
                 Purpose::Select | Purpose::Place => "no text here",
                 Purpose::Link => "no links here",
+                Purpose::Form => "no form fields here",
                 Purpose::DeleteAnnotation => "no annotations here",
                 Purpose::Smart | Purpose::Overview => "no references here",
             });
@@ -942,6 +950,10 @@ impl App {
                 self.mode = Mode::Normal;
                 self.remove_annotation(id);
             }
+            TargetKind::Widget(field, widget) => {
+                self.mode = Mode::Normal;
+                self.form_activate(field, widget);
+            }
         }
     }
 
@@ -1012,12 +1024,29 @@ impl App {
             "hotbar" => self.hotbar.toggle(self.tool.is_some()),
             "export" => self.command_export(argument, false),
             "export!" => self.command_export(argument, true),
+            "clearform" => self.clear_form(),
             "sign" => self.mode = Mode::Sign(SignPad::default()),
             "marks" => {
                 let marks: String = self.side.marks.keys().collect();
                 self.say(if marks.is_empty() { "no marks".to_owned() } else { format!("marks: {marks}") });
             }
-            other => self.say(format!("unknown command: {other}")),
+            // An action by its name, as under `[keys]`. The commands above come first.
+            other => match Action::from_name(other).filter(|a| a.is_listed()) {
+                Some(action) => self.command_action(ctx, action, argument),
+                None => self.say(format!("unknown command: {other}")),
+            },
+        }
+    }
+
+    /// An action named in a command. The one argument it may have is a count, as when typed before
+    /// the keys of the action.
+    fn command_action(&mut self, ctx: &egui::Context, action: Action, argument: &str) {
+        if argument.is_empty() {
+            self.run(ctx, action, None);
+        } else if let Some(count) = count_argument(argument) {
+            self.run(ctx, action, Some(count));
+        } else {
+            self.say(format!("{} takes no argument (a count is allowed)", action.name()));
         }
     }
 
@@ -1100,6 +1129,14 @@ impl App {
     }
 }
 
+/// What an export says for itself.
+fn exported_message(annotations: usize, report: Report, path: &Path) -> String {
+    let filled = if report.filled > 0 { format!(" and {} filled-in fields", report.filled) } else { String::new() };
+    let skipped = if report.skipped > 0 { format!(" ({} fields couldn't be filled in)", report.skipped) } else { String::new() };
+    let recalc = report.recalc.map_or_else(String::new, |why| format!(" (the calculated fields couldn't be recalculated: {why})"));
+    format!("exported {annotations} annotations{filled} to {}{skipped}{recalc}", path.display())
+}
+
 /// A source anchor marks the middle of the view: the top of the view that puts it there.
 fn top_of_view(app: &App, source: Anchor) -> Anchor {
     let span = app.view.rect.height() / app.view.zoom;
@@ -1111,9 +1148,16 @@ fn view_top(y: f32, percent: f32, span: f32) -> f32 {
     y - (1.0 - percent / 100.0) * span
 }
 
+/// The count in `:zoom_in 3`: a positive whole number, saturating when it is too big for one.
+fn count_argument(argument: &str) -> Option<u32> {
+    let digits = !argument.is_empty() && argument.bytes().all(|b| b.is_ascii_digit());
+    let count = if digits { argument.parse().unwrap_or(u32::MAX) } else { 0 };
+    (count > 0).then_some(count)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::view_top;
+    use super::{count_argument, view_top};
     use crate::view::{Anchor, Layout, View};
     use egui::{Rect, pos2, vec2};
 
@@ -1123,6 +1167,16 @@ mod tests {
         assert_eq!(view_top(500.0, 50.0, 200.0), 400.0);
         assert_eq!(view_top(500.0, 0.0, 200.0), 300.0);
         assert_eq!(view_top(500.0, 25.0, 200.0), 350.0);
+    }
+
+    #[test]
+    fn an_action_takes_a_positive_whole_number_as_its_count() {
+        assert_eq!(count_argument("3"), Some(3));
+        assert_eq!(count_argument("007"), Some(7));
+        assert_eq!(count_argument("99999999999999999999"), Some(u32::MAX));
+        for bad in ["", "0", "00", "-1", "+1", "1.5", "x", "3 4", "٣"] {
+            assert_eq!(count_argument(bad), None, "{bad:?}");
+        }
     }
 
     #[test]

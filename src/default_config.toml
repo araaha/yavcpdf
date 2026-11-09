@@ -123,6 +123,7 @@ jump_forward = ["<A-i>"]
 command = [":"]
 hint_select = ["f", "<A-w>"]
 hint_link = ["F", "<A-n>"]
+hint_form = ["i"]            # fill in a field of the form, or press its button
 yank = ["y"]
 portal = ["p"]
 smart_jump = ["gd", "<C-]>"]

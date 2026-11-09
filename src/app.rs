@@ -13,6 +13,7 @@ use crate::cache::{TileCache, TileKey};
 use crate::config::Config;
 use crate::doc::Doc;
 use crate::field::Field;
+use crate::form::{FormChange, FormState};
 use crate::hint::HintState;
 use crate::keymap::{Keymap, Pending};
 use crate::overview::Overview;
@@ -110,9 +111,13 @@ pub struct SignPad {
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum BarKind {
-    Search { forward: bool },
+    Search {
+        forward: bool,
+    },
     Command,
     Entry(Entry),
+    /// A field of the form: what it is editing is `App::form.edit`.
+    Form,
 }
 
 /// The bar at the top.
@@ -124,13 +129,40 @@ pub struct Bar {
     pub origin: Anchor,
     /// The search the bar's replaces, to go back to on escape.
     pub previous: Option<Search>,
-    /// The run of Tabs in progress, ended by any other key. Boxed to keep `Mode` small.
-    pub completion: Option<Box<crate::complete::Cycle>>,
+    /// The menu of the `:` bar, made again whenever its text changes. Boxed to keep `Mode` small.
+    pub menu: Option<Box<crate::menu::Menu>>,
 }
 
 #[derive(Clone, Debug, Default)]
 pub struct TocState {
     pub selected: usize,
+    pub filter: Field,
+    pub filtering: bool,
+}
+
+/// The panel for choosing in a combo or list box, laid out like the table of contents.
+#[derive(Clone, Debug)]
+pub struct ChoiceState {
+    /// The field's fully qualified name.
+    pub name: String,
+    /// What the panel's header says: the field's tooltip, else its name.
+    pub title: String,
+    /// The options as (export value, display text).
+    pub options: Vec<(String, String)>,
+    pub multi: bool,
+    pub editable: bool,
+    /// The export values chosen now. In a multi-select list, the marks Space toggles.
+    pub marked: Vec<String>,
+    /// The values the field had on opening, to tell whether Enter changes anything.
+    pub initial: Vec<String>,
+    /// The current values that are no option's export value, each shown as a ticked row.
+    pub strangers: Vec<String>,
+    /// The highlighted row, as a place in the rows the filter lets through.
+    pub selected: usize,
+    /// The first row shown. Moving the highlight keeps it in sight; the wheel moves it.
+    pub first: usize,
+    /// The part of a row the wheel has moved the list by and not yet scrolled.
+    pub wheel_rest: f32,
     pub filter: Field,
     pub filtering: bool,
 }
@@ -147,6 +179,7 @@ pub enum Mode {
     Bar(Bar),
     Hint(HintState),
     Toc(TocState),
+    Choice(ChoiceState),
     AwaitMark(MarkOp),
     Sign(SignPad),
 }
@@ -183,6 +216,8 @@ pub enum Edit {
         before: Annotation,
         after: Annotation,
     },
+    /// Values filled into the form changed.
+    Form(Vec<FormChange>),
 }
 
 /// A portal being made: from where, and whether it replaces an existing one's target.
@@ -326,6 +361,10 @@ pub struct App {
     pub signature: Option<Strokes>,
     /// Where the pointer is over the view.
     pub hover: Option<Pos2>,
+    /// When and where a click closed the choice panel, to swallow the second click of a double click.
+    pub choice_closed: Option<(f64, Pos2)>,
+    /// When and where a click opened the choice panel, to ignore the second click of a double click.
+    pub choice_opened: Option<(f64, Pos2)>,
     pub links_shown: bool,
     /// A reference waiting for the text of every page, to look up what it points at.
     pub smart: Option<(Reference, Landing)>,
@@ -338,6 +377,7 @@ pub struct App {
     pub hint_references: Vec<Reference>,
     pub undo: Vec<Edit>,
     pub redo: Vec<Edit>,
+    pub form: FormState,
 
     pub jumps: Vec<Anchor>,
     pub jump_index: usize,
@@ -430,6 +470,8 @@ impl App {
             fill: FillItem::Text,
             signature: store::load_signature(&store::data_dir()),
             hover: None,
+            choice_closed: None,
+            choice_opened: None,
             smart: None,
             toc_waiting: false,
             chooser: None,
@@ -437,6 +479,7 @@ impl App {
             hint_references: Vec::new(),
             undo: Vec::new(),
             redo: Vec::new(),
+            form: FormState::fresh(),
             jumps: Vec::new(),
             jump_index: 0,
             pending_portal: None,
@@ -550,8 +593,11 @@ impl App {
         self.overview = None;
         self.view.zoom_hold = None;
         self.mode = Mode::Normal;
+        self.choice_closed = None;
+        self.choice_opened = None;
         self.pending.clear();
         self.doc = doc;
+        self.form = FormState::fresh();
         self.reset_rendering();
         self.view.clamp(&self.doc.layout);
         self.set_title(ctx);
@@ -561,6 +607,11 @@ impl App {
     /// Forgets everything rendered, for a new document or new colours.
     pub fn reset_rendering(&mut self) {
         self.cache.clear();
+        self.forget_queue();
+    }
+
+    /// Asks the render workers for everything again, whatever they were sent.
+    pub fn forget_queue(&mut self) {
         self.queued.clear();
         self.queued_text.clear();
         self.slow_pages.clear();
@@ -791,6 +842,7 @@ impl eframe::App for App {
         self.pump_smart();
         self.pump_contents();
         self.pump_chooser(&ctx);
+        self.pump_form(&ctx);
         self.prepare_hints();
         self.settle_zoom(&ctx);
         self.frame(ui);

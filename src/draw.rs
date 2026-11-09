@@ -114,6 +114,8 @@ impl App {
                 let rect = Rect::from_min_size(place.origin + vec2(x as f32, y as f32) * unit, vec2(width as f32, height as f32) * unit);
                 painter.image(texture, rect, UV, Color32::WHITE);
             }
+        } else {
+            self.cache.settle(page);
         }
         for unit in units {
             let key = place.key(unit);
@@ -193,7 +195,7 @@ impl App {
         let shown = view.visible_pages(&self.doc.layout);
         let theme = self.config.active_theme();
         if self.links_shown {
-            for page in shown.clone() {
+            for page in shown.clone().filter(|p| self.cache.shows_page(*p)) {
                 if let Some(rects) = self.doc.internal_links.get(page) {
                     self.fill_rects(painter, view, page, rects, theme.link);
                 }

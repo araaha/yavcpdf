@@ -2107,6 +2107,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "pdfcraft-content"
+version = "0.18.1"
+source = "git+https://github.com/storytold/pdfcraft?rev=82c2009d0959dbf99dd5802cb8197c92763fb55e#82c2009d0959dbf99dd5802cb8197c92763fb55e"
+dependencies = [
+ "hayro-syntax",
+ "pdfcraft-cos",
+]
+
+[[package]]
 name = "pdfcraft-cos"
 version = "0.18.1"
 source = "git+https://github.com/storytold/pdfcraft?rev=82c2009d0959dbf99dd5802cb8197c92763fb55e#82c2009d0959dbf99dd5802cb8197c92763fb55e"
@@ -2152,6 +2161,18 @@ dependencies = [
  "pdfcraft-cos",
  "skrifa 0.44.0",
  "unicode-bidi",
+]
+
+[[package]]
+name = "pdfcraft-forms"
+version = "0.18.1"
+source = "git+https://github.com/storytold/pdfcraft?rev=82c2009d0959dbf99dd5802cb8197c92763fb55e#82c2009d0959dbf99dd5802cb8197c92763fb55e"
+dependencies = [
+ "pdfcraft-content",
+ "pdfcraft-cos",
+ "pdfcraft-fonts",
+ "pdfcraft-model",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -3911,6 +3932,7 @@ dependencies = [
  "egui",
  "pdfcraft-annot",
  "pdfcraft-cos",
+ "pdfcraft-forms",
  "pdfcraft-render",
  "rfd",
  "serde",

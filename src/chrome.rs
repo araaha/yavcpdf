@@ -3,13 +3,45 @@ use std::sync::Arc;
 
 use egui::{Align, Align2, Color32, FontData, FontDefinitions, FontFamily, FontId, Painter, Pos2, Rect, Sense, Vec2, pos2, vec2};
 
-use crate::app::{App, Bar, BarKind, EntryKind, FillItem, Mode, SignPad, TocState, Tool};
+use crate::app::{App, Bar, BarKind, ChoiceState, EntryKind, FillItem, Mode, SignPad, TocState, Tool};
 use crate::config::{Config, Side};
 use crate::field::Field;
 use crate::hint::Purpose;
 use crate::keymap::Action;
+use crate::menu::Menu;
 
 const PADDING: f32 = 8.0;
+
+/// A row of a list panel: how far its text is indented, the text, and the mark at the right.
+struct ListRow {
+    indent: f32,
+    text: String,
+    mark: String,
+    /// A tick drawn in the mark's place.
+    ticked: bool,
+}
+
+/// What a list panel shows: the optional header and filter rows, `len` rows with the highlight
+/// on `at`, and the first row shown when the caller fixes it (else `at` is kept in the middle).
+#[derive(Clone, Copy)]
+pub struct ListView<'a> {
+    pub header: Option<&'a str>,
+    pub filter: Option<&'a Field>,
+    pub len: usize,
+    pub at: usize,
+    pub first: Option<usize>,
+}
+
+/// Where a list panel puts things.
+pub struct ListLayout {
+    pub rect: Rect,
+    /// Where the first row's box starts, below the header and filter rows.
+    pub top: f32,
+    pub row_height: f32,
+    /// The first row shown, and how many fit.
+    pub first: usize,
+    pub fits: usize,
+}
 
 pub fn bar_height(config: &Config) -> f32 {
     (config.font_size * 1.7).round()
@@ -152,6 +184,7 @@ impl App {
                 (Purpose::Smart, _) => "HINT: jump to".to_owned(),
                 (Purpose::Overview, _) => "HINT: overview".to_owned(),
                 (Purpose::Place, _) => "HINT: place".to_owned(),
+                (Purpose::Form, _) => "HINT: form field".to_owned(),
             };
         }
         if let Some(overview) = &self.overview {
@@ -189,8 +222,14 @@ impl App {
         }
         self.draw_hotbar(ui);
         match &self.mode {
-            Mode::Bar(bar) => self.draw_bar(painter, bar),
+            Mode::Bar(bar) => {
+                self.draw_bar(painter, bar);
+                if let Some(menu) = bar.menu.as_deref().filter(|m| m.is_shown()) {
+                    self.draw_menu(painter, menu);
+                }
+            }
             Mode::Toc(state) => self.draw_toc(painter, state),
+            Mode::Choice(state) => self.draw_choice(painter, state),
             Mode::Sign(pad) => self.draw_pad(painter, pad),
             _ => {}
         }
@@ -219,10 +258,92 @@ impl App {
             BarKind::Command => ":",
             BarKind::Entry(entry) if entry.kind == EntryKind::Note => "note: ",
             BarKind::Entry(_) => "text: ",
+            BarKind::Form => self.form.edit.as_ref().map_or("field: ", |edit| edit.prompt.as_str()),
         };
         self.draw_field(painter, rect, prompt, &bar.field, theme.ui_text.egui());
         if let Some(search) = self.search.as_ref().filter(|_| matches!(bar.kind, BarKind::Search { .. })) {
             text_line(painter, &self.config, rect.right_center() - vec2(PADDING, 0.0), Align2::RIGHT_CENTER, search.status(), theme.ui_accent.egui());
+        }
+    }
+
+    /// How many rows of the menu fit under the bar.
+    pub fn menu_rows(&self) -> usize {
+        let room = self.view.rect.height() - bar_height(&self.config) * 2.0 - PADDING;
+        (room / bar_height(&self.config)).max(0.0) as usize
+    }
+
+    /// Where the menu is: under the bar, at its left, a good share of the view wide.
+    pub fn menu_rect(&self, menu: &Menu) -> Rect {
+        let area = self.view.rect;
+        let row_height = bar_height(&self.config);
+        let (list, footer) = menu.layout(self.menu_rows());
+        let rows = list + usize::from(footer);
+        Rect::from_min_size(pos2(area.left(), area.top() + row_height), vec2(area.width(), rows as f32 * row_height + PADDING))
+    }
+
+    /// The menu's rows, each as its index in the list and the rectangle it covers.
+    pub fn menu_row_rects(&self, menu: &Menu) -> Vec<(usize, Rect)> {
+        let rect = self.menu_rect(menu);
+        let row_height = bar_height(&self.config);
+        let (list, _) = menu.layout(self.menu_rows());
+        (0..list)
+            .map(|row| {
+                let top = rect.top() + PADDING / 2.0 + row as f32 * row_height;
+                (menu.scroll + row, Rect::from_min_size(pos2(rect.left() + PADDING / 2.0, top), vec2(rect.width() - PADDING, row_height)))
+            })
+            .collect()
+    }
+
+    /// The menu of commands and actions under the `:` bar.
+    fn draw_menu(&self, painter: &Painter, menu: &Menu) {
+        let theme = self.config.active_theme();
+        if let Some(count) = menu.count_label(self.menu_rows()) {
+            let bar = Rect::from_min_size(self.view.rect.min, vec2(self.view.rect.width(), bar_height(&self.config)));
+            let dim = theme.ui_text.egui().gamma_multiply(0.6);
+            text_line(painter, &self.config, bar.right_center() - vec2(PADDING, 0.0), Align2::RIGHT_CENTER, &count, dim);
+        }
+        let rect = self.menu_rect(menu);
+        painter.rect_filled(rect, 0.0, theme.ui_background.egui());
+        painter.rect_stroke(rect, 0.0, egui::Stroke::new(self.config.view.border, theme.ui_accent.egui()), egui::StrokeKind::Inside);
+        let clipped = painter.with_clip_rect(rect.shrink(PADDING / 2.0));
+        let (text_color, accent) = (theme.ui_text.egui(), theme.ui_accent.egui());
+        for (index, line) in self.menu_row_rects(menu) {
+            let Some(entry) = menu.entries.get(index) else { continue };
+            let selected = menu.highlighted() == Some(index);
+            if selected {
+                clipped.rect_filled(line, 0.0, accent);
+            }
+            let color = if selected { theme.ui_background.egui() } else { text_color };
+            let dim = color.gamma_multiply(0.6);
+            let keys = text_line(&clipped, &self.config, line.right_center() - vec2(PADDING, 0.0), Align2::RIGHT_CENTER, &entry.keys, dim);
+            let room = Rect::from_min_max(line.min, pos2(keys.left() - PADDING, line.max.y)).intersect(clipped.clip_rect());
+            let mut job = egui::text::LayoutJob::default();
+            let format = |color: Color32| egui::TextFormat { font_id: font(&self.config), color, ..Default::default() };
+            for (i, c) in entry.label.chars().enumerate() {
+                let marked = entry.matched.contains(&i);
+                job.append(c.encode_utf8(&mut [0; 4]), 0.0, format(if marked && !selected { accent } else { color }));
+            }
+            if !entry.hint.is_empty() {
+                job.append(&format!(" {}", entry.hint), 0.0, format(dim));
+            }
+            let galley = painter.layout_job(job);
+            let baseline = galley.rows.first().map_or(0.0, |row| row.pos.y + row.glyphs.first().map_or(0.0, |g| g.pos.y));
+            let at = pos2(line.left() + PADDING, line.center().y + cap_middle(painter, font(&self.config)) - baseline);
+            clipped.with_clip_rect(room).galley(at, galley, color);
+        }
+        if menu.incomplete {
+            let bottom = Rect::from_min_size(
+                pos2(rect.left(), rect.bottom() - PADDING / 2.0 - bar_height(&self.config)),
+                vec2(rect.width(), bar_height(&self.config)),
+            );
+            text_line(
+                &clipped,
+                &self.config,
+                bottom.left_center() + vec2(PADDING * 1.5, 0.0),
+                Align2::LEFT_CENTER,
+                "(listing incomplete)",
+                text_color.gamma_multiply(0.6),
+            );
         }
     }
 
@@ -267,46 +388,87 @@ impl App {
     }
 
     fn draw_toc(&self, painter: &Painter, state: &TocState) {
-        let theme = self.config.active_theme();
+        let rows = self.toc_rows(state);
+        let at = rows.iter().position(|r| *r >= state.selected).unwrap_or(0);
+        let filter = (state.filtering || !state.filter.is_empty()).then_some(&state.filter);
+        self.draw_list(painter, &ListView { header: None, filter, len: rows.len(), at, first: None }, |i| {
+            let entry = &self.doc.toc[rows[i]];
+            ListRow { indent: entry.depth as f32 * 14.0, text: entry.title.clone(), mark: (entry.page + 1).to_string(), ticked: false }
+        });
+    }
+
+    fn draw_choice(&self, painter: &Painter, state: &ChoiceState) {
+        let rows = state.rows();
+        let filter = (state.filtering || !state.filter.is_empty()).then_some(&state.filter);
+        let view = ListView { header: Some(&state.title), filter, len: rows.len(), at: state.selected, first: Some(state.first) };
+        self.draw_list(painter, &view, |i| ListRow { indent: 0.0, text: state.label(rows[i]), mark: String::new(), ticked: state.ticked(rows[i]) });
+    }
+
+    /// Where a list panel (the contents, the choices) and its rows go: a centred box with the
+    /// optional header and filter rows above the list, scrolled to keep row `at` in the middle,
+    /// or to start at row `first` when that is given.
+    pub fn list_layout(&self, header: bool, filter: bool, len: usize, at: usize, first: Option<usize>) -> ListLayout {
         let area = self.view.rect;
         let size = vec2((area.width() * 0.7).min(760.0), area.height() * 0.8);
         let rect = Rect::from_center_size(area.center(), size);
-        painter.rect_filled(rect, 0.0, theme.ui_background.egui());
-        painter.rect_stroke(rect, 0.0, egui::Stroke::new(1.0, theme.ui_accent.egui()), egui::StrokeKind::Inside);
         let row_height = bar_height(&self.config);
+        let top = rect.top() + PADDING + row_height * (usize::from(header) + usize::from(filter)) as f32;
+        let fits = (((rect.bottom() - top - PADDING) / row_height) as usize).max(1);
+        let first = first.unwrap_or_else(|| at.saturating_sub(fits / 2)).min(len.saturating_sub(fits));
+        ListLayout { rect, top, row_height, first, fits }
+    }
+
+    /// The box of a row of a list panel, as `list_layout` placed it.
+    pub fn list_row_rect(layout: &ListLayout, i: usize) -> Rect {
+        let y = layout.top + (i - layout.first) as f32 * layout.row_height;
+        Rect::from_min_size(pos2(layout.rect.left() + PADDING / 2.0, y), vec2(layout.rect.width() - PADDING, layout.row_height))
+    }
+
+    /// A panel of rows with a mark at the right of each, as the table of contents is drawn.
+    fn draw_list(&self, painter: &Painter, view: &ListView, row: impl Fn(usize) -> ListRow) {
+        let ListView { header, filter, len, at, first } = *view;
+        let theme = self.config.active_theme();
+        let layout = self.list_layout(header.is_some(), filter.is_some(), len, at, first);
+        let rect = layout.rect;
+        painter.rect_filled(rect, 0.0, theme.ui_background.egui());
+        painter.rect_stroke(rect, 0.0, egui::Stroke::new(self.config.view.border, theme.ui_accent.egui()), egui::StrokeKind::Inside);
+        let row_height = layout.row_height;
         let mut y = rect.top() + PADDING;
         let text_color = theme.ui_text.egui();
-        if state.filtering || !state.filter.is_empty() {
-            let row = Rect::from_min_size(pos2(rect.left(), y), vec2(rect.width(), row_height));
-            self.draw_field(painter, row, "/", &state.filter, theme.ui_accent.egui());
+        if let Some(header) = header {
+            let at = pos2(rect.left() + PADDING, y + row_height / 2.0);
+            let room = Rect::from_min_max(rect.min, pos2(rect.right() - PADDING, rect.bottom())).intersect(rect.shrink(PADDING / 2.0));
+            text_line(&painter.with_clip_rect(room), &self.config, at, Align2::LEFT_CENTER, header, theme.ui_accent.egui());
             y += row_height;
         }
-        let rows = self.toc_rows(state);
-        let at = rows.iter().position(|r| *r >= state.selected).unwrap_or(0);
-        let fits = (((rect.bottom() - y - PADDING) / row_height) as usize).max(1);
-        let first = at.saturating_sub(fits / 2).min(rows.len().saturating_sub(fits));
+        if let Some(filter) = filter {
+            let line = Rect::from_min_size(pos2(rect.left(), y), vec2(rect.width(), row_height));
+            self.draw_field(painter, line, "/", filter, theme.ui_accent.egui());
+        }
         let clipped = painter.with_clip_rect(rect.shrink(PADDING / 2.0));
-        for (i, row) in rows.iter().enumerate().skip(first).take(fits) {
-            let entry = &self.doc.toc[*row];
-            let line = Rect::from_min_size(pos2(rect.left() + PADDING / 2.0, y), vec2(rect.width() - PADDING, row_height));
+        for i in (layout.first..len).take(layout.fits) {
+            let row = row(i);
+            let line = Self::list_row_rect(&layout, i);
             let selected = i == at;
             if selected {
                 clipped.rect_filled(line, 0.0, theme.ui_accent.egui());
             }
             let color = if selected { theme.ui_background.egui() } else { text_color };
-            let indent = PADDING + entry.depth as f32 * 14.0;
-            let number = text_line(&clipped, &self.config, line.right_center() - vec2(PADDING, 0.0), Align2::RIGHT_CENTER, entry.page + 1, color);
-            // A long title stops short of its page number.
-            let room = Rect::from_min_max(line.min, pos2(number.left() - PADDING, line.max.y)).intersect(clipped.clip_rect());
-            text_line(
-                &clipped.with_clip_rect(room),
-                &self.config,
-                pos2(line.left() + indent, line.center().y),
-                Align2::LEFT_CENTER,
-                &entry.title,
-                color,
-            );
-            y += row_height;
+            let indent = PADDING + row.indent;
+            let mark = if row.ticked {
+                // Drawn, not typed: the fonts bundled with egui have no check mark.
+                let size = row_height * 0.4;
+                let tick = Rect::from_min_size(pos2(line.right() - PADDING - size, line.center().y - size / 2.0), vec2(size, size));
+                let at = |x: f32, y: f32| tick.min + vec2(x, y) * size;
+                let points = vec![at(0.0, 0.55), at(0.4, 1.0), at(1.0, 0.0)];
+                clipped.add(egui::Shape::line(points, egui::Stroke::new((row_height / 12.0).max(1.5), color)));
+                tick
+            } else {
+                text_line(&clipped, &self.config, line.right_center() - vec2(PADDING, 0.0), Align2::RIGHT_CENTER, row.mark, color)
+            };
+            // A long title stops short of its mark.
+            let room = Rect::from_min_max(line.min, pos2(mark.left() - PADDING, line.max.y)).intersect(clipped.clip_rect());
+            text_line(&clipped.with_clip_rect(room), &self.config, pos2(line.left() + indent, line.center().y), Align2::LEFT_CENTER, row.text, color);
         }
     }
 
@@ -381,8 +543,10 @@ impl App {
     }
 
     /// Shown as `HotbarState` says: asked for, or a tool in hand and not hidden.
+    /// Not while the command menu is shown: this registers widgets after the view, so it would
+    /// take the clicks meant for the menu that covers it.
     fn draw_hotbar(&mut self, ui: &egui::Ui) {
-        if !self.hotbar.visible(self.tool.is_some()) {
+        if !self.hotbar.visible(self.tool.is_some()) || self.open_menu().is_some() {
             return;
         }
         let ctx = ui.ctx().clone();

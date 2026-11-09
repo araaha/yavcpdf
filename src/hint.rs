@@ -34,6 +34,8 @@ pub enum TargetKind {
     Annotation(u64),
     /// A reference written in the text, by its index in the app's list for these hints.
     Reference(usize),
+    /// A form field's widget: the field's index in the form, and the widget's in the field.
+    Widget(usize, usize),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -56,6 +58,8 @@ pub enum Purpose {
     Overview,
     /// Where the tool in hand puts what it makes.
     Place,
+    /// A form field to fill, or a button of the form to press.
+    Form,
 }
 
 #[derive(Clone, Debug)]
