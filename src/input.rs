@@ -99,6 +99,7 @@ impl App {
             Mode::Bar(_) => self.bar_key(ctx, &stroke),
             Mode::Hint(_) => self.hint_key(ctx, &stroke),
             Mode::Toc(_) => self.toc_key(&stroke),
+            Mode::Recent(_) => self.recent_key(ctx, &stroke),
             Mode::Choice(_) => self.choice_key(&stroke),
             Mode::Sign(_) => self.sign_key(&stroke),
             Mode::Password(_) => self.password_key(ctx, &stroke),
@@ -735,6 +736,11 @@ impl App {
         }
         if matches!(self.mode, Mode::Choice(_)) {
             self.pointer_choice(ui.ctx(), &response);
+            return;
+        }
+        if matches!(self.mode, Mode::Recent(_)) {
+            self.hover = None;
+            self.pointer_recent(ui.ctx(), &response);
             return;
         }
         if self.swallowed_after_choice(ui.ctx(), &response) {

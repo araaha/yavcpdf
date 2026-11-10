@@ -194,6 +194,7 @@ pub enum Mode {
     Bar(Bar),
     Hint(HintState),
     Toc(TocState),
+    Recent(crate::recent::RecentState),
     Choice(ChoiceState),
     AwaitMark(MarkOp),
     Sign(SignPad),
@@ -523,6 +524,8 @@ pub struct App {
     pub choice_closed: Option<(f64, Pos2)>,
     /// When and where a click opened the choice panel, to ignore the second click of a double click.
     pub choice_opened: Option<(f64, Pos2)>,
+    /// Whether the file being opened was picked from the recent list, which a cancelled password returns to.
+    pub recent_return: bool,
     pub links_shown: bool,
     pub fields_shown: bool,
     /// A reference waiting for the text of every page, to look up what it points at.
@@ -667,6 +670,7 @@ impl App {
             hover: None,
             choice_closed: None,
             choice_opened: None,
+            recent_return: false,
             smart: None,
             toc_waiting: false,
             chooser: None,
@@ -684,7 +688,18 @@ impl App {
             watcher,
             config,
         };
-        let problem = warning.or(load_warning).or_else(|| key_errors.into_iter().next());
+        if blank {
+            app.set_title(&cc.egui_ctx);
+            let recent = store::recent_documents();
+            if !recent.is_empty() {
+                app.mode = Mode::Recent(app.recent_state(recent));
+            }
+        }
+        let problem = match (load_warning, warning) {
+            (Some(load), Some(warning)) => Some(format!("{load} · {warning}")),
+            (load, warning) => load.or(warning),
+        }
+        .or_else(|| key_errors.into_iter().next());
         if let Some(problem) = problem {
             app.say(problem);
         }
@@ -815,11 +830,14 @@ impl App {
         }
     }
 
-    /// Closes the password menu: the open document stays, and with none the window closes, unless it
-    /// shows the blank page.
+    /// Closes the password menu: a file picked from the recent list returns to it; otherwise the open
+    /// document stays, and with none the window closes, unless it shows the blank page.
     pub fn password_cancel(&mut self, ctx: &egui::Context) {
         let opening = matches!(&self.mode, Mode::Password(s) if s.purpose == Purpose::Open);
-        if self.locked && !self.blank && opening {
+        if opening && std::mem::take(&mut self.recent_return) {
+            self.mode = Mode::Normal;
+            self.open_recent();
+        } else if self.locked && !self.blank && opening {
             ctx.send_viewport_cmd_to(egui::ViewportId::ROOT, egui::ViewportCommand::Close);
         } else {
             self.mode = Mode::Normal;
@@ -874,6 +892,7 @@ impl App {
         self.mode = Mode::Normal;
         self.choice_closed = None;
         self.choice_opened = None;
+        self.recent_return = false;
         self.pending.clear();
         self.doc = doc;
         self.form = FormState::fresh();

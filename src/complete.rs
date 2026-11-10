@@ -57,6 +57,7 @@ pub const COMMANDS: &[Command] = &[
     takes("zoom", Of::Number, "{percent}", true),
     plain("reload"),
     plain("toc"),
+    plain("recent"),
     plain("hotbar"),
     takes("export", Of::Path, "[file]", false),
     takes("export!", Of::Path, "[file]", false),

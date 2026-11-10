@@ -1167,6 +1167,7 @@ impl App {
             "zoom" => self.command_zoom(argument),
             "reload" => self.run(ctx, Action::Reload, None),
             "toc" => self.open_toc(),
+            "recent" => self.open_recent(),
             "hotbar" => self.hotbar.toggle(self.tool.is_some()),
             "export" => self.command_export(argument, false),
             "export!" => self.command_export(argument, true),

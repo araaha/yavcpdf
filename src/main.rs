@@ -20,6 +20,7 @@ mod keymap;
 mod menu;
 mod overview;
 mod protect;
+mod recent;
 mod search;
 mod smart;
 mod store;
@@ -193,8 +194,15 @@ pub fn strip_verbatim(path: PathBuf) -> PathBuf {
 }
 
 fn run(args: Args) -> Result<(), String> {
+    // A file named on the command line must open; the last document is only a convenience, and
+    // the blank page with the recent list takes over when it won't.
+    let from_recent = args.file.is_none();
     let path = match args.file.or_else(store::last_document) {
-        Some(path) => Some(std::fs::canonicalize(&path).map(strip_verbatim).map_err(|e| format!("{}: {e}", path.display()))?),
+        Some(path) => match std::fs::canonicalize(&path).map(strip_verbatim) {
+            Ok(path) => Some(path),
+            Err(_) if from_recent => None,
+            Err(e) => return Err(format!("{}: {e}", path.display())),
+        },
         None => None,
     };
     let (mut config, warning) = Config::load();
@@ -208,7 +216,10 @@ fn run(args: Args) -> Result<(), String> {
     let opening = {
         let (path, password, config) = (path.clone(), args.password, config.clone());
         std::thread::spawn(move || match path {
-            Some(path) => app::Opened::load(&path, password.as_deref(), &config),
+            Some(path) => match app::Opened::load(&path, password.as_deref(), &config) {
+                Err(e) if from_recent => app::Opened::blank(store::data_dir(), &config).map(|opened| app::Opened { load_warning: Some(e), ..opened }),
+                opened => opened,
+            },
             None => app::Opened::blank(store::data_dir(), &config),
         })
     };
@@ -216,6 +227,7 @@ fn run(args: Args) -> Result<(), String> {
         let config = config.clone();
         std::thread::spawn(move || chrome::font_bytes(&config))
     };
+    // The title of a last document that won't open is corrected by `App::new`.
     let title = path.as_deref().map_or_else(|| "yavcpdf".to_owned(), window_title);
     let (width, height) = args.geometry.map_or((1280, 800), |g| g.size);
     // Sizes and offsets are capped at 16384 by parse_geometry, so they are exact in f32.

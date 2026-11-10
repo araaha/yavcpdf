@@ -214,7 +214,7 @@ yavcpdf [--page N] [--password PW] [--geometry WxH[+X+Y]]
         [--fullscreen|--no-fullscreen] [--statusbar|--no-statusbar] [file.pdf]
 ```
 
-With no file, yavcpdf reopens the last document, or opens a blank page if there is none, where `:open` or `:e` open a file. It reloads the PDF when the
+With no file, yavcpdf reopens the last document. If that file is gone or won't open (the reason is in the status bar), or there is none, it opens a blank page instead, where `:open` or `:e` open a file; a file named on the command line that won't open is an error. The blank page lists the recent files that still exist: type a row's label, or move with j/k and press Enter, or click; Esc closes the list and `:recent` shows it again, over a document too. It reloads the PDF when the
 file changes. A password-protected PDF opens a [password menu](#password-protected-pdfs). On Windows, and on macOS when not started from a terminal,
 `--help` and argument errors show in a dialog, as do fatal errors.
 
@@ -480,6 +480,7 @@ is no way to protect it in place.
 | `:reload` | Reload the document |
 | `:toc` | Open the table of contents |
 | `:hotbar` | Show or hide the hotbar |
+| `:recent` | List the recent files |
 | `:marks` | List the marks |
 | `:sign` | Draw a new signature |
 | `:export [FILE]`, `:export! [FILE]` | Write a copy with the annotations and the filled-in form; `!` replaces an existing file |

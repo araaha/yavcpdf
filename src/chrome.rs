@@ -9,6 +9,7 @@ use crate::field::Field;
 use crate::hint::Purpose;
 use crate::keymap::Action;
 use crate::menu::Menu;
+use crate::recent::RecentState;
 
 const PADDING: f32 = 8.0;
 
@@ -229,6 +230,7 @@ impl App {
                 }
             }
             Mode::Toc(state) => self.draw_toc(painter, state),
+            Mode::Recent(state) => self.draw_recent(painter, state),
             Mode::Choice(state) => self.draw_choice(painter, state),
             Mode::Sign(pad) => self.draw_pad(painter, pad),
             Mode::Password(state) => self.draw_password(painter, state),
@@ -394,6 +396,39 @@ impl App {
             let entry = &self.doc.toc[rows[i]];
             ListRow { indent: entry.depth as f32 * 14.0, text: entry.title.clone(), mark: (entry.page + 1).to_string(), ticked: false }
         });
+    }
+
+    /// The recent files: a panel like the contents, each row a hint label, the name and the folder.
+    fn draw_recent(&self, painter: &Painter, state: &RecentState) {
+        let theme = self.config.active_theme();
+        let layout = self.list_layout(true, false, state.files.len(), state.selected, None);
+        let rect = layout.rect;
+        painter.rect_filled(rect, 0.0, theme.ui_background.egui());
+        painter.rect_stroke(rect, 0.0, egui::Stroke::new(self.config.view.border, theme.ui_accent.egui()), egui::StrokeKind::Inside);
+        let clipped = painter.with_clip_rect(rect.shrink(PADDING / 2.0));
+        let header = pos2(rect.left() + PADDING, rect.top() + PADDING + layout.row_height / 2.0);
+        text_line(&clipped, &self.config, header, Align2::LEFT_CENTER, "Recent files", theme.ui_accent.egui());
+        let home = crate::config::home();
+        for i in (layout.first..state.files.len()).take(layout.fits) {
+            let line = Self::list_row_rect(&layout, i);
+            let selected = i == state.selected;
+            if selected {
+                clipped.rect_filled(line, 0.0, theme.ui_accent.egui());
+            }
+            let mut color = if selected { theme.ui_background.egui() } else { theme.ui_text.egui() };
+            let mut label_color = if selected { color } else { theme.ui_accent.egui() };
+            // What is typed so far dims the rows it no longer leads to.
+            if !state.labels[i].starts_with(&state.typed) {
+                (color, label_color) = (color.gamma_multiply(0.35), label_color.gamma_multiply(0.35));
+            }
+            let path = &state.files[i];
+            let name = path.file_name().map_or_else(|| path.display().to_string(), |n| n.to_string_lossy().into_owned());
+            let folder = path.parent().map_or_else(String::new, |p| crate::recent::tilde(p, &home));
+            let at = |x: f32| pos2(x, line.center().y);
+            let label = text_line(&clipped, &self.config, at(line.left() + PADDING), Align2::LEFT_CENTER, &state.labels[i], label_color);
+            let name = text_line(&clipped, &self.config, at(label.right() + PADDING * 2.0), Align2::LEFT_CENTER, name, color);
+            text_line(&clipped, &self.config, at(name.right() + PADDING), Align2::LEFT_CENTER, folder, color.gamma_multiply(0.6));
+        }
     }
 
     /// The password menu, a panel like the contents with a header, the field and a line for what went wrong.

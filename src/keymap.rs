@@ -521,6 +521,11 @@ impl Keymap {
         self.binds.iter().any(|(s, a)| *a == action && s.as_slice() == std::slice::from_ref(stroke))
     }
 
+    /// The characters that one printable stroke alone, bound to any of `actions`, types.
+    pub fn typed_by(&self, actions: &[Action]) -> Vec<char> {
+        self.binds.iter().filter(|(s, a)| actions.contains(a) && s.len() == 1).filter_map(|(s, _)| s[0].text()).collect()
+    }
+
     /// What this one stroke does in a text field. As with `cancel`, a printable key never does
     /// anything here, so that it can still be typed.
     pub fn edit(&self, stroke: &Stroke) -> Option<Edit> {
@@ -881,6 +886,33 @@ mod tests {
         let (map, _) = Keymap::new(&config.keys);
         assert_eq!(map.exact(std::slice::from_ref(&ctrl_z)), Some(Action::Quit));
         assert_eq!(map.edit(&ctrl_z), Some(Edit::Undo));
+    }
+
+    fn typed(table: &str, actions: &[Action]) -> Vec<char> {
+        let config = crate::config::Config::load_str(table).unwrap();
+        let (map, errors) = Keymap::new(&config.keys);
+        assert!(errors.is_empty(), "{errors:?}");
+        let mut chars = map.typed_by(actions);
+        chars.sort_unstable();
+        chars
+    }
+
+    #[test]
+    fn typed_by_takes_single_printable_strokes_only() {
+        let all = [Action::Quit, Action::Command, Action::Open, Action::ToggleFullscreen];
+        // Sequences, chords and named keys type nothing.
+        assert_eq!(typed("[keys]\nquit = [\"ZZ\", \"<C-q>\", \"<A-q>\", \"<esc>\", \"<F4>\"]", &[Action::Quit]), Vec::<char>::new());
+        // A single letter, a capital and a symbol each type themselves.
+        assert_eq!(typed("[keys]\nquit = [\"x\", \"Q\", \"ZZ\", \"<C-q>\"]", &[Action::Quit]), ['Q', 'x']);
+        // Only the asked-for actions count.
+        assert_eq!(typed("[keys]\nquit = [\"x\"]\nopen = [\"y\"]", &[Action::Quit]), ['x']);
+        assert_eq!(typed("[keys]\nquit = [\"x\"]\nopen = [\"y\"]", &[]), Vec::<char>::new());
+        let defaults = typed("", &all);
+        assert!(defaults.contains(&'q') && defaults.contains(&':'), "{defaults:?}");
+        assert!(!defaults.contains(&'j') && !defaults.contains(&'k'), "{defaults:?}");
+        // A removed binding leaves nothing.
+        assert_eq!(typed("[keys]\nquit = []\ncommand = []\nopen = []\ntoggle_fullscreen = []", &all), Vec::<char>::new());
+        assert_eq!(typed("[keys]\nquit = [\"<space>\"]", &[Action::Quit]), [' ']);
     }
 
     #[test]

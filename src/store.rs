@@ -344,18 +344,107 @@ fn read_sidecar(file: &Path) -> Result<Option<Sidecar>, String> {
     }
 }
 
-/// The document opened last, for starting with no file named.
-pub fn last_document() -> Option<PathBuf> {
-    let text = std::fs::read_to_string(data_dir().join("last")).ok()?;
-    let path = PathBuf::from(text.trim());
-    path.exists().then_some(path)
+/// How many documents the recent list keeps.
+pub const RECENT_MAX: usize = 10;
+
+/// The recent documents that still exist, newest first. Missing ones are hidden, not forgotten:
+/// a file on a drive that is not mounted comes back with it.
+pub fn recent_documents() -> Vec<PathBuf> {
+    recent_documents_in(&data_dir())
 }
 
+/// The document opened last, for starting with no file named: the newest entry, if it still
+/// exists. When it doesn't, nothing is, and the blank page lists the older ones.
+pub fn last_document() -> Option<PathBuf> {
+    last_document_in(&data_dir())
+}
+
+fn last_document_in(dir: &Path) -> Option<PathBuf> {
+    load_recent(dir).into_iter().next().filter(|p| p.exists())
+}
+
+/// Puts `path` at the top of the recent list, as the file system names it, so that one file is one entry.
 pub fn remember_document(path: &Path) {
-    let dir = data_dir();
-    if std::fs::create_dir_all(&dir).is_ok() {
-        let _ = std::fs::write(dir.join("last"), path.display().to_string());
+    let path = std::fs::canonicalize(path).map_or_else(|_| path.to_owned(), crate::strip_verbatim);
+    remember_document_in(&data_dir(), &path);
+}
+
+fn recent_file(dir: &Path) -> PathBuf {
+    dir.join("recent")
+}
+
+/// The whole list, one path per line. Without a `recent` file, or with an empty one, it starts
+/// from the single path of the older `last` file.
+fn load_recent(dir: &Path) -> Vec<PathBuf> {
+    let read = |name: &str| std::fs::read_to_string(dir.join(name)).map(|t| parse_recent(&t)).unwrap_or_default();
+    let mut list = read("recent");
+    if list.is_empty() {
+        return read("last");
     }
+    // An older build writes only `last`: when it names another document, and was written no
+    // earlier than `recent`, it was opened since.
+    if let Some(raw) = read("last").into_iter().next() {
+        let last = std::fs::canonicalize(&raw).map_or(raw, crate::strip_verbatim);
+        if list.first() != Some(&last) && !last_is_older(dir) {
+            list = pushed(list, &last);
+        }
+    }
+    list
+}
+
+/// Whether `last` is known to be older than `recent`.
+fn last_is_older(dir: &Path) -> bool {
+    let modified = |name: &str| std::fs::metadata(dir.join(name)).and_then(|m| m.modified()).ok();
+    matches!((modified("last"), modified("recent")), (Some(last), Some(recent)) if last < recent)
+}
+
+fn recent_documents_in(dir: &Path) -> Vec<PathBuf> {
+    load_recent(dir).into_iter().filter(|p| p.exists()).collect()
+}
+
+/// Writes `recent`, and `last` for the builds that only read that. Both are readable by this user
+/// alone, as they name personal documents.
+fn remember_document_in(dir: &Path, path: &Path) {
+    let list = pushed(load_recent(dir), path);
+    let mut builder = std::fs::DirBuilder::new();
+    builder.recursive(true);
+    #[cfg(unix)]
+    std::os::unix::fs::DirBuilderExt::mode(&mut builder, 0o700);
+    if builder.create(dir).is_err() {
+        return;
+    }
+    // `last` first: if the second write fails, `last` is the newer, which is read as such.
+    let newest = render_recent(&list[..1]);
+    if !newest.is_empty() {
+        let _ = crate::export::write_atomic(&dir.join("last"), newest.as_bytes(), true, Some(0o600));
+    }
+    let _ = crate::export::write_atomic(&recent_file(dir), render_recent(&list).as_bytes(), true, Some(0o600));
+}
+
+fn parse_recent(text: &str) -> Vec<PathBuf> {
+    let mut list: Vec<PathBuf> = Vec::new();
+    for line in text.lines().filter(|l| !l.trim().is_empty()) {
+        let path = PathBuf::from(line);
+        if !list.contains(&path) {
+            list.push(path);
+        }
+    }
+    list.truncate(RECENT_MAX);
+    list
+}
+
+/// One path per line. A path that is not valid UTF-8, or has a line break in it, can't be written
+/// as a line and is left out.
+fn render_recent(list: &[PathBuf]) -> String {
+    list.iter().filter_map(|p| p.to_str()).filter(|p| !p.contains(['\n', '\r'])).map(|p| format!("{p}\n")).collect()
+}
+
+/// `list` with `path` first, once, and no more than `RECENT_MAX` long.
+fn pushed(mut list: Vec<PathBuf>, path: &Path) -> Vec<PathBuf> {
+    list.retain(|p| p != path);
+    list.insert(0, path.to_owned());
+    list.truncate(RECENT_MAX);
+    list
 }
 
 #[cfg(test)]
@@ -378,6 +467,287 @@ mod tests {
         fn drop(&mut self) {
             let _ = std::fs::remove_dir_all(&self.0);
         }
+    }
+
+    fn paths(names: &[&str]) -> Vec<PathBuf> {
+        names.iter().map(PathBuf::from).collect()
+    }
+
+    #[test]
+    fn a_pushed_path_goes_first_without_a_duplicate() {
+        let list = pushed(paths(&["/a", "/b", "/c"]), Path::new("/b"));
+        assert_eq!(list, paths(&["/b", "/a", "/c"]));
+        assert_eq!(pushed(Vec::new(), Path::new("/a")), paths(&["/a"]));
+    }
+
+    #[test]
+    fn the_list_keeps_the_newest_few() {
+        let mut list = Vec::new();
+        for i in 0..RECENT_MAX + 3 {
+            list = pushed(list, Path::new(&format!("/{i}")));
+        }
+        assert_eq!(list.len(), RECENT_MAX);
+        assert_eq!(list[0], PathBuf::from(format!("/{}", RECENT_MAX + 2)));
+        assert_eq!(list[RECENT_MAX - 1], PathBuf::from("/3"));
+    }
+
+    #[test]
+    fn the_list_round_trips_through_its_file_newest_first() {
+        let scratch = Scratch::new("recent-trip");
+        let (a, b) = (scratch.0.join("a.pdf"), scratch.0.join("b.pdf"));
+        std::fs::write(&a, "").unwrap();
+        std::fs::write(&b, "").unwrap();
+        remember_document_in(&scratch.0, &a);
+        remember_document_in(&scratch.0, &b);
+        remember_document_in(&scratch.0, &a);
+        assert_eq!(recent_documents_in(&scratch.0), vec![a.clone(), b]);
+        let leftovers =
+            std::fs::read_dir(&scratch.0).unwrap().filter_map(Result::ok).filter(|e| e.file_name().to_string_lossy().ends_with(".tmp")).count();
+        assert_eq!(leftovers, 0);
+        // `last` follows, for the builds that only read it.
+        assert_eq!(std::fs::read_to_string(scratch.0.join("last")).unwrap().trim(), a.to_str().unwrap());
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            for name in ["recent", "last"] {
+                assert_eq!(std::fs::metadata(scratch.0.join(name)).unwrap().permissions().mode() & 0o077, 0, "{name}");
+            }
+        }
+    }
+
+    #[test]
+    fn a_list_starts_from_the_older_last_file() {
+        let scratch = Scratch::new("recent-migrate");
+        let old = scratch.0.join("old.pdf");
+        std::fs::write(&old, "").unwrap();
+        std::fs::write(scratch.0.join("last"), old.to_str().unwrap()).unwrap();
+        assert_eq!(recent_documents_in(&scratch.0), vec![old.clone()]);
+        let new = scratch.0.join("new.pdf");
+        std::fs::write(&new, "").unwrap();
+        remember_document_in(&scratch.0, &new);
+        assert_eq!(recent_documents_in(&scratch.0), vec![new, old]);
+    }
+
+    #[test]
+    fn the_last_document_is_the_newest_entry_even_when_it_is_gone() {
+        let scratch = Scratch::new("recent-last-gone");
+        let (here, gone) = (scratch.0.join("here.pdf"), scratch.0.join("gone.pdf"));
+        std::fs::write(&here, "").unwrap();
+        remember_document_in(&scratch.0, &here);
+        assert_eq!(last_document_in(&scratch.0), Some(here.clone()));
+        remember_document_in(&scratch.0, &gone);
+        assert_eq!(last_document_in(&scratch.0), None);
+        assert_eq!(recent_documents_in(&scratch.0), vec![here]);
+    }
+
+    #[test]
+    fn missing_files_are_hidden_but_kept() {
+        let scratch = Scratch::new("recent-missing");
+        let (here, gone) = (scratch.0.join("here.pdf"), scratch.0.join("gone.pdf"));
+        std::fs::write(&here, "").unwrap();
+        remember_document_in(&scratch.0, &gone);
+        remember_document_in(&scratch.0, &here);
+        assert_eq!(recent_documents_in(&scratch.0), vec![here.clone()]);
+        assert_eq!(load_recent(&scratch.0), vec![here, gone]);
+        assert!(recent_documents_in(&scratch.0.join("nowhere")).is_empty());
+    }
+
+    #[test]
+    fn a_path_that_cannot_be_a_line_is_left_out() {
+        assert_eq!(render_recent(&paths(&["/a", "/b\nc", "/d"])), "/a\n/d\n");
+        #[cfg(unix)]
+        {
+            use std::os::unix::ffi::OsStrExt;
+            let odd = PathBuf::from(std::ffi::OsStr::from_bytes(b"/bad\xff"));
+            assert_eq!(render_recent(&[odd, PathBuf::from("/ok")]), "/ok\n");
+        }
+        assert_eq!(parse_recent("/a\n\n /b \n/a\n"), paths(&["/a", " /b "]));
+    }
+
+    #[test]
+    fn parse_recent_handles_crlf_and_a_trailing_newline() {
+        assert_eq!(parse_recent("/a\r\n/b\r\n"), paths(&["/a", "/b"]));
+        assert_eq!(parse_recent("/a\n/b\n"), parse_recent("/a\n/b"));
+        assert_eq!(parse_recent("/a\r/b"), paths(&["/a\r/b"]).into_iter().map(|_| PathBuf::from("/a\r/b")).collect::<Vec<_>>());
+        assert!(parse_recent("").is_empty());
+        assert!(parse_recent("\n\r\n  \n").is_empty());
+    }
+
+    #[test]
+    fn parse_recent_keeps_only_the_first_ten_and_the_first_of_each_path() {
+        let text: String = (0..15).map(|i| format!("/{i}\n/0\n")).collect();
+        let list = parse_recent(&text);
+        assert_eq!(list.len(), RECENT_MAX);
+        assert_eq!(list[0], PathBuf::from("/0"));
+        assert_eq!(list[9], PathBuf::from("/9"));
+    }
+
+    #[test]
+    fn render_then_parse_round_trips_and_ends_in_a_newline() {
+        let list = paths(&["/a b/c.pdf", "/ünï/x.pdf", "/ spaced"]);
+        let text = render_recent(&list);
+        assert!(text.ends_with('\n'));
+        assert_eq!(parse_recent(&text), list);
+        assert_eq!(render_recent(&[]), "");
+    }
+
+    #[test]
+    fn a_path_with_edge_spaces_survives_the_round_trip() {
+        // Only the line ending is stripped on reading, so blanks at either end of a path are kept.
+        let list = paths(&["/a/b.pdf ", " /c.pdf"]);
+        assert_eq!(parse_recent(&render_recent(&list)), list);
+    }
+
+    #[test]
+    fn pushing_an_existing_path_from_the_middle_or_the_end_moves_it_to_the_top() {
+        let all: Vec<String> = (0..RECENT_MAX).map(|i| format!("/{i}")).collect();
+        let list: Vec<PathBuf> = all.iter().map(PathBuf::from).collect();
+        let moved = pushed(list.clone(), Path::new("/5"));
+        assert_eq!(moved.len(), RECENT_MAX);
+        assert_eq!(moved[0], PathBuf::from("/5"));
+        assert_eq!(moved.iter().filter(|p| **p == Path::new("/5")).count(), 1);
+        assert_eq!(&moved[1..6], &list[0..5]);
+        assert_eq!(&moved[6..], &list[6..]);
+        let last = pushed(list.clone(), Path::new("/9"));
+        assert_eq!(last.len(), RECENT_MAX);
+        assert_eq!(last[0], PathBuf::from("/9"));
+        assert_eq!(&last[1..], &list[..9]);
+        assert_eq!(pushed(list.clone(), Path::new("/0")), list);
+    }
+
+    #[test]
+    fn hiding_missing_files_keeps_the_order_of_the_rest() {
+        let scratch = Scratch::new("recent-order");
+        let mut kept = Vec::new();
+        for i in 0..6 {
+            let p = scratch.0.join(format!("{i}.pdf"));
+            if i % 2 == 0 {
+                std::fs::write(&p, "").unwrap();
+                kept.push(p.clone());
+            }
+            remember_document_in(&scratch.0, &p);
+        }
+        kept.reverse();
+        assert_eq!(recent_documents_in(&scratch.0), kept);
+        assert_eq!(load_recent(&scratch.0).len(), 6);
+    }
+
+    #[test]
+    fn a_recent_file_with_crlf_and_a_trailing_newline_is_read() {
+        let scratch = Scratch::new("recent-crlf");
+        let (a, b) = (scratch.0.join("a.pdf"), scratch.0.join("b.pdf"));
+        std::fs::write(&a, "").unwrap();
+        std::fs::write(&b, "").unwrap();
+        let text = format!("{}\r\n{}\r\n", a.display(), b.display());
+        std::fs::write(scratch.0.join("recent"), text).unwrap();
+        assert_eq!(recent_documents_in(&scratch.0), vec![a.clone(), b.clone()]);
+        remember_document_in(&scratch.0, &b);
+        assert_eq!(recent_documents_in(&scratch.0), vec![b, a]);
+    }
+
+    #[test]
+    fn a_very_long_path_is_stored_and_read_back() {
+        let scratch = Scratch::new("recent-long");
+        let long = PathBuf::from(format!("/{}", "x".repeat(100_000)));
+        remember_document_in(&scratch.0, &long);
+        assert_eq!(load_recent(&scratch.0), vec![long.clone()]);
+        // It doesn't exist, so it is hidden rather than an error.
+        assert!(recent_documents_in(&scratch.0).is_empty());
+        remember_document_in(&scratch.0, Path::new("/short"));
+        assert_eq!(load_recent(&scratch.0), vec![PathBuf::from("/short"), long]);
+    }
+
+    #[test]
+    fn an_empty_recent_file_falls_back_to_last_but_a_filled_one_wins() {
+        let scratch = Scratch::new("recent-empty-wins");
+        let old = scratch.0.join("old.pdf");
+        std::fs::write(&old, "").unwrap();
+        std::fs::write(scratch.0.join("last"), old.to_str().unwrap()).unwrap();
+        std::fs::write(scratch.0.join("recent"), "").unwrap();
+        assert_eq!(recent_documents_in(&scratch.0), vec![old.clone()]);
+        let new = scratch.0.join("new.pdf");
+        std::fs::write(&new, "").unwrap();
+        std::fs::write(scratch.0.join("recent"), format!("{}\n", new.display())).unwrap();
+        assert_eq!(recent_documents_in(&scratch.0), vec![new]);
+    }
+
+    fn touch(path: &Path) -> PathBuf {
+        std::fs::write(path, "").unwrap();
+        path.to_owned()
+    }
+
+    fn set_age(path: &Path, ago: u64) {
+        let file = std::fs::OpenOptions::new().write(true).open(path).unwrap();
+        file.set_modified(std::time::SystemTime::now() - std::time::Duration::from_secs(ago)).unwrap();
+    }
+
+    fn write_lists(dir: &Path, recent: &[PathBuf], last: &Path) {
+        std::fs::write(dir.join("recent"), render_recent(recent)).unwrap();
+        std::fs::write(dir.join("last"), last.to_str().unwrap()).unwrap();
+    }
+
+    #[test]
+    fn a_different_last_is_promoted() {
+        let scratch = Scratch::new("recent-promote");
+        let (a, b) = (touch(&scratch.0.join("a.pdf")), touch(&scratch.0.join("b.pdf")));
+        write_lists(&scratch.0, std::slice::from_ref(&a), &b);
+        assert_eq!(load_recent(&scratch.0), vec![b, a]);
+    }
+
+    #[test]
+    fn a_last_equal_to_the_newest_changes_nothing() {
+        let scratch = Scratch::new("recent-same");
+        let (a, b) = (touch(&scratch.0.join("a.pdf")), touch(&scratch.0.join("b.pdf")));
+        write_lists(&scratch.0, &[a.clone(), b.clone()], &a);
+        assert_eq!(load_recent(&scratch.0), vec![a, b]);
+    }
+
+    #[test]
+    fn a_last_deeper_in_the_list_moves_up_once() {
+        let scratch = Scratch::new("recent-deeper");
+        let (a, b, c) = (touch(&scratch.0.join("a.pdf")), touch(&scratch.0.join("b.pdf")), touch(&scratch.0.join("c.pdf")));
+        write_lists(&scratch.0, &[a.clone(), b.clone(), c.clone()], &c);
+        assert_eq!(load_recent(&scratch.0), vec![c, a, b]);
+    }
+
+    #[test]
+    fn an_older_last_is_not_promoted() {
+        let scratch = Scratch::new("recent-stale");
+        let (a, b) = (touch(&scratch.0.join("a.pdf")), touch(&scratch.0.join("b.pdf")));
+        write_lists(&scratch.0, std::slice::from_ref(&a), &b);
+        set_age(&scratch.0.join("last"), 100);
+        assert_eq!(load_recent(&scratch.0), vec![a]);
+    }
+
+    #[test]
+    fn a_promoted_last_keeps_the_cap() {
+        let scratch = Scratch::new("recent-cap");
+        let list: Vec<PathBuf> = (0..RECENT_MAX).map(|i| touch(&scratch.0.join(format!("{i}.pdf")))).collect();
+        let extra = touch(&scratch.0.join("extra.pdf"));
+        write_lists(&scratch.0, &list, &extra);
+        let loaded = load_recent(&scratch.0);
+        assert_eq!(loaded.len(), RECENT_MAX);
+        assert_eq!(loaded[0], extra);
+        assert_eq!(&loaded[1..], &list[..RECENT_MAX - 1]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_new_data_dir_is_private() {
+        use std::os::unix::fs::PermissionsExt;
+        let scratch = Scratch::new("recent-mode");
+        let dir = scratch.0.join("data");
+        remember_document_in(&dir, &touch(&scratch.0.join("a.pdf")));
+        assert_eq!(std::fs::metadata(&dir).unwrap().permissions().mode() & 0o777, 0o700);
+    }
+
+    #[test]
+    fn a_last_file_with_a_trailing_newline_or_crlf_migrates() {
+        let scratch = Scratch::new("recent-last-nl");
+        let old = scratch.0.join("old.pdf");
+        std::fs::write(&old, "").unwrap();
+        std::fs::write(scratch.0.join("last"), format!("{}\r\n", old.display())).unwrap();
+        assert_eq!(recent_documents_in(&scratch.0), vec![old]);
     }
 
     fn highlight(id: u64) -> Annotation {
