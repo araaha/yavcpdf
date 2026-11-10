@@ -445,6 +445,10 @@ impl App {
 
     /// Takes up the fill & sign tool with `item`.
     pub fn pick_fill(&mut self, item: FillItem) {
+        if self.blank {
+            self.say("no document open");
+            return;
+        }
         if self.locked {
             return;
         }
@@ -850,6 +854,11 @@ impl App {
                 None => self.say("no portals"),
             },
             Action::TogglePortalWindow => {
+                if self.blank {
+                    self.portal_window = false;
+                    self.say("no document open");
+                    return;
+                }
                 self.portal_window = !self.portal_window;
                 if self.portal_window && self.side.portals.is_empty() {
                     self.say("no portals yet: press p, go to the target, press p");
