@@ -4,6 +4,7 @@ use std::sync::Arc;
 use egui::{Align, Align2, Color32, FontData, FontDefinitions, FontFamily, FontId, Painter, Pos2, Rect, Sense, Vec2, pos2, vec2};
 
 use crate::app::{App, Bar, BarKind, ChoiceState, EntryKind, FillItem, Mode, PasswordState, SignPad, TocState, Tool};
+use crate::bookmarks::BookmarkState;
 use crate::config::{Config, Side};
 use crate::field::Field;
 use crate::hint::Purpose;
@@ -230,6 +231,7 @@ impl App {
                 }
             }
             Mode::Toc(state) => self.draw_toc(painter, state),
+            Mode::Bookmarks(state) => self.draw_bookmarks(painter, state),
             Mode::Recent(state) => self.draw_recent(painter, state),
             Mode::Choice(state) => self.draw_choice(painter, state),
             Mode::Sign(pad) => self.draw_pad(painter, pad),
@@ -395,6 +397,17 @@ impl App {
         self.draw_list(painter, &ListView { header: None, filter, len: rows.len(), at, first: None }, |i| {
             let entry = &self.doc.toc[rows[i]];
             ListRow { indent: entry.depth as f32 * 14.0, text: entry.title.clone(), mark: (entry.page + 1).to_string(), ticked: false }
+        });
+    }
+
+    /// The bookmarks: a panel like the contents, each row a name and its page.
+    fn draw_bookmarks(&self, painter: &Painter, state: &BookmarkState) {
+        let rows = self.bookmark_rows(state);
+        let at = rows.iter().position(|r| *r >= state.selected).unwrap_or(0);
+        let filter = (state.filtering || !state.filter.is_empty()).then_some(&state.filter);
+        self.draw_list(painter, &ListView { header: None, filter, len: rows.len(), at, first: Some(state.first) }, |i| {
+            let bookmark = &self.side.bookmarks[rows[i]];
+            ListRow { indent: 0.0, text: bookmark.name.clone(), mark: (bookmark.anchor.page + 1).to_string(), ticked: false }
         });
     }
 

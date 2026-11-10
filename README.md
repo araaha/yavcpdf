@@ -258,6 +258,7 @@ choose a colour instead, so counts such as `42G` don't work then.
 | <kbd>/</kbd> / <kbd>?</kbd> | Search forward / backward |
 | <kbd>n</kbd> / <kbd>N</kbd> | Next / previous match |
 | <kbd>m</kbd> then a key / <kbd>'</kbd> or <kbd>`</kbd> then a key / <kbd>'</kbd> <kbd>'</kbd> | Set a mark / go to a mark / jump back |
+| <kbd>M</kbd> / <kbd>g</kbd> <kbd>b</kbd> | Name a bookmark here (opens `:bookmark `) / pick a bookmark: <kbd>j</kbd> <kbd>k</kbd> move, <kbd>Enter</kbd>, <kbd>l</kbd> or a click jumps (<kbd>Alt</kbd>+<kbd>O</kbd> comes back), <kbd>/</kbd> filters, <kbd>Esc</kbd> clears the filter and then closes, <kbd>q</kbd> closes, <kbd>d</kbd> or <kbd>Delete</kbd> deletes the highlighted one when not filtering |
 | <kbd>Alt</kbd>+<kbd>O</kbd> / <kbd>Alt</kbd>+<kbd>I</kbd> | Jump history, back / forward; the last 100 places are kept per document between sessions |
 | <kbd>f</kbd> / <kbd>y</kbd> | Select by hint / copy the selection, with its lines joined and hyphenation undone (`view.copy_reflow = false` copies the lines as they are) |
 | <kbd>F</kbd> | Follow a link by hint; one that names a spot lands there at `view.jump_position` |
@@ -472,7 +473,7 @@ is no way to protect it in place.
 | --- | --- |
 | `:N` | Go to page N |
 | `:q`, `:quit`, `:q!`, `:wq`, `:x` | Quit |
-| `:w`, `:write` | Save the position, marks, portals and annotations |
+| `:w`, `:write` | Save the position, marks, bookmarks, jump history, portals and annotations |
 | `:e FILE`, `:edit FILE`, `:open [FILE]` | Open a file; `:open` with none shows the file chooser |
 | `:noh`, `:nohlsearch` | Clear the search highlight |
 | `:theme NAME` | Switch theme; with an unknown name it lists them |
@@ -481,7 +482,9 @@ is no way to protect it in place.
 | `:toc` | Open the table of contents |
 | `:hotbar` | Show or hide the hotbar |
 | `:recent` | List the recent files |
-| `:marks` | List the marks |
+| `:marks` | List the marks, and count the bookmarks |
+| `:bookmark NAME`, `:bm NAME` | Add a named bookmark at this place; an existing name, in any case, moves to it |
+| `:bookmarks` | Pick a bookmark: type <kbd>/</kbd> to filter, <kbd>j</kbd> <kbd>k</kbd> or the arrows and the wheel move, <kbd>Enter</kbd>, <kbd>l</kbd> or a click jumps, <kbd>d</kbd> or <kbd>Delete</kbd> deletes when not filtering, <kbd>Esc</kbd> clears the filter and then closes, <kbd>q</kbd> closes. Names match without regard to case. They are listed in the order of the document, with their page |
 | `:sign` | Draw a new signature |
 | `:export [FILE]`, `:export! [FILE]` | Write a copy with the annotations and the filled-in form; `!` replaces an existing file |
 | `:protect [FILE]`, `:protect! [FILE]` | Write a copy with a password; `!` replaces an existing file |
@@ -600,7 +603,7 @@ document's own colours.
 What is stored where
 --------------------
 
-Position, marks, portals, annotations and the values filled into a form are kept in
+Position, marks, bookmarks, the jump history, portals, annotations and the values filled into a form are kept in
 `{hash}.json` in the data folder (`~/.local/share/yavcpdf/` on Linux, other
 systems: see the Settings folders table under Installation).
 The PDF itself is never changed, so other viewers don't show them. A file keeps

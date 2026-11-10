@@ -52,6 +52,8 @@ pub enum Action {
     EditPortal,
     TogglePortalWindow,
     ToggleToc,
+    ShowBookmarks,
+    AddBookmark,
     ToggleStatusbar,
     ToggleHotbar,
     ToolHighlight,
@@ -104,7 +106,7 @@ pub enum Action {
 
 impl Action {
     /// Every action, in declaration order. `the_list_of_actions_is_complete` keeps it whole.
-    pub const ALL: [Self; 87] = [
+    pub const ALL: [Self; 89] = [
         Self::Cancel,
         Self::ScrollDown,
         Self::ScrollUp,
@@ -144,6 +146,8 @@ impl Action {
         Self::EditPortal,
         Self::TogglePortalWindow,
         Self::ToggleToc,
+        Self::ShowBookmarks,
+        Self::AddBookmark,
         Self::ToggleStatusbar,
         Self::ToggleHotbar,
         Self::ToolHighlight,
@@ -237,6 +241,8 @@ impl Action {
             Self::EditPortal => "edit_portal",
             Self::TogglePortalWindow => "toggle_portal_window",
             Self::ToggleToc => "toggle_toc",
+            Self::ShowBookmarks => "show_bookmarks",
+            Self::AddBookmark => "add_bookmark",
             Self::ToggleStatusbar => "toggle_statusbar",
             Self::ToggleHotbar => "toggle_hotbar",
             Self::ToolHighlight => "tool_highlight",
@@ -708,6 +714,50 @@ mod tests {
         assert_eq!(found, vec![("Pp".to_owned(), Action::Protect), ("Pu".to_owned(), Action::Unprotect), ("ep".to_owned(), Action::EditPortal)]);
         assert_eq!(Action::from_name("protect"), Some(Action::Protect));
         assert_eq!(Action::from_name("unprotect"), Some(Action::Unprotect));
+    }
+
+    #[test]
+    fn gb_picks_a_bookmark_and_capital_m_names_one_without_clashing() {
+        let map = default_keymap();
+        assert_eq!(map.exact(&[stroke("g"), stroke("b")]), Some(Action::ShowBookmarks));
+        assert_eq!(map.exact(&[stroke("M")]), Some(Action::AddBookmark));
+        let on = |a: Action| map.binds.iter().filter(|(_, x)| *x == a).count();
+        assert_eq!((on(Action::ShowBookmarks), on(Action::AddBookmark)), (1, 1));
+        let starts_with_g = map.binds.iter().filter(|(seq, _)| seq[0] == stroke("g")).filter(|(seq, _)| seq.get(1) == Some(&stroke("b"))).count();
+        assert_eq!(starts_with_g, 1);
+        assert_eq!(map.binds.iter().filter(|(seq, _)| seq[0] == stroke("M")).count(), 1);
+    }
+
+    #[test]
+    fn an_old_copied_keys_table_still_gets_the_bookmark_keys_and_pending_feed_resolves_them() {
+        use crate::config::Config;
+        let defaults = Config::load_str("").unwrap();
+        let mut old = String::from("[keys]\n");
+        for (action, keys) in &defaults.keys {
+            if matches!(action, Action::ShowBookmarks | Action::AddBookmark) {
+                continue;
+            }
+            let list: Vec<String> = keys.iter().map(|k| format!("{k:?}")).collect();
+            old.push_str(&format!("{} = [{}]\n", action.name(), list.join(", ")));
+        }
+        assert!(!old.contains("bookmark"));
+        let config = Config::load_str(&old).unwrap();
+        assert_eq!(config.keys[&Action::ShowBookmarks], ["gb"]);
+        assert_eq!(config.keys[&Action::AddBookmark], ["M"]);
+        let (map, errors) = Keymap::new(&config.keys);
+        assert!(errors.is_empty(), "{errors:?}");
+        assert_eq!(map.exact(&[stroke("g"), stroke("b")]), Some(Action::ShowBookmarks));
+        assert_eq!(map.exact(&[stroke("M")]), Some(Action::AddBookmark));
+        let mut p = Pending::default();
+        assert_eq!(type_keys(&mut p, &map, "gb"), Some((Action::ShowBookmarks, None)));
+        assert_eq!(type_keys(&mut p, &map, "M"), Some((Action::AddBookmark, None)));
+        // A user override of one of them keeps the other's default.
+        let config = Config::load_str("[keys]\nshow_bookmarks = [\"B\"]").unwrap();
+        assert_eq!(config.keys[&Action::ShowBookmarks], ["B"]);
+        assert_eq!(config.keys[&Action::AddBookmark], ["M"]);
+        // Names are in the table and listed.
+        assert_eq!(Action::from_name("show_bookmarks"), Some(Action::ShowBookmarks));
+        assert_eq!(Action::from_name("add_bookmark"), Some(Action::AddBookmark));
     }
 
     #[test]

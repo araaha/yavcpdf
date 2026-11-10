@@ -13,6 +13,8 @@ pub enum Of {
     Path,
     /// A number, which has nothing to complete.
     Number,
+    /// Free text, which has nothing to complete.
+    Name,
 }
 
 /// The argument of a command: what it is made of, how the menu shows it, and whether the command
@@ -58,6 +60,9 @@ pub const COMMANDS: &[Command] = &[
     plain("reload"),
     plain("toc"),
     plain("recent"),
+    takes("bookmark", Of::Name, "{name}", true),
+    takes("bm", Of::Name, "{name}", true),
+    plain("bookmarks"),
     plain("hotbar"),
     takes("export", Of::Path, "[file]", false),
     takes("export!", Of::Path, "[file]", false),
@@ -160,7 +165,7 @@ pub fn complete(before: &str, themes: &[String], home: &Path, cache: &mut DirCac
         Of::Theme => (themes.iter().filter(|t| t.starts_with(word)).cloned().collect(), false),
         Of::Document => paths(word, home, true, cache),
         Of::Path => paths(word, home, false, cache),
-        Of::Number => return None,
+        Of::Number | Of::Name => return None,
     };
     // A cut-short listing with nothing seen is still an answer: the menu says so instead of staying silent.
     (!candidates.is_empty() || incomplete).then_some(Completion { start: lead + offset, candidates, incomplete })

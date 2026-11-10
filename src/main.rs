@@ -4,6 +4,7 @@
 
 mod actions;
 mod app;
+mod bookmarks;
 mod cache;
 mod chrome;
 mod complete;

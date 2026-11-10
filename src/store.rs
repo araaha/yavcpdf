@@ -1,4 +1,4 @@
-//! What is kept per document, outside the PDF: position, marks, portals and annotations.
+//! What is kept per document, outside the PDF: position, marks, bookmarks, jump history, portals and annotations.
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
@@ -153,6 +153,47 @@ fn distance_to_segment(p: [f32; 2], a: [f32; 2], b: [f32; 2]) -> f32 {
     (p[0] - a[0] - t * dx).hypot(p[1] - a[1] - t * dy)
 }
 
+/// A named place in the document, kept in the sidecar next to the one-letter marks.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Bookmark {
+    pub name: String,
+    pub anchor: Anchor,
+}
+
+/// The longest bookmark name, in characters.
+pub const MAX_BOOKMARK_NAME: usize = 200;
+
+/// A bookmark name as stored: trimmed, tabs and newlines as spaces, runs of spaces collapsed, and
+/// cut to `MAX_BOOKMARK_NAME` characters.
+pub fn normalise_bookmark_name(name: &str) -> String {
+    let joined = name.split_whitespace().collect::<Vec<_>>().join(" ");
+    joined.chars().take(MAX_BOOKMARK_NAME).collect::<String>().trim_end().to_owned()
+}
+
+/// Puts a bookmark at `anchor` under `name`, which moves one of that name, in any case, instead of adding a second.
+/// The stored name is the new spelling.
+/// The list stays in the order of the document, so the picker reads like the contents. Returns
+/// whether it moved an existing one.
+pub fn add_bookmark(list: &mut Vec<Bookmark>, name: &str, anchor: Anchor) -> bool {
+    let same = |b: &Bookmark| b.name.to_lowercase() == name.to_lowercase();
+    let moved = list.iter().any(same);
+    list.retain(|b| !same(b));
+    list.push(Bookmark { name: name.to_owned(), anchor });
+    list.sort_by(|a, b| a.anchor.page.cmp(&b.anchor.page).then(a.anchor.y.total_cmp(&b.anchor.y)));
+    moved
+}
+
+/// Removes the bookmark at `index` and returns it.
+pub fn remove_bookmark(list: &mut Vec<Bookmark>, index: usize) -> Option<Bookmark> {
+    (index < list.len()).then(|| list.remove(index))
+}
+
+/// The bookmarks whose names contain `filter`, ignoring case, as indices.
+pub fn bookmark_rows(list: &[Bookmark], filter: &str) -> Vec<usize> {
+    let filter = filter.to_lowercase();
+    list.iter().enumerate().filter(|(_, b)| b.name.to_lowercase().contains(&filter)).map(|(i, _)| i).collect()
+}
+
 /// The sidecar file's contents.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -164,6 +205,8 @@ pub struct Sidecar {
     pub jumps: Vec<Anchor>,
     pub jump_index: usize,
     pub marks: BTreeMap<char, Anchor>,
+    /// The named bookmarks, in the order of the document.
+    pub bookmarks: Vec<Bookmark>,
     pub portals: Vec<Portal>,
     pub annotations: Vec<Annotation>,
     /// What was filled into the form, by the fully qualified name of the field. Only the fields
@@ -957,6 +1000,171 @@ mod tests {
 
     fn spot(page: usize) -> Anchor {
         Anchor { page, y: 1.0, x: 0.0 }
+    }
+
+    #[test]
+    fn bookmarks_survive_a_round_trip() {
+        let bookmarks = vec![Bookmark { name: "intro".into(), anchor: spot(1) }, Bookmark { name: "proof".into(), anchor: spot(5) }];
+        let side = Sidecar { bookmarks, ..Default::default() };
+        let text = serde_json::to_string(&side).unwrap();
+        assert_eq!(serde_json::from_str::<Sidecar>(&text).unwrap(), side);
+    }
+
+    #[test]
+    fn an_old_sidecar_without_bookmarks_loads() {
+        let old = r#"{"path":"/a.pdf","anchor":null,"zoom":1.5,"marks":{},"portals":[],"annotations":[],"next_id":3}"#;
+        let side: Sidecar = serde_json::from_str(old).unwrap();
+        assert!(side.bookmarks.is_empty());
+    }
+
+    #[test]
+    fn adding_a_bookmark_keeps_document_order_and_a_name_moves() {
+        let mut list = Vec::new();
+        assert!(!add_bookmark(&mut list, "b", spot(5)));
+        assert!(!add_bookmark(&mut list, "a", spot(2)));
+        assert!(!add_bookmark(&mut list, "c", Anchor { page: 2, y: 0.5, x: 0.0 }));
+        let names = |l: &[Bookmark]| l.iter().map(|b| b.name.clone()).collect::<Vec<_>>();
+        assert_eq!(names(&list), ["c", "a", "b"]);
+        assert!(add_bookmark(&mut list, "c", spot(9)));
+        assert_eq!(names(&list), ["a", "b", "c"]);
+        assert_eq!(list[2].anchor.page, 9);
+    }
+
+    #[test]
+    fn removing_a_bookmark_and_filtering_them() {
+        let mut list = Vec::new();
+        for (name, page) in [("Intro", 1), ("Proof of A", 2), ("proof of B", 3)] {
+            add_bookmark(&mut list, name, spot(page));
+        }
+        assert_eq!(bookmark_rows(&list, ""), [0, 1, 2]);
+        assert_eq!(bookmark_rows(&list, "PROOF"), [1, 2]);
+        assert!(bookmark_rows(&list, "zzz").is_empty());
+        assert_eq!(remove_bookmark(&mut list, 1).map(|b| b.name), Some("Proof of A".to_owned()));
+        assert_eq!(list.len(), 2);
+        assert_eq!(remove_bookmark(&mut list, 5), None);
+    }
+
+    fn bm_names(l: &[Bookmark]) -> Vec<String> {
+        l.iter().map(|b| b.name.clone()).collect()
+    }
+
+    #[test]
+    fn bookmark_names_match_without_regard_to_case_and_are_unicode_safe() {
+        let mut list = Vec::new();
+        add_bookmark(&mut list, "Intro", spot(1));
+        assert!(add_bookmark(&mut list, "intro", spot(2)), "a case variant moves the bookmark");
+        assert_eq!(bm_names(&list), ["intro"], "the new spelling is stored");
+        add_bookmark(&mut list, "héllo wörld", spot(3));
+        add_bookmark(&mut list, "🔖 mark", spot(4));
+        add_bookmark(&mut list, "日本語", spot(5));
+        assert_eq!(list.len(), 4);
+        assert!(add_bookmark(&mut list, "HÉLLO WÖRLD", spot(0)));
+        assert_eq!(list[0].name, "HÉLLO WÖRLD");
+        assert!(add_bookmark(&mut list, "🔖 mark", spot(0)));
+        assert_eq!(list.len(), 4);
+        assert_eq!(bookmark_rows(&list, "INTRO"), [list.iter().position(|b| b.name == "intro").unwrap()]);
+        assert_eq!(bookmark_rows(&list, "日本"), [list.iter().position(|b| b.name == "日本語").unwrap()]);
+        assert!(bookmark_rows(&list, "x🔖").is_empty());
+        let text = serde_json::to_string(&Sidecar { bookmarks: list.clone(), ..Default::default() }).unwrap();
+        assert_eq!(serde_json::from_str::<Sidecar>(&text).unwrap().bookmarks, list);
+    }
+
+    #[test]
+    fn names_are_normalised_and_capped_at_a_char_boundary() {
+        assert_eq!(normalise_bookmark_name("   "), "");
+        assert_eq!(
+            normalise_bookmark_name(
+                "  a 	 b
+
+c   d  "
+            ),
+            "a b c d"
+        );
+        let long = "é".repeat(300);
+        assert_eq!(normalise_bookmark_name(&long).chars().count(), MAX_BOOKMARK_NAME);
+        let spaced = format!("{} x", "a".repeat(MAX_BOOKMARK_NAME - 1));
+        assert_eq!(normalise_bookmark_name(&spaced), "a".repeat(MAX_BOOKMARK_NAME - 1));
+    }
+
+    #[test]
+    fn an_empty_name_is_stored_as_given_by_add_bookmark() {
+        // `add_bookmark` does not normalise: `command_bookmark` does that, and refuses an empty name.
+        let mut list = Vec::new();
+        add_bookmark(&mut list, "   ", spot(1));
+        add_bookmark(&mut list, "", spot(2));
+        assert_eq!(list.len(), 2);
+        assert_eq!(bookmark_rows(&list, " "), [0]);
+        assert_eq!(bookmark_rows(&list, ""), [0, 1]);
+    }
+
+    #[test]
+    fn moving_a_bookmark_earlier_or_later_keeps_the_order() {
+        let mut list = Vec::new();
+        for (n, p) in [("a", 1), ("b", 2), ("c", 3), ("d", 4)] {
+            add_bookmark(&mut list, n, spot(p));
+        }
+        assert!(add_bookmark(&mut list, "d", spot(0)));
+        assert_eq!(bm_names(&list), ["d", "a", "b", "c"]);
+        assert!(add_bookmark(&mut list, "d", spot(99)));
+        assert_eq!(bm_names(&list), ["a", "b", "c", "d"]);
+        assert!(add_bookmark(&mut list, "b", Anchor { page: 2, y: 5.0, x: 3.0 }));
+        assert_eq!(bm_names(&list), ["a", "b", "c", "d"]);
+        assert_eq!(list[1].anchor.x, 3.0);
+        assert_eq!(list.len(), 4);
+    }
+
+    #[test]
+    fn equal_places_for_two_names_are_both_kept_and_the_sort_is_stable() {
+        let mut list = Vec::new();
+        add_bookmark(&mut list, "first", spot(3));
+        add_bookmark(&mut list, "second", spot(3));
+        add_bookmark(&mut list, "third", spot(3));
+        assert_eq!(bm_names(&list), ["first", "second", "third"]);
+        // Moving one to the same place puts it last among its equals.
+        add_bookmark(&mut list, "first", spot(3));
+        assert_eq!(bm_names(&list), ["second", "third", "first"]);
+    }
+
+    #[test]
+    fn a_nan_or_infinite_y_does_not_panic_the_sort() {
+        let mut list = Vec::new();
+        for (n, y) in [("a", f32::NAN), ("b", 1.0), ("c", f32::INFINITY), ("d", f32::NEG_INFINITY), ("e", -f32::NAN)] {
+            add_bookmark(&mut list, n, Anchor { page: 1, y, x: 0.0 });
+        }
+        assert_eq!(list.len(), 5);
+        let finite: Vec<&str> = list.iter().filter(|b| !b.anchor.y.is_nan()).map(|b| b.name.as_str()).collect();
+        assert_eq!(finite, ["d", "b", "c"]);
+        // NaN cannot come from a sidecar: JSON has no NaN, and null is refused for a number.
+        let bad = r#"{"bookmarks":[{"name":"x","anchor":{"page":0,"y":null,"x":0.0}}]}"#;
+        assert!(serde_json::from_str::<Sidecar>(bad).is_err());
+    }
+
+    #[test]
+    fn removing_a_missing_bookmark_changes_nothing() {
+        let mut list = Vec::new();
+        assert_eq!(remove_bookmark(&mut list, 0), None);
+        add_bookmark(&mut list, "a", spot(1));
+        assert_eq!(remove_bookmark(&mut list, 1), None);
+        assert_eq!(remove_bookmark(&mut list, usize::MAX), None);
+        assert_eq!(list.len(), 1);
+        assert_eq!(remove_bookmark(&mut list, 0).map(|b| b.name), Some("a".to_owned()));
+        assert!(list.is_empty());
+    }
+
+    #[test]
+    fn a_thousand_bookmarks_sort_and_filter_quickly() {
+        let mut list = Vec::new();
+        let start = std::time::Instant::now();
+        for i in 0..1000usize {
+            // Pages in a scrambled order, so each insert re-sorts something out of order.
+            add_bookmark(&mut list, &format!("Mark {i} é"), Anchor { page: (i * 7919) % 1000, y: (i % 13) as f32, x: 0.0 });
+        }
+        assert_eq!(list.len(), 1000);
+        assert!(list.windows(2).all(|w| (w[0].anchor.page, w[0].anchor.y) <= (w[1].anchor.page, w[1].anchor.y)));
+        assert_eq!(bookmark_rows(&list, "").len(), 1000);
+        assert_eq!(bookmark_rows(&list, "MARK 99").len(), 11);
+        assert_eq!(bookmark_rows(&list, "É").len(), 1000);
+        assert!(start.elapsed() < std::time::Duration::from_secs(5), "{:?}", start.elapsed());
     }
 
     #[test]

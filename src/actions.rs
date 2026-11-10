@@ -29,6 +29,7 @@ fn edits_document(action: Action) -> bool {
         action,
         Portal
             | SetMark
+            | AddBookmark
             | DeletePortal
             | EditPortal
             | HintForm
@@ -251,6 +252,14 @@ impl App {
             Action::HintForm => self.mode = Mode::Hint(HintState::new(Purpose::Form)),
             Action::DeleteAnnotation => self.mode = Mode::Hint(HintState::new(Purpose::DeleteAnnotation)),
             Action::ToggleToc => self.open_toc(),
+            Action::ShowBookmarks => self.open_bookmarks(),
+            Action::AddBookmark => {
+                self.open_bar(BarKind::Command);
+                if let Mode::Bar(bar) = &mut self.mode {
+                    bar.field = Field::new("bookmark ".to_owned());
+                }
+                self.refresh_menu();
+            }
             Action::Open => self.choose_file(ctx),
             Action::Protect => self.command_protect(Job::Protect, "", false),
             Action::Unprotect => self.command_protect(Job::Unprotect, "", false),
@@ -1179,6 +1188,8 @@ impl App {
             "reload" => self.run(ctx, Action::Reload, None),
             "toc" => self.open_toc(),
             "recent" => self.open_recent(),
+            "bookmark" | "bm" => self.command_bookmark(argument),
+            "bookmarks" => self.open_bookmarks(),
             "hotbar" => self.hotbar.toggle(self.tool.is_some()),
             "export" => self.command_export(argument, false),
             "export!" => self.command_export(argument, true),
@@ -1191,7 +1202,9 @@ impl App {
             "sign" => self.mode = Mode::Sign(SignPad::default()),
             "marks" => {
                 let marks: String = self.side.marks.keys().collect();
-                self.say(if marks.is_empty() { "no marks".to_owned() } else { format!("marks: {marks}") });
+                let count = self.side.bookmarks.len();
+                let bookmarks = if count == 0 { String::new() } else { format!("; {count} bookmark{}", if count == 1 { "" } else { "s" }) };
+                self.say(if marks.is_empty() { format!("no marks{bookmarks}") } else { format!("marks: {marks}{bookmarks}") });
             }
             // An action by its name, as under `[keys]`. The commands above come first.
             other => match Action::from_name(other).filter(|a| a.is_listed()) {
@@ -1402,6 +1415,7 @@ mod tests {
         use Action::*;
         let editing = [
             SetMark,
+            AddBookmark,
             Portal,
             DeletePortal,
             EditPortal,

@@ -194,6 +194,7 @@ pub enum Mode {
     Bar(Bar),
     Hint(HintState),
     Toc(TocState),
+    Bookmarks(crate::bookmarks::BookmarkState),
     Recent(crate::recent::RecentState),
     Choice(ChoiceState),
     AwaitMark(MarkOp),
