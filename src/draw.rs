@@ -1,5 +1,6 @@
 //! Drawing pages and what lies on them, and the portal window.
-use egui::{Align2, Color32, FontId, Painter, Pos2, Rect, Shape, Stroke, Vec2, ViewportBuilder, ViewportId, pos2, vec2};
+use egui::epaint::{TextShape, Vertex};
+use egui::{Align2, Color32, FontId, Mesh, Painter, Pos2, Rect, Shape, Stroke, TextureId, Vec2, ViewportBuilder, ViewportId, pos2, vec2};
 use pdfcraft_render::{RenderRequest, Tile, device_pixels, effective_scale};
 
 use crate::app::{App, Mode, Tool, ZOOM_SETTLE};
@@ -8,7 +9,7 @@ use crate::config::Color;
 use crate::hint::HintState;
 use crate::present::{PREFETCH_AHEAD, PREFETCH_BEHIND};
 use crate::store::{Annotation, MarkKind, NOTE_SIDE, Portal, mark_rect};
-use crate::view::{View, tile_side, tiles_crossing};
+use crate::view::{View, rotate_point, tile_side, tile_uv, tiles_crossing, visible_pixels};
 
 const UV: Rect = Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0));
 /// Pages up to this long in device pixels are rendered whole: a tile costs an interpretation of
@@ -40,24 +41,60 @@ fn clear_of(previous: Option<Rect>, label: Rect) -> Rect {
     }
 }
 
+/// Where the pixel box `[x, y, width, height]` of an unrotated raster of `pixels` lands on screen,
+/// when the page is shown turned by `rotation` with its top-left at `origin`.
+fn pixel_rect(rotation: u16, pixels: [f32; 2], origin: Pos2, unit: f32, [x, y, width, height]: [f32; 4]) -> Rect {
+    let at = |p: [f32; 2]| {
+        let d = rotate_point(rotation, pixels, p);
+        origin + vec2(d[0], d[1]) * unit
+    };
+    Rect::from_two_pos(at([x, y]), at([x + width, y + height]))
+}
+
+/// Draws the texture of an unrotated tile in `rect`, turned by `rotation`.
+fn paint_tile(painter: &Painter, texture: TextureId, rect: Rect, rotation: u16) {
+    if rotation == 0 {
+        painter.image(texture, rect, UV, Color32::WHITE);
+        return;
+    }
+    let mut mesh = Mesh::with_texture(texture);
+    let corners = [rect.left_top(), rect.right_top(), rect.right_bottom(), rect.left_bottom()];
+    for (pos, uv) in corners.into_iter().zip(tile_uv(rotation)) {
+        mesh.vertices.push(Vertex { pos, uv, color: Color32::WHITE });
+    }
+    mesh.indices.extend([0, 1, 2, 0, 2, 3]);
+    painter.add(Shape::mesh(mesh));
+}
+
 /// How a page is rendered and placed for a view.
 struct Placement {
     page: usize,
     scale: f32,
+    /// The raster's size, unrotated.
     width: u32,
     height: u32,
+    /// The top-left of the page as shown.
     origin: Pos2,
     /// Screen points per rendered pixel.
     unit: f32,
+    /// Degrees clockwise.
+    rotation: u16,
 }
 
 impl Placement {
+    fn pixels(&self) -> [f32; 2] {
+        [self.width as f32, self.height as f32]
+    }
+
+    /// The page as shown, turned.
     fn rect(&self) -> Rect {
-        Rect::from_min_size(self.origin, vec2(self.width as f32, self.height as f32) * self.unit)
+        let [w, h] = self.pixels();
+        let turned = !self.rotation.is_multiple_of(180);
+        Rect::from_min_size(self.origin, if turned { vec2(h, w) } else { vec2(w, h) } * self.unit)
     }
 
     fn tile_rect(&self, x: u32, y: u32, width: u32, height: u32) -> Rect {
-        Rect::from_min_size(self.origin + vec2(x as f32, y as f32) * self.unit, vec2(width as f32, height as f32) * self.unit)
+        pixel_rect(self.rotation, self.pixels(), self.origin, self.unit, [x as f32, y as f32, width as f32, height as f32])
     }
 
     fn request(&self, unit: Option<Tile>) -> RenderRequest {
@@ -84,12 +121,20 @@ impl Placement {
 
 impl App {
     fn place(&self, view: &View, page: usize, ppp: f32, render_zoom: f32) -> Placement {
-        let [w, h] = self.doc.layout.sizes[page];
+        let [w, h] = self.doc.layout.page_sizes[page];
         let scale = effective_scale(w, h, render_zoom * ppp);
         let at = view.transform(&self.doc.layout, page).origin;
         // On whole pixels, so a tile at its own scale is copied to the screen unchanged.
         let origin = pos2((at.x * ppp).round() / ppp, (at.y * ppp).round() / ppp);
-        Placement { page, scale, width: device_pixels(w, scale), height: device_pixels(h, scale), origin, unit: view.zoom / scale }
+        Placement {
+            page,
+            scale,
+            width: device_pixels(w, scale),
+            height: device_pixels(h, scale),
+            origin,
+            unit: view.zoom / scale,
+            rotation: self.doc.layout.rotation,
+        }
     }
 
     pub fn draw_page(&mut self, painter: &Painter, view: &View, page: usize, ppp: f32, render_zoom: f32) {
@@ -102,9 +147,7 @@ impl App {
         if !clip.is_positive() {
             return;
         }
-        let min = (clip.min - place.origin) / place.unit;
-        let max = (clip.max - place.origin) / place.unit;
-        let units = place.units([min.x, min.y, max.x, max.y]);
+        let units = place.units(visible_pixels(place.rotation, place.pixels(), place.origin, place.unit, clip));
         if !place.whole() {
             self.keep_backdrop(page);
         }
@@ -112,8 +155,10 @@ impl App {
             for (key, texture, width, height) in self.cache.stale(page, place.scale) {
                 let unit = view.zoom / f32::from_bits(key.scale);
                 let (x, y) = key.offset();
-                let rect = Rect::from_min_size(place.origin + vec2(x as f32, y as f32) * unit, vec2(width as f32, height as f32) * unit);
-                painter.image(texture, rect, UV, Color32::WHITE);
+                let [w, h] = self.doc.layout.page_sizes[page];
+                let pixels = [device_pixels(w, f32::from_bits(key.scale)) as f32, device_pixels(h, f32::from_bits(key.scale)) as f32];
+                let rect = pixel_rect(place.rotation, pixels, place.origin, unit, [x as f32, y as f32, width as f32, height as f32]);
+                paint_tile(painter, texture, rect, place.rotation);
             }
         } else {
             self.cache.settle(page);
@@ -122,7 +167,7 @@ impl App {
             let key = place.key(unit);
             if let Some(cached) = self.cache.touch(&key) {
                 let (x, y) = key.offset();
-                painter.image(cached.texture.id(), place.tile_rect(x, y, cached.width, cached.height), UV, Color32::WHITE);
+                paint_tile(painter, cached.texture.id(), place.tile_rect(x, y, cached.width, cached.height), place.rotation);
             } else if !self.cache.settled(&key) {
                 self.wants.push(place.request(unit));
             }
@@ -131,7 +176,7 @@ impl App {
 
     /// Keeps a low-resolution raster of a tiled page, so zooming and panning never show it empty.
     fn keep_backdrop(&mut self, page: usize) {
-        let [w, h] = self.doc.layout.sizes[page];
+        let [w, h] = self.doc.layout.page_sizes[page];
         let scale = effective_scale(w, h, BACKDROP_SIDE / w.max(h).max(1.0));
         let key = TileKey::new(page, scale, None);
         if self.cache.touch(&key).is_none() && !self.cache.settled(&key) {
@@ -160,9 +205,10 @@ impl App {
     /// Returns whether it did: false once the room has run out.
     fn prefetch_page(&mut self, view: &View, page: usize, ppp: f32, render_zoom: f32, room: &mut usize) -> bool {
         let place = self.place(view, page, ppp, render_zoom);
-        let left = (view.rect.left() - place.origin.x) / place.unit;
-        let right = (view.rect.right() - place.origin.x) / place.unit;
-        for unit in place.units([left, 0.0, right, place.height as f32]) {
+        // The columns of the view, all the way down the page.
+        let shown = place.rect();
+        let columns = Rect::from_min_max(pos2(view.rect.left(), shown.top()), pos2(view.rect.right(), shown.bottom()));
+        for unit in place.units(visible_pixels(place.rotation, place.pixels(), place.origin, place.unit, columns)) {
             let (width, height) = unit.map_or((place.width, place.height), |t| (t.w, t.h));
             let Some(left_over) = room.checked_sub(width as usize * height as usize * 4) else { return false };
             *room = left_over;
@@ -275,8 +321,11 @@ impl App {
             Annotation::Note { page, at, color, .. } => self.draw_note(painter, view, *page, *at, *color),
             Annotation::Text { page, at, size, text, .. } => {
                 let font = FontId::proportional(font_pixels(size * view.zoom));
+                // Turned with the page, as the export writes it.
                 let point = view.transform(&self.doc.layout, *page).point(*at);
-                painter.text(point, Align2::LEFT_TOP, text, font, self.ink());
+                let galley = painter.layout_no_wrap(text.clone(), font, self.ink());
+                let angle = f32::from(self.doc.layout.rotation).to_radians();
+                painter.add(TextShape::new(point, galley, self.ink()).with_angle(angle));
             }
             Annotation::Mark { page, at, size, mark, .. } => self.draw_mark(painter, view, *page, *at, *size, *mark),
             Annotation::Signature { page, strokes, width, .. } => {
@@ -361,7 +410,8 @@ impl App {
         let accent = self.config.active_theme().ui_accent.egui();
         for portal in self.side.portals.iter().filter(|p| shown.contains(&p.source.page)) {
             let t = view.transform(&self.doc.layout, portal.source.page);
-            painter.circle_filled(t.point([6.0, portal.source.y]), 3.0, accent);
+            // A portal's `y` is how far down the page as shown, as an anchor's is.
+            painter.circle_filled(t.origin + vec2(6.0, portal.source.y) * t.scale, 3.0, accent);
         }
     }
 
@@ -376,7 +426,8 @@ impl App {
         let mut previous = None;
         for target in &state.targets {
             let Some(rest) = target.label.strip_prefix(state.typed.as_str()) else { continue };
-            let at = view.transform(&self.doc.layout, target.page).point([target.rect[0], target.rect[1]]);
+            // The label stays upright at the corner of the target that is top left on screen.
+            let at = view.transform(&self.doc.layout, target.page).rect(target.rect).min;
             let galley = painter.layout_no_wrap(rest.to_owned(), font.clone(), theme.hint_text.egui());
             let box_rect = clear_of(previous, Rect::from_min_size(at, galley.size() + vec2(2.0, 0.0)));
             painter.rect_filled(box_rect, 0.0, theme.hint_background.egui());
@@ -492,5 +543,53 @@ mod tests {
     #[test]
     fn the_next_line_starts_again_at_its_word() {
         assert_eq!(clear_of(Some(label(300.0, 50.0)), label(20.0, 70.0)), label(20.0, 70.0));
+    }
+    #[test]
+    fn a_tile_lands_where_the_turned_page_puts_it() {
+        // A raster of 1000 x 2000 pixels with a tile of 100 x 50 at (10, 20), at 0.5 points a pixel.
+        let size = [1000.0, 2000.0];
+        let tile = [10.0, 20.0, 100.0, 50.0];
+        let origin = pos2(5.0, 7.0);
+        let at = |rotation| {
+            let r = super::pixel_rect(rotation, size, origin, 0.5, tile);
+            [r.min.x, r.min.y, r.max.x, r.max.y]
+        };
+        assert_eq!(at(0), [10.0, 17.0, 60.0, 42.0]);
+        assert_eq!(at(90), [5.0 + 0.5 * (2000.0 - 70.0), 7.0 + 5.0, 5.0 + 0.5 * (2000.0 - 20.0), 7.0 + 55.0]);
+        assert_eq!(at(180), [5.0 + 0.5 * 890.0, 7.0 + 0.5 * 1930.0, 5.0 + 0.5 * 990.0, 7.0 + 0.5 * 1980.0]);
+        assert_eq!(at(270), [5.0 + 0.5 * 20.0, 7.0 + 0.5 * 890.0, 5.0 + 0.5 * 70.0, 7.0 + 0.5 * 990.0]);
+    }
+
+    #[test]
+    fn prop_tiles_cover_the_turned_page_without_gaps_or_overlaps() {
+        for rotation in [0u16, 90, 180, 270] {
+            for (pw, ph) in [(1000u32, 1700u32), (333, 77), (1, 50), (512, 512), (1025, 513)] {
+                for side in [64u32, 100, 512, 1024] {
+                    let pixels = [pw as f32, ph as f32];
+                    let origin = pos2(13.0, -7.0);
+                    let unit = 1.0;
+                    let (tw, th) = if rotation % 180 == 0 { (pw, ph) } else { (ph, pw) };
+                    // Count coverage on the shown pixel grid.
+                    let mut hits = vec![0u8; (tw * th) as usize];
+                    for y in (0..ph).step_by(side as usize) {
+                        for x in (0..pw).step_by(side as usize) {
+                            let (w, h) = (side.min(pw - x), side.min(ph - y));
+                            let r = super::pixel_rect(rotation, pixels, origin, unit, [x as f32, y as f32, w as f32, h as f32]);
+                            assert!(r.min.x >= origin.x - 1e-3 && r.max.x <= origin.x + tw as f32 + 1e-3, "{rotation} out of bounds");
+                            assert!(r.min.y >= origin.y - 1e-3 && r.max.y <= origin.y + th as f32 + 1e-3, "{rotation} out of bounds");
+                            let (x0, y0) = ((r.min.x - origin.x).round() as u32, (r.min.y - origin.y).round() as u32);
+                            let (x1, y1) = ((r.max.x - origin.x).round() as u32, (r.max.y - origin.y).round() as u32);
+                            assert_eq!((x1 - x0, y1 - y0), if rotation % 180 == 0 { (w, h) } else { (h, w) });
+                            for yy in y0..y1 {
+                                for xx in x0..x1 {
+                                    hits[(yy * tw + xx) as usize] += 1;
+                                }
+                            }
+                        }
+                    }
+                    assert!(hits.iter().all(|&n| n == 1), "{rotation} {pw}x{ph} side {side}: gaps or overlaps");
+                }
+            }
+        }
     }
 }

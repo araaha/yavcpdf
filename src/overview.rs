@@ -48,6 +48,7 @@ pub fn area(view: Rect, config: &OverviewConfig) -> Rect {
 
 impl App {
     /// Opens the overview on the first of `places`.
+    /// The places are pages with the y they have as shown.
     pub fn open_overview(&mut self, title: String, places: Vec<(usize, f32)>) {
         let Some(first) = places.first().copied() else { return };
         self.overview = Some(Overview { title, places, index: 0, top: top_of(&self.doc.layout, first) });
@@ -145,7 +146,9 @@ impl App {
         self.draw_marks(&painter, &view);
         // The place it was opened on, in the margin.
         if let Some((page, y)) = overview.places.get(overview.index).copied() {
-            let at = view.transform(&self.doc.layout, page).point([0.0, y]);
+            // `y` is down the page as shown, as an anchor's is.
+            let t = view.transform(&self.doc.layout, page);
+            let at = t.origin + vec2(0.0, y) * t.scale;
             let mark = Rect::from_min_size(pos2(view.rect.left(), at.y), vec2(4.0, 12.0 * view.zoom));
             painter.rect_filled(mark, 0.0, theme.ui_accent.egui());
         }

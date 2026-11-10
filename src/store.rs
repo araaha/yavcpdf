@@ -7,7 +7,7 @@ use sha2::{Digest, Sha256};
 
 use crate::config::user_dir;
 use crate::form::{FormValue, Hidden};
-use crate::view::Anchor;
+use crate::view::{Anchor, normalize_rotation};
 
 /// A link from one place in the document to another, shown beside the source.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -194,6 +194,29 @@ pub fn bookmark_rows(list: &[Bookmark], filter: &str) -> Vec<usize> {
     list.iter().enumerate().filter(|(_, b)| b.name.to_lowercase().contains(&filter)).map(|(i, _)| i).collect()
 }
 
+/// Reads a rotation from any JSON value, so that an odd one can't make the sidecar unreadable:
+/// numbers are rounded and wrapped, a numeric string is parsed, anything else is 0.
+fn lenient_rotation<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<u16, D::Error> {
+    let value = serde_json::Value::deserialize(deserializer).unwrap_or(serde_json::Value::Null);
+    Ok(rotation_of(&value))
+}
+
+fn rotation_of(value: &serde_json::Value) -> u16 {
+    use serde_json::Value;
+    let whole = |n: &serde_json::Number| n.as_i64().or_else(|| n.as_f64().filter(|f| f.is_finite()).map(|f| f.round() as i64));
+    match value {
+        Value::Number(n) => whole(n).map_or(0, normalize_rotation),
+        Value::String(text) => {
+            let text = text.trim();
+            text.parse::<i64>()
+                .ok()
+                .or_else(|| text.parse::<f64>().ok().filter(|f| f.is_finite()).map(|f| f.round() as i64))
+                .map_or(0, normalize_rotation)
+        }
+        _ => 0,
+    }
+}
+
 /// The sidecar file's contents.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -201,6 +224,9 @@ pub struct Sidecar {
     pub path: String,
     pub anchor: Option<Anchor>,
     pub zoom: Option<f32>,
+    /// How the pages are turned, clockwise in degrees: 0, 90, 180 or 270.
+    #[serde(deserialize_with = "lenient_rotation")]
+    pub rotation: u16,
     /// The jump history, oldest first, and where `jump_back` stands in it.
     pub jumps: Vec<Anchor>,
     pub jump_index: usize,
@@ -1509,6 +1535,174 @@ c   d  "
             // Anchors too ignore unknown fields.
             let text = r#"{"jumps":[{"page":2,"y":1.0,"x":0.0,"extra":true}]}"#;
             assert_eq!(serde_json::from_str::<Sidecar>(text).unwrap().jumps.len(), 1);
+        }
+    }
+    #[test]
+    fn the_rotation_is_kept_and_an_old_sidecar_has_none() {
+        let side = Sidecar { rotation: 270, ..Default::default() };
+        let text = serde_json::to_string(&side).unwrap();
+        assert_eq!(serde_json::from_str::<Sidecar>(&text).unwrap().rotation, 270);
+        assert_eq!(serde_json::from_str::<Sidecar>(r#"{"path":"/a.pdf"}"#).unwrap().rotation, 0);
+        // A build that doesn't know the field reads the rest: nothing denies unknown fields.
+        assert!(serde_json::from_str::<Sidecar>(r#"{"rotation":90,"future":1}"#).is_ok());
+    }
+
+    #[test]
+    fn an_odd_saved_rotation_is_normalised_when_applied() {
+        let side: Sidecar = serde_json::from_str(r#"{"rotation":450}"#).unwrap();
+        let mut layout = crate::view::Layout::new(vec![[100.0, 200.0]], 8.0);
+        layout.set_rotation(side.rotation.into());
+        assert_eq!((layout.rotation, layout.sizes[0]), (90, [200.0, 100.0]));
+        layout.set_rotation(100);
+        assert_eq!(layout.rotation, 90);
+    }
+
+    #[test]
+    fn sidecar_rotation_json_variants() {
+        let parse = |t: &str| serde_json::from_str::<Sidecar>(t);
+        // Whatever the value, the sidecar loads, and the rotation is made sensible.
+        for (text, want) in [
+            (r#"{"rotation":90}"#, 90),
+            (r#"{"rotation":-90}"#, 270),
+            (r#"{"rotation":70000}"#, 90),
+            (r#"{"rotation":"90"}"#, 90),
+            (r#"{"rotation":" 180 "}"#, 180),
+            (r#"{"rotation":"-90"}"#, 270),
+            (r#"{"rotation":"left"}"#, 0),
+            (r#"{"rotation":90.0}"#, 90),
+            (r#"{"rotation":269.6}"#, 270),
+            (r#"{"rotation":1e300}"#, 0),
+            (r#"{"rotation":null}"#, 0),
+            (r#"{"rotation":true}"#, 0),
+            (r#"{"rotation":[1]}"#, 0),
+            (r#"{"rotation":{"a":1}}"#, 0),
+            (r#"{"rotation":100}"#, 90),
+        ] {
+            assert_eq!(parse(text).map(|s| s.rotation).ok(), Some(want), "{text}");
+        }
+        // Whatever loads is normalised when applied.
+        let mut layout = crate::view::Layout::new(vec![[100.0, 200.0]], 8.0);
+        layout.set_rotation(parse(r#"{"rotation":65535}"#).unwrap().rotation.into());
+        assert_eq!(layout.rotation, 0); // 65535 mod 360 = 15, floored to 0
+    }
+}
+
+#[cfg(test)]
+mod rotation_fuzz_tests {
+    use super::*;
+    use serde_json::{Value, json};
+
+    fn read(value: &Value) -> Sidecar {
+        let text = format!(r#"{{"path":"a.pdf","zoom":1.5,"rotation":{value}}}"#);
+        let side: Sidecar = serde_json::from_str(&text).unwrap_or_else(|e| panic!("{text}: {e}"));
+        assert_eq!(side.path, "a.pdf");
+        assert_eq!(side.zoom, Some(1.5));
+        assert!([0, 90, 180, 270].contains(&side.rotation), "{text}: {}", side.rotation);
+        side
+    }
+
+    fn odd_values() -> Vec<Value> {
+        let mut v = vec![
+            json!(null),
+            json!(true),
+            json!(false),
+            json!([]),
+            json!([90]),
+            json!({}),
+            json!({"a": 90, "b": [1, {"c": null}]}),
+            json!(i64::MIN),
+            json!(i64::MAX),
+            json!(u64::MAX),
+            json!(u64::MAX - 1),
+            json!(1e300),
+            json!(-1e300),
+            json!(f64::MAX),
+            json!(f64::MIN_POSITIVE),
+            json!(-0.0),
+            json!(89.5),
+            json!(-89.5),
+            json!(44.9),
+            json!(45.0),
+            json!(0.5),
+            json!(1.0e19),
+            json!(-1.0e19),
+            json!(9.3e18),
+            json!(""),
+            json!(" "),
+            json!("NaN"),
+            json!("nan"),
+            json!("inf"),
+            json!("-inf"),
+            json!("Infinity"),
+            json!("1e999"),
+            json!("-1e999"),
+            json!("1e300"),
+            json!("90"),
+            json!(" 90 "),
+            json!("+90"),
+            json!("-90"),
+            json!("90.4"),
+            json!("0x5a"),
+            json!("九十"),
+            json!("99999999999999999999999"),
+            json!("-99999999999999999999999"),
+            json!("90deg"),
+        ];
+        v.extend((-1000..=1000).map(|n| json!(n)));
+        v
+    }
+
+    #[test]
+    fn any_json_value_gives_a_valid_rotation_and_a_readable_sidecar() {
+        for value in odd_values() {
+            read(&value);
+        }
+    }
+
+    #[test]
+    fn known_values_come_out_as_documented() {
+        assert_eq!(read(&json!(90)).rotation, 90);
+        assert_eq!(read(&json!(-90)).rotation, 270);
+        assert_eq!(read(&json!(450)).rotation, 90);
+        assert_eq!(read(&json!(90.4)).rotation, 90);
+        assert_eq!(read(&json!("180")).rotation, 180);
+        assert_eq!(read(&json!(" 270 ")).rotation, 270);
+        assert_eq!(read(&json!(null)).rotation, 0);
+        assert_eq!(read(&json!(true)).rotation, 0);
+        assert_eq!(read(&json!([90])).rotation, 0);
+        assert_eq!(read(&json!("NaN")).rotation, 0);
+        assert_eq!(read(&json!("inf")).rotation, 0);
+    }
+
+    #[test]
+    fn a_missing_rotation_is_zero_and_the_rest_still_reads() {
+        let side: Sidecar = serde_json::from_str(r#"{"path":"x"}"#).unwrap();
+        assert_eq!(side.rotation, 0);
+        let side: Sidecar = serde_json::from_str("{}").unwrap();
+        assert_eq!(side, Sidecar::default());
+    }
+
+    #[test]
+    fn the_rotation_survives_a_write_and_a_read() {
+        for rotation in [0u16, 90, 180, 270] {
+            let side = Sidecar { path: "p".into(), rotation, ..Sidecar::default() };
+            for text in [serde_json::to_string(&side).unwrap(), serde_json::to_string_pretty(&side).unwrap()] {
+                assert_eq!(serde_json::from_str::<Sidecar>(&text).unwrap().rotation, rotation, "{text}");
+            }
+        }
+    }
+
+    #[test]
+    fn random_numbers_always_land_on_a_quarter_turn() {
+        let mut state = 0x1234_5678_9ABC_DEF1u64;
+        for _ in 0..5000 {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            read(&json!(state as i64));
+            read(&json!(state));
+            read(&json!(f64::from_bits(state)));
+            read(&json!(state.to_string()));
         }
     }
 }

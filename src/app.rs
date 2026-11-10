@@ -626,7 +626,8 @@ impl App {
         start_page: Option<usize>,
         warning: Option<String>,
     ) -> Self {
-        let Opened { doc, store, side, load_warning, locked, blank } = opened;
+        let Opened { mut doc, store, side, load_warning, locked, blank } = opened;
+        doc.layout.set_rotation(side.rotation.into());
         if locked.is_none() && !blank {
             store::remember_document(&doc.path);
         }
@@ -746,6 +747,7 @@ impl App {
         };
         side.anchor = Some(anchor);
         side.zoom = Some(zoom);
+        side.rotation = self.doc.layout.rotation;
         (side.jumps, side.jump_index) = store::capped_jumps(&self.jumps, self.jump_index);
         side
     }
@@ -908,6 +910,8 @@ impl App {
                 self.say(warning);
             }
         }
+        // A reload keeps the rotation it had, even if it was not saved yet.
+        let rotation = if same_file { self.doc.layout.rotation } else { self.side.rotation };
         self.selection = None;
         self.smart = None;
         self.toc_waiting = false;
@@ -919,6 +923,7 @@ impl App {
         self.recent_return = false;
         self.pending.clear();
         self.doc = doc;
+        self.doc.layout.set_rotation(rotation.into());
         self.form = FormState::fresh();
         self.reset_rendering();
         self.view.clamp(&self.doc.layout);
@@ -1036,7 +1041,9 @@ impl App {
                 }
             }
         }
-        let target = search.resolve_jump().map(|m| (m.page, m.rects.first().copied()));
+        let layout = &self.doc.layout;
+        let shown = crate::search::shown_top_left(layout);
+        let target = search.resolve_jump((layout.rotation != 0).then_some(&shown as _)).map(|m| (m.page, m.rects.first().copied()));
         if let Some((page, Some(rect))) = target {
             self.view.reveal(&self.doc.layout, page, rect);
         }

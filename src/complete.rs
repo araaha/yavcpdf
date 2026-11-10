@@ -58,6 +58,7 @@ pub const COMMANDS: &[Command] = &[
     takes("theme", Of::Theme, "{name}", true),
     takes("zoom", Of::Number, "{percent}", true),
     plain("reload"),
+    takes("rotate", Of::Name, "[90|180|270|0|cw|ccw]", false),
     plain("toc"),
     plain("recent"),
     takes("bookmark", Of::Name, "{name}", true),

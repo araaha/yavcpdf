@@ -33,6 +33,8 @@ pub enum Action {
     ZoomOut,
     FitWidth,
     FitHeight,
+    RotateCw,
+    RotateCcw,
     SearchForward,
     SearchBackward,
     SearchNext,
@@ -107,7 +109,7 @@ pub enum Action {
 
 impl Action {
     /// Every action, in declaration order. `the_list_of_actions_is_complete` keeps it whole.
-    pub const ALL: [Self; 90] = [
+    pub const ALL: [Self; 92] = [
         Self::Cancel,
         Self::ScrollDown,
         Self::ScrollUp,
@@ -128,6 +130,8 @@ impl Action {
         Self::ZoomOut,
         Self::FitWidth,
         Self::FitHeight,
+        Self::RotateCw,
+        Self::RotateCcw,
         Self::SearchForward,
         Self::SearchBackward,
         Self::SearchNext,
@@ -224,6 +228,8 @@ impl Action {
             Self::ZoomOut => "zoom_out",
             Self::FitWidth => "fit_width",
             Self::FitHeight => "fit_height",
+            Self::RotateCw => "rotate_cw",
+            Self::RotateCcw => "rotate_ccw",
             Self::SearchForward => "search_forward",
             Self::SearchBackward => "search_backward",
             Self::SearchNext => "search_next",
@@ -442,6 +448,7 @@ fn canonical_key(name: &str) -> Option<String> {
         "bs" | "backspace" => "bs",
         "del" | "delete" => "del",
         "lt" => "<",
+        "gt" => ">",
         "tab" | "space" | "up" | "down" | "left" | "right" | "pageup" | "pagedown" | "home" | "end" => lower.as_str(),
         f if f.strip_prefix('f').and_then(|n| n.parse::<u8>().ok()).is_some_and(|n| (1..=12).contains(&n)) => f,
         _ => return None,
@@ -984,5 +991,39 @@ mod tests {
             assert!(seen.insert(action.name()), "{}", action.name());
         }
         assert_eq!(seen.len(), Action::ALL.len());
+    }
+    #[test]
+    fn the_default_rotation_keys_are_free_and_clash_with_nothing() {
+        let config = crate::config::Config::load_str("").unwrap();
+        assert_eq!(config.keys.get(&Action::RotateCw), Some(&vec![">".to_owned()]));
+        assert_eq!(config.keys.get(&Action::RotateCcw), Some(&vec!["<".to_owned()]));
+        let mut seen = std::collections::BTreeMap::new();
+        // The `edit_*` actions share keys with the normal ones on purpose.
+        for (action, keys) in config.keys.iter().filter(|(a, _)| a.edit().is_none()) {
+            for key in keys {
+                if let Some(other) = seen.insert(key.clone(), action.name()) {
+                    panic!("{key} is bound to both {other} and {}", action.name());
+                }
+            }
+        }
+        let map = default_keymap();
+        assert_eq!(map.exact(&[stroke(">")]), Some(Action::RotateCw));
+        assert_eq!(map.exact(&[stroke("<")]), Some(Action::RotateCcw));
+    }
+
+    #[test]
+    fn the_rotation_keys_can_be_written_several_ways() {
+        for text in ["<", "<lt>", "<LT>", "<Lt>"] {
+            assert_eq!(parse_sequence(text).unwrap(), vec![Stroke::plain("<")], "{text}");
+        }
+        assert_eq!(parse_sequence(">").unwrap(), vec![Stroke::plain(">")]);
+        for text in [">", "<gt>", "<GT>"] {
+            assert_eq!(parse_sequence(text).unwrap(), vec![Stroke::plain(">")], "{text}");
+        }
+        let table: BTreeMap<Action, Vec<String>> = [(Action::RotateCw, vec![">".to_owned()]), (Action::RotateCcw, vec!["<lt>".to_owned()])].into();
+        let (map, errors) = Keymap::new(&table);
+        assert!(errors.is_empty(), "{errors:?}");
+        assert_eq!(map.exact(&[stroke("<")]), Some(Action::RotateCcw));
+        assert_eq!(map.exact(&[stroke(">")]), Some(Action::RotateCw));
     }
 }

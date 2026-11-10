@@ -11,16 +11,15 @@ use crate::app::{
     App, Bar, BarKind, Edit, Entry, EntryKind, FillItem, Fit, Landing, MarkOp, Mode, PasswordState, PendingPortal, Selection, SignPad, TocState, Tool,
 };
 use crate::config::expand_home;
-use crate::doc::{dest_point, dest_y};
+use crate::doc::dest_spot;
 use crate::field::Field;
 use crate::form::Report;
 use crate::hint::{self, HintState, Purpose, Target, TargetKind};
 use crate::keymap::Action;
 use crate::protect::{Job, Security};
-use crate::search::Search;
 use crate::smart::{Line, Reference, find_definitions, lines_of, references_in, touches};
-use crate::store::{self, Annotation, MarkKind, NOTE_SIDE, Portal};
-use crate::view::Anchor;
+use crate::store::{self, Annotation, MarkKind, NOTE_SIDE, Portal, Sidecar};
+use crate::view::{Anchor, Layout, normalize_rotation};
 
 /// Whether `action` changes or writes the document, which the blank page has none of.
 fn edits_document(action: Action) -> bool {
@@ -48,6 +47,8 @@ fn edits_document(action: Action) -> bool {
             | DeleteAnnotation
             | Undo
             | Redo
+            | RotateCw
+            | RotateCcw
             | Reload
             | Protect
             | Unprotect
@@ -103,6 +104,8 @@ impl App {
             Action::ZoomOut => self.zoom_by(self.config.view.zoom_step.powi(-times)),
             Action::FitWidth => self.set_fit(Fit::Width),
             Action::FitHeight => self.set_fit(Fit::Height),
+            Action::RotateCw => self.rotate_by(90 * i64::from(times)),
+            Action::RotateCcw => self.rotate_by(-90 * i64::from(times)),
             _ => return false,
         }
         true
@@ -119,6 +122,65 @@ impl App {
         self.zoom_changed = Instant::now();
         self.fit = None;
         self.mark_dirty();
+    }
+
+    /// Turns the pages by `degrees` clockwise.
+    pub fn rotate_by(&mut self, degrees: i64) {
+        self.rotate_to(i64::from(self.doc.layout.rotation) + degrees);
+    }
+
+    /// Shows the pages turned to `degrees` clockwise, from the top of the current page, under the
+    /// fit that is on. Rasters are of the unturned page, so nothing is rendered again.
+    pub fn rotate_to(&mut self, degrees: i64) {
+        let (from, to) = (self.doc.layout.rotation, normalize_rotation(degrees));
+        if from == to {
+            return;
+        }
+        let page = self.view.current_page(&self.doc.layout);
+        self.turn_stored_anchors(from, to);
+        self.doc.layout.set_rotation(degrees);
+        self.view.go_to(&self.doc.layout, Anchor { page, y: 0.0, x: 0.0 });
+        self.view.zoom_hold = None;
+        self.apply_fit();
+        self.view.zoom_hold = None;
+        self.view.go_to(&self.doc.layout, Anchor { page, y: 0.0, x: 0.0 });
+        // A search still waiting to jump started from a y in the old rotation.
+        let anchor = self.view.anchor(&self.doc.layout);
+        if let Some(search) = self.search.as_mut() {
+            search.restart_jump((anchor.page, anchor.y));
+        }
+        // What was picked out or being drawn is where the page was.
+        self.selection = None;
+        self.stroke = None;
+        self.hover = None;
+        self.overview = None;
+        self.mark_dirty();
+    }
+
+    /// Turns what is kept as anchors from the rotation `from` to `to`, so they stay where they were.
+    fn turn_stored_anchors(&mut self, from: u16, to: u16) {
+        turn_anchors(&self.doc.layout, from, to, &mut self.jumps, &mut self.side, self.pending_portal.as_mut());
+    }
+
+    /// `:rotate`: with no argument a quarter turn clockwise, or to 0, 90, 180 or 270 degrees, or
+    /// `cw` or `ccw` a quarter turn.
+    fn command_rotate(&mut self, ctx: &egui::Context, argument: &str) {
+        match argument {
+            "" | "cw" => self.run(ctx, Action::RotateCw, None),
+            "ccw" => self.run(ctx, Action::RotateCcw, None),
+            _ => match argument.parse::<i64>() {
+                Ok(_) if self.blank => self.say("no document open"),
+                Ok(degrees) if degrees % 90 == 0 && degrees.abs() <= 360 => {
+                    let to = normalize_rotation(degrees);
+                    if to == self.doc.layout.rotation {
+                        self.say(format!("already at {to}°"));
+                    } else {
+                        self.rotate_to(degrees);
+                    }
+                }
+                _ => self.say("usage: :rotate [90|180|270|0|cw|ccw]"),
+            },
+        }
     }
 
     fn set_fit(&mut self, fit: Fit) {
@@ -215,14 +277,22 @@ impl App {
             self.say("no search yet");
             return;
         };
-        let target = search.advance(reverse).map(|m| (m.page, m.rects.first().copied()));
+        let target = {
+            let layout = &self.doc.layout;
+            let shown = crate::search::shown_top_left(layout);
+            search.advance(reverse, (layout.rotation != 0).then_some(&shown as _)).map(|m| (m.page, m.rects.first().copied()))
+        };
         match target {
             Some((page, Some(rect))) => {
                 self.record_jump();
                 self.view.reveal(&self.doc.layout, page, rect);
             }
             _ => {
-                let status = self.search.as_ref().map(Search::status).unwrap_or_default();
+                let status = {
+                    let layout = &self.doc.layout;
+                    let shown = crate::search::shown_top_left(layout);
+                    self.search.as_ref().map(|s| s.status((layout.rotation != 0).then_some(&shown as _))).unwrap_or_default()
+                };
                 self.say(status);
             }
         }
@@ -756,15 +826,22 @@ impl App {
         let Some((reference, landing)) = self.smart.take() else { return };
         let pages: Vec<Vec<Line>> = self.doc.text.iter().map(|t| t.as_ref().map(|t| lines_of(t)).unwrap_or_default()).collect();
         let places = find_definitions(&reference, &pages);
-        let Some((page, y)) = places.first().copied() else {
+        let Some((page, point)) = places.first().copied() else {
             self.say(format!("nothing found for {}", reference.describe()));
             return;
         };
         self.say(reference.describe());
         match landing {
             // A little above it, with a jump back to here.
-            Landing::Jump => self.jump_to_point(Anchor { page, y: y - 12.0, x: self.view.x }),
-            Landing::Overview => self.open_overview(reference.describe(), places),
+            Landing::Jump => {
+                let y = self.doc.layout.shown_dest_y(page, Some(point[0]), Some(point[1]));
+                self.jump_to_point(Anchor { page, y: y - 12.0, x: self.view.x })
+            }
+            Landing::Overview => {
+                let layout = &self.doc.layout;
+                let shown = places.iter().map(|&(page, [x, y])| (page, layout.shown_dest_y(page, Some(x), Some(y)))).collect();
+                self.open_overview(reference.describe(), shown)
+            }
         }
     }
 
@@ -772,7 +849,8 @@ impl App {
     fn link_place(&self, index: usize) -> Option<(usize, f32)> {
         let link = self.doc.info.links.get(index)?;
         let LinkTarget::Page(page, dest) = &link.target else { return None };
-        Some((*page, dest_y(self.doc.info.pages.get(*page)?, *dest)))
+        let spot = dest_spot(self.doc.info.pages.get(*page)?, *dest);
+        Some((*page, self.doc.layout.shown_spot_y(*page, spot.x, spot.y, spot.rect)))
     }
 
     /// Shows where a link points in the overview.
@@ -948,7 +1026,7 @@ impl App {
             .map(|page| {
                 let t = self.view.transform(layout, page);
                 let (a, b) = (t.to_page(rect.min), t.to_page(rect.max));
-                (page, [a[0], a[1], b[0], b[1]])
+                (page, [a[0].min(b[0]), a[1].min(b[1]), a[0].max(b[0]), a[1].max(b[1])])
             })
             .collect()
     }
@@ -1129,9 +1207,10 @@ impl App {
             LinkTarget::Page(page, dest) => {
                 let (page, dest) = (*page, *dest);
                 let Some(info) = self.doc.info.pages.get(page) else { return };
-                let point = dest_point(info, dest);
-                let anchor = Anchor { page, y: point.unwrap_or(0.0), x: self.view.x };
-                if point.is_some() { self.jump_to_point(anchor) } else { self.jump_to(anchor) }
+                let spot = dest_spot(info, dest);
+                let y = self.doc.layout.shown_spot_y(page, spot.x, spot.y, spot.rect);
+                let anchor = Anchor { page, y, x: self.view.x };
+                if spot.y.is_some() { self.jump_to_point(anchor) } else { self.jump_to(anchor) }
             }
             LinkTarget::Uri(uri) => {
                 let uri = uri.clone();
@@ -1187,6 +1266,7 @@ impl App {
             "theme" => self.command_theme(argument),
             "zoom" => self.command_zoom(argument),
             "reload" => self.run(ctx, Action::Reload, None),
+            "rotate" => self.command_rotate(ctx, argument),
             "toc" => self.open_toc(),
             "recent" => self.open_recent(),
             "bookmark" | "bm" => self.command_bookmark(argument),
@@ -1344,12 +1424,31 @@ fn count_argument(argument: &str) -> Option<u32> {
     (count > 0).then_some(count)
 }
 
+/// Turns the anchors that are kept, the jump history, marks, bookmarks, portals and the portal being
+/// made, from the rotation `from` to `to`.
+fn turn_anchors(layout: &Layout, from: u16, to: u16, jumps: &mut [Anchor], side: &mut Sidecar, pending: Option<&mut PendingPortal>) {
+    let turn = |a: &mut Anchor| *a = layout.turn_anchor(*a, from, to);
+    jumps.iter_mut().for_each(turn);
+    side.marks.values_mut().for_each(turn);
+    side.bookmarks.iter_mut().for_each(|b| turn(&mut b.anchor));
+    side.bookmarks.sort_by(|a, b| a.anchor.page.cmp(&b.anchor.page).then(a.anchor.y.total_cmp(&b.anchor.y)));
+    for portal in &mut side.portals {
+        turn(&mut portal.source);
+        turn(&mut portal.target);
+    }
+    if let Some(pending) = pending {
+        turn(&mut pending.source);
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{count_argument, edits_document, view_top};
+    use super::{PendingPortal, Portal, count_argument, edits_document, turn_anchors, view_top};
     use crate::keymap::Action;
     use crate::view::{Anchor, Layout, View};
     use egui::{Rect, pos2, vec2};
+
+    use crate::store::{Bookmark, Sidecar};
 
     #[test]
     fn a_jump_puts_its_target_at_the_asked_height() {
@@ -1437,6 +1536,8 @@ mod tests {
             DeleteAnnotation,
             Undo,
             Redo,
+            RotateCw,
+            RotateCcw,
             Reload,
             Protect,
             Unprotect,
@@ -1450,5 +1551,117 @@ mod tests {
         for view in [ZoomIn, ZoomOut, ScrollDown, NextPage, Quit, Open, Command, SearchForward, ToggleToc, ToggleFullscreen, Cancel] {
             assert!(!edits_document(view), "{}", view.name());
         }
+    }
+
+    #[test]
+    fn turning_the_pages_turns_every_kept_anchor() {
+        let mut layout = Layout::new(vec![[600.0, 800.0], [600.0, 800.0]], 8.0);
+        let at = |page, y, x| Anchor { page, y, x };
+        let mut jumps = vec![at(0, 100.0, 0.0)];
+        let mut side = Sidecar::default();
+        side.marks.insert('a', at(1, 100.0, 0.0));
+        side.bookmarks = vec![Bookmark { name: "a".into(), anchor: at(0, 700.0, 0.0) }, Bookmark { name: "b".into(), anchor: at(0, 50.0, 0.0) }];
+        side.portals = vec![Portal { id: 1, source: at(0, 100.0, 0.0), target: at(1, 100.0, 0.0) }];
+        let mut pending = PendingPortal { source: at(0, 100.0, 0.0), replacing: None };
+        turn_anchors(&layout, 0, 90, &mut jumps, &mut side, Some(&mut pending));
+        // A quarter turn: the point [300, 100] of the page is at [700, 300] on the turned one, whose width is 800.
+        let turned = at(0, 300.0, 700.0 - 400.0);
+        assert_eq!(jumps, [turned]);
+        assert_eq!(pending.source, turned);
+        assert_eq!(side.portals[0].source, turned);
+        assert_eq!(side.marks[&'a'], Anchor { page: 1, ..turned });
+        assert_eq!(side.portals[0].target, Anchor { page: 1, ..turned });
+        // Re-sorted by the turned y: the first bookmark was at [300, 700] -> y 300, the second [300, 50] -> y 300; both are in order of page then y.
+        assert!(side.bookmarks.windows(2).all(|w| (w[0].anchor.page, w[0].anchor.y) <= (w[1].anchor.page, w[1].anchor.y)));
+        // And back again.
+        layout.set_rotation(90);
+        turn_anchors(&layout, 90, 0, &mut jumps, &mut side, Some(&mut pending));
+        assert_eq!(jumps, [at(0, 100.0, 0.0)]);
+        let marks: Vec<_> = side.bookmarks.iter().map(|b| (b.name.as_str(), b.anchor.y)).collect();
+        assert_eq!(marks, [("b", 50.0), ("a", 700.0)]);
+    }
+
+    #[test]
+    fn a_bookmark_list_is_sorted_again_after_a_turn() {
+        let layout = Layout::new(vec![[600.0, 800.0]], 8.0);
+        // At 0 the order is a (y 100), b (y 200). At 180 the y's flip, so b comes first.
+        let mut side = Sidecar {
+            bookmarks: vec![
+                Bookmark { name: "a".into(), anchor: Anchor { page: 0, y: 100.0, x: 0.0 } },
+                Bookmark { name: "b".into(), anchor: Anchor { page: 0, y: 200.0, x: 0.0 } },
+            ],
+            ..Default::default()
+        };
+        turn_anchors(&layout, 0, 180, &mut [], &mut side, None);
+        assert_eq!(side.bookmarks.iter().map(|b| b.name.as_str()).collect::<Vec<_>>(), ["b", "a"]);
+    }
+}
+
+#[cfg(test)]
+mod turn_anchor_tests {
+    use super::{PendingPortal, Portal, turn_anchors};
+    use crate::store::{Bookmark, Sidecar};
+    use crate::view::{Anchor, Layout};
+
+    fn at(page: usize, y: f32, x: f32) -> Anchor {
+        Anchor { page, y, x }
+    }
+
+    #[test]
+    fn empty_collections_and_no_pending_portal_are_fine() {
+        let layout = Layout::new(vec![[600.0, 800.0]], 8.0);
+        let mut side = Sidecar::default();
+        turn_anchors(&layout, 0, 90, &mut [], &mut side, None);
+        assert_eq!(side, Sidecar::default());
+        let empty = Layout::default();
+        turn_anchors(&empty, 0, 90, &mut [], &mut side, None);
+        assert_eq!(side, Sidecar::default());
+    }
+
+    #[test]
+    fn an_anchor_past_the_last_page_is_left_alone_everywhere() {
+        let layout = Layout::new(vec![[600.0, 800.0]], 8.0);
+        let stray = at(5, 10.0, 4.0);
+        let mut jumps = vec![stray];
+        let mut side = Sidecar::default();
+        side.marks.insert('a', stray);
+        side.bookmarks.push(Bookmark { name: "b".into(), anchor: stray });
+        side.portals.push(Portal { id: 1, source: stray, target: stray });
+        let mut pending = PendingPortal { source: stray, replacing: None };
+        turn_anchors(&layout, 0, 90, &mut jumps, &mut side, Some(&mut pending));
+        assert_eq!(jumps, [stray]);
+        assert_eq!(side.marks[&'a'], stray);
+        assert_eq!(side.bookmarks[0].anchor, stray);
+        assert_eq!((side.portals[0].source, side.portals[0].target), (stray, stray));
+        assert_eq!(pending.source, stray);
+    }
+
+    #[test]
+    fn bookmarks_are_resorted_by_page_then_height_and_a_round_trip_restores_them() {
+        let layout = Layout::new(vec![[600.0, 800.0], [600.0, 800.0]], 8.0);
+        let mut side = Sidecar::default();
+        // At 0 degrees these are in order; turned 180 the heights on page 0 reverse.
+        for (i, y) in [100.0, 700.0].into_iter().enumerate() {
+            side.bookmarks.push(Bookmark { name: format!("p0-{i}"), anchor: at(0, y, 0.0) });
+        }
+        side.bookmarks.push(Bookmark { name: "p1".into(), anchor: at(1, 50.0, 0.0) });
+        let before = side.bookmarks.clone();
+        turn_anchors(&layout, 0, 180, &mut [], &mut side, None);
+        let names: Vec<_> = side.bookmarks.iter().map(|b| b.name.as_str()).collect();
+        assert_eq!(names, ["p0-1", "p0-0", "p1"]);
+        assert_eq!(side.bookmarks[0].anchor.y, 100.0);
+        turn_anchors(&layout, 180, 0, &mut [], &mut side, None);
+        assert_eq!(side.bookmarks, before);
+    }
+
+    #[test]
+    fn nan_heights_do_not_panic_the_sort() {
+        let layout = Layout::new(vec![[600.0, 800.0]], 8.0);
+        let mut side = Sidecar::default();
+        for y in [f32::NAN, 1.0, f32::INFINITY, -f32::INFINITY] {
+            side.bookmarks.push(Bookmark { name: "n".into(), anchor: at(0, y, 0.0) });
+        }
+        turn_anchors(&layout, 0, 90, &mut [], &mut side, None);
+        assert_eq!(side.bookmarks.len(), 4);
     }
 }

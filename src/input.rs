@@ -388,7 +388,7 @@ impl App {
     fn toc_go(&mut self, entry: usize) {
         self.mode = Mode::Normal;
         if let Some(e) = self.doc.toc.get(entry) {
-            let anchor = Anchor { page: e.page, y: e.y, x: self.view.x };
+            let anchor = Anchor { page: e.page, y: self.doc.layout.shown_spot_y(e.page, e.x, e.point.then_some(e.y), e.rect), x: self.view.x };
             if e.point { self.jump_to_point(anchor) } else { self.jump_to(anchor) }
         }
     }

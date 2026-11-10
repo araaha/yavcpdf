@@ -17,7 +17,12 @@ pub struct TocEntry {
     pub title: String,
     pub depth: usize,
     pub page: usize,
+    /// The destination's point on its page, in page points, x then y.
+    /// The x is `None` when the destination names no left edge.
+    pub x: Option<f32>,
     pub y: f32,
+    /// The bounds of a `FitR` destination, whose top as shown depends on the rotation.
+    pub rect: Option<[f32; 4]>,
     /// Whether `y` is a spot the entry names, rather than the top of its page.
     pub point: bool,
 }
@@ -106,6 +111,16 @@ fn render_config(password: Option<&Arc<str>>, theme: &Theme) -> RenderConfig {
     RenderConfig { password: password.cloned(), reading_colors: reading_colors(theme), ..Default::default() }.on_screen()
 }
 
+/// Where a destination points on its page, in page points. The x is `None` when the destination
+/// names no left edge, and nothing at all is known when it names a whole page or view.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Spot {
+    pub x: Option<f32>,
+    pub y: Option<f32>,
+    /// For `FitR`, the bounds `[x0, y0, x1, y1]` of the rectangle: its top as shown depends on the rotation.
+    pub rect: Option<[f32; 4]>,
+}
+
 /// The y on a page that a destination points at, in page points.
 pub fn dest_y(page: &PageInfo, view: DestView) -> f32 {
     dest_point(page, view).unwrap_or(0.0)
@@ -113,18 +128,33 @@ pub fn dest_y(page: &PageInfo, view: DestView) -> f32 {
 
 /// The y a destination points at, when it names one; `None` for a whole page or view.
 pub fn dest_point(page: &PageInfo, view: DestView) -> Option<f32> {
-    let fraction = |x: Option<f32>, y: f32| page.dest_fraction(x, Some(y), 0)[1];
-    let f = match view {
-        DestView::Xyz { left, top: Some(top), .. } => fraction(left, top),
-        DestView::FitH { top: Some(top) } => fraction(None, top),
-        DestView::FitR { rect } => [rect[0], rect[2]]
-            .into_iter()
-            .flat_map(|x| [rect[1], rect[3]].into_iter().map(move |y| (x, y)))
-            .filter_map(|(x, y)| fraction(Some(x), y))
-            .min_by(f32::total_cmp),
-        _ => None,
+    dest_spot(page, view).y
+}
+
+/// What a destination points at, in page points.
+pub fn dest_spot(page: &PageInfo, view: DestView) -> Spot {
+    let fraction = |x: Option<f32>, y: f32| {
+        let [fx, fy] = page.dest_fraction(x, Some(y), 0);
+        fy.map(|fy| [fx, Some(fy)])
     };
-    f.map(|f| f * page.height)
+    let points = |[fx, fy]: [Option<f32>; 2]| [fx.map(|fx| fx * page.width), fy.map(|fy| fy * page.height)];
+    match view {
+        DestView::Xyz { left, top: Some(top), .. } => fraction(left, top).map(points).map_or_else(Spot::default, |[x, y]| Spot { x, y, rect: None }),
+        DestView::FitH { top: Some(top) } => fraction(None, top).map(points).map_or_else(Spot::default, |[x, y]| Spot { x, y, rect: None }),
+        DestView::FitR { rect } => {
+            let corners: Vec<[f32; 2]> = [rect[0], rect[2]]
+                .into_iter()
+                .flat_map(|x| [rect[1], rect[3]].into_iter().map(move |y| (x, y)))
+                .filter_map(|(x, y)| fraction(Some(x), y))
+                .map(|c| points(c).map(|v| v.unwrap_or(0.0)))
+                .collect();
+            let Some(top) = corners.iter().copied().min_by(|a, b| a[1].total_cmp(&b[1])) else { return Spot::default() };
+            let fold = |f: fn(f32, f32) -> f32, i: usize| corners.iter().map(|c| c[i]).reduce(f).unwrap_or(0.0);
+            let bounds = [fold(f32::min, 0), fold(f32::min, 1), fold(f32::max, 0), fold(f32::max, 1)];
+            Spot { x: Some(top[0]), y: Some(top[1]), rect: Some(bounds) }
+        }
+        _ => Spot::default(),
+    }
 }
 
 /// The rectangles of links to places in the document, by page.
@@ -145,7 +175,14 @@ fn link_rows(info: &DocInfo) -> Vec<Row> {
         let (from, to) = (info.pages.get(link.page)?, info.pages.get(*target)?);
         let (a, b) = (from.user_to_view(link.rect[0], link.rect[1]), from.user_to_view(link.rect[2], link.rect[3]));
         let rect = [a[0].min(b[0]), a[1].min(b[1]), a[0].max(b[0]), a[1].max(b[1])];
-        Some(Row { page: link.page, rect, target: (*target, dest_y(to, *dest)), point: dest_point(to, *dest).is_some() })
+        Some(Row {
+            page: link.page,
+            rect,
+            target: (*target, dest_y(to, *dest)),
+            target_x: dest_spot(to, *dest).x,
+            target_rect: dest_spot(to, *dest).rect,
+            point: dest_point(to, *dest).is_some(),
+        })
     };
     info.links.iter().filter_map(row).collect()
 }
@@ -157,6 +194,8 @@ fn flatten(items: &[OutlineItem], pages: &[PageInfo], depth: usize, out: &mut Ve
                 title: item.title.clone(),
                 depth,
                 page: info.0,
+                x: dest_spot(info.1, item.view).x,
+                rect: dest_spot(info.1, item.view).rect,
                 y: dest_y(info.1, item.view),
                 point: dest_point(info.1, item.view).is_some(),
             });
@@ -248,7 +287,7 @@ mod tests {
     use pdfcraft_cos::{Algorithm, Document, NewEncryption, SaveOptions, write_full};
     use pdfcraft_render::OpenError;
 
-    use super::{Doc, OpenFailure, TocEntry, dest_point, dest_y, flatten, link_rows, placeholder_pdf};
+    use super::{Doc, OpenFailure, TocEntry, dest_point, dest_spot, dest_y, flatten, link_rows, placeholder_pdf};
     use crate::config::Config;
 
     fn open_bytes(bytes: Vec<u8>, password: Option<&str>) -> Result<Doc, OpenFailure> {
@@ -429,6 +468,108 @@ mod tests {
         assert_eq!(rows.len(), 1);
         assert!(!rows[0].point);
         assert_eq!(rows[0].target, (0, 0.0));
+    }
+
+    #[test]
+    fn a_destination_is_a_page_point_that_converts_under_rotation() {
+        use crate::view::Layout;
+        // Unrotated page 600x800: x 100, user top 600 is 200 below the top.
+        let p = page(0, CROPS[0]);
+        let full = dest_spot(&p, DestView::Xyz { left: Some(100.0), top: Some(600.0), zoom: None });
+        let (x, y) = (full.x.unwrap(), full.y.unwrap());
+        assert!((x - 100.0).abs() < 1e-3 && (y - 200.0).abs() < 1e-3, "{full:?}");
+        // No x is unknown, not 0.
+        assert_eq!(dest_spot(&p, DestView::FitH { top: Some(600.0) }).x, None);
+        let mut layout = Layout::new(vec![[600.0, 800.0]], 8.0);
+        // A full point is at its own place at every rotation: y 200, x 100, w 600, h 800.
+        for (rotation, expect) in [(0, 200.0), (90, 100.0), (180, 600.0), (270, 500.0)] {
+            layout.set_rotation(rotation);
+            let got = layout.shown_spot_y(0, full.x, full.y, full.rect);
+            assert!((got - expect).abs() < 1e-3 && (got - layout.shown_point(0, [x, y])[1]).abs() < 1e-3, "rot {rotation}: {got}");
+        }
+        // On a page that is /Rotate 90 the page space is already turned: 800 wide, 600 high.
+        let p = page(90, CROPS[0]);
+        let point = dest_spot(&p, DestView::Xyz { left: Some(300.0), top: Some(600.0), zoom: None });
+        let (x, y) = (point.x.unwrap(), point.y.unwrap());
+        assert!((x - 800.0 * 0.75).abs() < 1e-3 && (y - 600.0 * 0.5).abs() < 1e-3, "{point:?}");
+    }
+
+    #[test]
+    fn page_only_and_top_only_destinations_are_at_the_top_at_every_rotation() {
+        use crate::view::Layout;
+        let p = page(0, CROPS[0]);
+        let mut layout = Layout::new(vec![[600.0, 800.0]], 8.0);
+        for rotation in [0, 90, 180, 270] {
+            layout.set_rotation(rotation);
+            let shown = |view| {
+                let s = dest_spot(&p, view);
+                layout.shown_spot_y(0, s.x, s.y, s.rect)
+            };
+            for view in [DestView::Fit, DestView::Top, DestView::Xyz { left: None, top: None, zoom: None }] {
+                assert_eq!(shown(view), 0.0, "rot {rotation} {view:?}");
+            }
+            // FitH has a y but no x: at a quarter turn the y that matters is unknown.
+            let fith = shown(DestView::FitH { top: Some(600.0) });
+            let expect = match rotation {
+                0 => 200.0,
+                180 => 600.0,
+                _ => 0.0,
+            };
+            assert!((fith - expect).abs() < 1e-3, "rot {rotation} FitH: {fith}");
+        }
+    }
+
+    #[test]
+    fn a_fit_rectangle_is_placed_by_its_corner_topmost_as_shown() {
+        use crate::view::Layout;
+        let p = page(0, CROPS[0]);
+        // User rect x 100..300, y 400..700 is page x 100..300, y 100..400.
+        let s = dest_spot(&p, DestView::FitR { rect: [100.0, 400.0, 300.0, 700.0] });
+        assert_eq!(s.rect.map(|r| r.map(f32::round)), Some([100.0, 100.0, 300.0, 400.0]));
+        let mut layout = Layout::new(vec![[600.0, 800.0]], 8.0);
+        for rotation in [0, 90, 180, 270] {
+            layout.set_rotation(rotation);
+            let got = layout.shown_spot_y(0, s.x, s.y, s.rect);
+            let top = layout.shown_rect(0, s.rect.unwrap())[1];
+            assert!((got - top).abs() < 1e-3, "rot {rotation}: {got} vs rect top {top}");
+        }
+    }
+
+    #[test]
+    fn a_toc_entry_goes_to_the_same_place_as_its_destination_at_every_rotation() {
+        use crate::view::Layout;
+        let pages = vec![page(0, CROPS[0])];
+        let item = |view| OutlineItem {
+            title: "t".into(),
+            page: Some(0),
+            view,
+            action: None,
+            children: vec![],
+            open: true,
+            color: None,
+            italic: false,
+            bold: false,
+        };
+        let items = vec![
+            item(DestView::Fit),
+            item(DestView::FitH { top: Some(600.0) }),
+            item(DestView::Xyz { left: Some(100.0), top: Some(600.0), zoom: None }),
+        ];
+        let mut out: Vec<TocEntry> = Vec::new();
+        flatten(&items, &pages, 0, &mut out);
+        let mut layout = Layout::new(vec![[600.0, 800.0]], 8.0);
+        for rotation in [0, 90, 180, 270] {
+            layout.set_rotation(rotation);
+            let ys: Vec<f32> = out.iter().map(|e| layout.shown_spot_y(0, e.x, e.point.then_some(e.y), e.rect)).collect();
+            assert_eq!(ys[0], 0.0, "rot {rotation}");
+            let (fith, xyz) = match rotation {
+                0 => (200.0, 200.0),
+                90 => (0.0, 100.0),
+                180 => (600.0, 600.0),
+                _ => (0.0, 500.0),
+            };
+            assert!((ys[1] - fith).abs() < 1e-3 && (ys[2] - xyz).abs() < 1e-3, "rot {rotation}: {ys:?}");
+        }
     }
 
     fn encrypted(algorithm: Algorithm, user: &str, owner: &str) -> Vec<u8> {

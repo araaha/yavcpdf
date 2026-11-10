@@ -107,6 +107,8 @@ pub struct Line {
     pub text: String,
     /// The top of the line, in page points.
     pub y: f32,
+    /// The left of the line's first glyph, in page points.
+    pub x: f32,
     /// The glyph each character of `text` came from.
     pub glyphs: Vec<usize>,
 }
@@ -127,7 +129,7 @@ pub fn lines_of(text: &PageText) -> Vec<Line> {
         let number = text.line_of.get(index).copied();
         if current != Some(number) || lines.is_empty() {
             current = Some(number);
-            lines.push(Line { text: String::new(), y: glyph.rect[1], glyphs: Vec::new() });
+            lines.push(Line { text: String::new(), y: glyph.rect[1], x: glyph.rect[0], glyphs: Vec::new() });
         }
         let Some(line) = lines.last_mut() else { continue };
         if !line.text.is_empty() && text.space_before.get(index).copied().unwrap_or(false) {
@@ -331,15 +333,15 @@ fn opens_entry(line: &str, key: &str) -> bool {
         .any(|rest| !rest.starts_with(|c: char| c.is_ascii_digit()))
 }
 
-fn find_citations(key: &str, lines: &[(usize, &Line)]) -> Vec<(usize, f32)> {
-    let place = |(page, line): &(usize, &Line)| (*page, line.y);
+fn find_citations(key: &str, lines: &[(usize, &Line)]) -> Vec<(usize, [f32; 2])> {
+    let place = |(page, line): &(usize, &Line)| (*page, [line.x, line.y]);
     let entry = |(_, line): &&(usize, &Line)| opens_entry(&line.text, key);
     let tail = lines.get(bibliography(lines)..).unwrap_or(&[]);
-    let listed: Vec<(usize, f32)> = tail.iter().filter(entry).map(place).collect();
+    let listed: Vec<(usize, [f32; 2])> = tail.iter().filter(entry).map(place).collect();
     if listed.is_empty() { lines.iter().rev().filter(entry).map(place).collect() } else { listed }
 }
 
-fn find_authors(name: &str, year: &str, lines: &[(usize, &Line)]) -> Vec<(usize, f32)> {
+fn find_authors(name: &str, year: &str, lines: &[(usize, &Line)]) -> Vec<(usize, [f32; 2])> {
     /// An entry's first author comes this early in its line, and its year in the next few.
     const AUTHOR_WITHIN: usize = 40;
     const ENTRY_LINES: usize = 4;
@@ -351,7 +353,7 @@ fn find_authors(name: &str, year: &str, lines: &[(usize, &Line)]) -> Vec<(usize,
         // The first year after the name is the entry's: one further on belongs to the next entry.
         let has_year = |(_, l): &&(usize, &Line)| words_of(&l.text).iter().any(|w| year_of(&w.text).is_some());
         let dated = tail.iter().skip(i).take(ENTRY_LINES).find(has_year).is_some_and(|(_, l)| l.text.contains(year));
-        (names(line) && dated).then_some((*page, line.y))
+        (names(line) && dated).then_some((*page, [line.x, line.y]))
     });
     found.collect()
 }
@@ -403,16 +405,17 @@ fn label_score(text: &str, kind: Kind, number: &str) -> u8 {
     }
 }
 
-fn find_labels(kind: Kind, number: &str, lines: &[(usize, &Line)]) -> Vec<(usize, f32)> {
-    let mut found: Vec<(u8, usize, f32)> = lines.iter().map(|(page, line)| (label_score(&line.text, kind, number), *page, line.y)).collect();
+fn find_labels(kind: Kind, number: &str, lines: &[(usize, &Line)]) -> Vec<(usize, [f32; 2])> {
+    let mut found: Vec<(u8, usize, [f32; 2])> =
+        lines.iter().map(|(page, line)| (label_score(&line.text, kind, number), *page, [line.x, line.y])).collect();
     found.retain(|(score, ..)| *score > 0);
     // Stable: among equals, the first in the document comes first.
     found.sort_by_key(|(score, ..)| std::cmp::Reverse(*score));
     found.into_iter().map(|(_, page, y)| (page, y)).collect()
 }
 
-/// Everywhere a reference may point, most likely first: a page and the y on it.
-pub fn find_definitions(reference: &Reference, pages: &[Vec<Line>]) -> Vec<(usize, f32)> {
+/// Everywhere a reference may point, most likely first: a page and the point `[x, y]` on it.
+pub fn find_definitions(reference: &Reference, pages: &[Vec<Line>]) -> Vec<(usize, [f32; 2])> {
     /// A common name can match a whole bibliography, and nobody steps through more than this.
     const MOST: usize = 32;
     let lines = all_lines(pages);
@@ -430,7 +433,7 @@ mod tests {
     use super::*;
 
     fn find_definition(reference: &Reference, pages: &[Vec<Line>]) -> Option<(usize, f32)> {
-        find_definitions(reference, pages).first().copied()
+        find_definitions(reference, pages).first().map(|(page, p)| (*page, p[1]))
     }
 
     fn refs(line: &str) -> Vec<Reference> {
@@ -442,7 +445,7 @@ mod tests {
     }
 
     fn doc(pages: &[&[&str]]) -> Vec<Vec<Line>> {
-        let line = |(i, text): (usize, &&str)| Line { text: (*text).to_owned(), y: i as f32 * 10.0, glyphs: Vec::new() };
+        let line = |(i, text): (usize, &&str)| Line { text: (*text).to_owned(), y: i as f32 * 10.0, x: 0.0, glyphs: Vec::new() };
         pages.iter().map(|lines| lines.iter().enumerate().map(line).collect()).collect()
     }
 
@@ -515,7 +518,7 @@ mod tests {
     fn every_candidate_is_kept_the_likeliest_first() {
         let pages = doc(&[&["Figure 3 Shows a mention", "Figure 3 lower case is no candidate"], &["Figure 3: one", "Figure 3. two"]]);
         let found = find_definitions(&label(Kind::Figure, "3"), &pages);
-        assert_eq!(found, [(1, 0.0), (1, 10.0), (0, 0.0)]);
+        assert_eq!(found, [(1, [0.0, 0.0]), (1, [0.0, 10.0]), (0, [0.0, 0.0])]);
     }
 
     #[test]

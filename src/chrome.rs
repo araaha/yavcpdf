@@ -11,6 +11,7 @@ use crate::hint::Purpose;
 use crate::keymap::Action;
 use crate::menu::Menu;
 use crate::recent::RecentState;
+use crate::view::{Layout, View, unrotate_point};
 
 const PADDING: f32 = 8.0;
 
@@ -164,7 +165,11 @@ impl App {
             "file" => self.doc.file_name(),
             "mode" => self.mode_name(),
             "pending" => self.pending_text(),
-            "search" => self.search.as_ref().map(|s| format!("/{} {}", s.query, s.status())).unwrap_or_default(),
+            "search" => self
+                .search
+                .as_ref()
+                .map(|s| format!("/{} {}", s.query, s.status((layout.rotation != 0).then_some(&crate::search::shown_top_left(layout) as _))))
+                .unwrap_or_default(),
             "selection" => self.selection_status(),
             "message" => self.message().to_owned(),
             _ => String::new(),
@@ -172,7 +177,7 @@ impl App {
     }
 
     fn chapter(&self, page: usize) -> String {
-        let y = self.view.y + self.view.rect.height() / self.view.zoom / 2.0 - self.doc.layout.tops[page];
+        let y = centre_y(&self.doc.layout, &self.view, page);
         self.doc.chapter_at(page, y).map(|e| e.title.clone()).unwrap_or_default()
     }
 
@@ -278,7 +283,10 @@ impl App {
         };
         self.draw_field(painter, rect, prompt, &bar.field, theme.ui_text.egui());
         if let Some(search) = self.search.as_ref().filter(|_| matches!(bar.kind, BarKind::Search { .. })) {
-            text_line(painter, &self.config, rect.right_center() - vec2(PADDING, 0.0), Align2::RIGHT_CENTER, search.status(), theme.ui_accent.egui());
+            let layout = &self.doc.layout;
+            let shown = crate::search::shown_top_left(layout);
+            let status = search.status((layout.rotation != 0).then_some(&shown as _));
+            text_line(painter, &self.config, rect.right_center() - vec2(PADDING, 0.0), Align2::RIGHT_CENTER, status, theme.ui_accent.egui());
         }
     }
 
@@ -682,9 +690,16 @@ impl App {
     }
 }
 
+/// The y, in the page's own points, of the middle of the view on `page`.
+fn centre_y(layout: &Layout, view: &View, page: usize) -> f32 {
+    let shown = [view.x + layout.sizes[page][0] / 2.0, view.y + view.rect.height() / view.zoom / 2.0 - layout.tops[page]];
+    unrotate_point(layout.rotation, layout.page_sizes[page], shown)[1]
+}
+
 #[cfg(test)]
 mod tests {
-    use super::expand;
+    use super::{centre_y, expand};
+    use crate::view::{Layout, View};
 
     fn field(name: &str) -> String {
         match name {
@@ -713,5 +728,57 @@ mod tests {
     #[test]
     fn an_unclosed_brace_is_left_alone() {
         assert_eq!(expand("a {page", field), "a {page");
+    }
+
+    #[test]
+    fn the_middle_of_the_view_is_found_in_page_points_under_rotation() {
+        let mut layout = Layout::new(vec![[600.0, 800.0]], 8.0);
+        let rect = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(100.0, 200.0));
+        // Scrolled so the view's middle is 300 down and 50 right of the middle, as shown.
+        let view = View { x: 50.0, y: 200.0, zoom: 1.0, rect, zoom_hold: None };
+        assert_eq!(centre_y(&layout, &view, 0), 300.0);
+        // Turned 180: the shown point [350, 300] is the page point [250, 500].
+        layout.set_rotation(180);
+        assert_eq!(centre_y(&layout, &view, 0), 500.0);
+        // Turned 90 (800 wide, 600 high): the shown point [450, 300] is the page point [300, 800 - 450].
+        layout.set_rotation(90);
+        assert_eq!(centre_y(&layout, &view, 0), 350.0);
+    }
+}
+
+#[cfg(test)]
+mod centre_tests {
+    use super::centre_y;
+    use crate::view::{Layout, View};
+
+    fn view(x: f32, y: f32, zoom: f32, h: f32) -> View {
+        let rect = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(100.0, h));
+        View { x, y, zoom, rect, zoom_hold: None }
+    }
+
+    #[test]
+    fn the_centre_on_a_later_page_and_a_zoom_at_every_rotation() {
+        // Two 600x800 pages, gap 8: the second starts at 808 unrotated, at 608 turned 90 or 270.
+        let mut layout = Layout::new(vec![[600.0, 800.0], [600.0, 800.0]], 8.0);
+        // Zoom 2, a 400 high window: the middle is 100 view points below the top.
+        let v = view(20.0, 1000.0, 2.0, 400.0);
+        // Rotation 0: shown [320, 1100 - 808 = 292], the page point is the same.
+        assert_eq!(centre_y(&layout, &v, 1), 292.0);
+        // Rotation 180: shown [320, 292] -> y = 800 - 292.
+        layout.set_rotation(180);
+        assert_eq!(centre_y(&layout, &v, 1), 508.0);
+        // Rotation 90: pages are 800 wide, 600 high, the second starts at 608. Shown [420, 492]:
+        // page point [492, 800 - 420].
+        layout.set_rotation(90);
+        assert_eq!(centre_y(&layout, &v, 1), 380.0);
+        // Rotation 270: shown [420, 492]: page point [600 - 492, 420].
+        layout.set_rotation(270);
+        assert_eq!(centre_y(&layout, &v, 1), 420.0);
+    }
+
+    #[test]
+    fn a_zero_zoom_does_not_panic() {
+        let layout = Layout::new(vec![[600.0, 800.0]], 8.0);
+        let _ = centre_y(&layout, &view(0.0, 0.0, 0.0, 100.0), 0);
     }
 }

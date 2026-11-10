@@ -120,6 +120,8 @@ zoom_in = ["=", "+"]
 zoom_out = ["-"]
 fit_width = ["W"]
 fit_height = ["H"]
+rotate_cw = [">"]            # turn the pages clockwise, kept for the document
+rotate_ccw = ["<"]
 search_forward = ["/"]
 search_backward = ["?"]
 search_next = ["n"]
