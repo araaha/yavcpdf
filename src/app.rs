@@ -549,6 +549,10 @@ pub struct App {
 
     pub statusbar_visible: bool,
     pub fullscreen: bool,
+    /// Set while presenting: one page fit to the screen, and nothing else.
+    pub presentation: Option<crate::present::Presentation>,
+    /// Where the view goes back to after leaving the presentation, until the window has settled.
+    pub return_to: Option<(Anchor, Instant)>,
     /// The theme the config file names, so a reload only changes it when the file did.
     file_theme: String,
     message: Option<(String, Instant)>,
@@ -686,6 +690,8 @@ impl App {
             pending_portal: None,
             portal_window: false,
             fullscreen: config.view.fullscreen,
+            presentation: None,
+            return_to: None,
             message: None,
             watcher,
             config,
@@ -734,8 +740,12 @@ impl App {
     /// The sidecar as it is now: the saved one with the current place, zoom and jump history.
     pub fn live_side(&self) -> Sidecar {
         let mut side = self.side.clone();
-        side.anchor = Some(self.view.anchor(&self.doc.layout));
-        side.zoom = Some(self.view.zoom);
+        let (anchor, zoom) = match &self.presentation {
+            Some(presentation) => presentation.kept_place(),
+            None => (self.view.anchor(&self.doc.layout), self.view.zoom),
+        };
+        side.anchor = Some(anchor);
+        side.zoom = Some(zoom);
         (side.jumps, side.jump_index) = store::capped_jumps(&self.jumps, self.jump_index);
         side
     }
@@ -859,6 +869,10 @@ impl App {
     fn install(&mut self, ctx: &egui::Context, doc: Doc, same_file: bool) {
         let path = doc.path.clone();
         let path = path.as_path();
+        // Another document starts with the window as it was, not as the presentation made it.
+        if !same_file {
+            self.end_presentation(ctx);
+        }
         self.save();
         self.locked = false;
         self.blank = false;
@@ -1005,6 +1019,10 @@ impl App {
 
     /// Searches pages that have arrived, nearest first, and settles a waiting jump.
     fn pump_search(&mut self) {
+        // The search waits behind the presentation, which would have it move the view.
+        if self.presentation.is_some() {
+            return;
+        }
         let Some(search) = self.search.as_mut() else { return };
         let pages = self.doc.layout.len();
         let first = self.view.current_page(&self.doc.layout);
@@ -1113,11 +1131,15 @@ impl App {
         self.view.rect = rect;
         if !self.started {
             self.start();
-        } else if resized {
+        } else if resized && self.presentation.is_none() {
             self.apply_fit();
             self.view.clamp(&self.doc.layout);
         }
         ui.painter().rect_filled(area, 0.0, self.config.active_theme().background.egui());
+        if self.presentation.is_some() {
+            return self.present_frame(ui);
+        }
+        self.settle_return(&ctx, resized);
         self.pointer(ui);
         self.draw_document(ui);
         self.draw_chrome(ui, Rect::from_min_max(pos2(area.min.x, rect.max.y), area.max));

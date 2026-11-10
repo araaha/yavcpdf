@@ -139,6 +139,13 @@ pub struct PortalConfig {
 
 #[derive(Clone, Copy, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct PresentationConfig {
+    /// Whether the elapsed time shows while presenting.
+    pub timer: bool,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct OverviewConfig {
     pub width: f32,
     pub height: f32,
@@ -158,6 +165,7 @@ pub struct Config {
     pub hotbar: HotbarConfig,
     pub overview: OverviewConfig,
     pub portal: PortalConfig,
+    pub presentation: PresentationConfig,
     pub themes: BTreeMap<String, Theme>,
     pub keys: BTreeMap<Action, Vec<String>>,
 }
@@ -330,6 +338,28 @@ mod tests {
         assert!(Config::load_str("").unwrap().view.highlight_fields);
         assert!(!Config::load_str("[view]\nhighlight_fields = false").unwrap().view.highlight_fields);
         assert!(Config::load_str("[view]\nhighlight_fields = false").unwrap().view.highlight_links);
+    }
+
+    #[test]
+    fn the_presentation_timer_is_off_by_default_and_can_be_turned_on() {
+        assert!(!Config::load_str("").unwrap().presentation.timer);
+        assert!(Config::load_str("[presentation]\ntimer = true").unwrap().presentation.timer);
+        assert!(Config::load_str("[presentation]\nclock = true").is_err());
+    }
+
+    #[test]
+    fn an_old_config_with_a_copied_keys_table_and_no_presentation_section_still_loads() {
+        let defaults: toml::Table = DEFAULTS.parse().unwrap();
+        let mut keys = defaults["keys"].as_table().unwrap().clone();
+        keys.remove("toggle_presentation");
+        let mut old = toml::Table::new();
+        old.insert("keys".to_owned(), toml::Value::Table(keys));
+        let config = Config::load_str(&old.to_string()).unwrap();
+        assert!(!config.presentation.timer);
+        assert_eq!(config.keys[&Action::TogglePresentation], vec!["<f5>".to_owned()]);
+        // A user's own binding replaces the default whole.
+        let config = Config::load_str("[keys]\ntoggle_presentation = [\"<f6>\"]").unwrap();
+        assert_eq!(config.keys[&Action::TogglePresentation], vec!["<f6>".to_owned()]);
     }
 
     #[test]

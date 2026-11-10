@@ -277,6 +277,7 @@ choose a colour instead, so counts such as `42G` don't work then.
 | <kbd>u</kbd> / <kbd>U</kbd> | Undo / redo |
 | <kbd>Ctrl</kbd>+<kbd>R</kbd> / <kbd>T</kbd> | Light or dark theme / next theme |
 | <kbd>g</kbd> <kbd>l</kbd> / <kbd>g</kbd> <kbd>i</kbd> / <kbd>Ctrl</kbd>+<kbd>S</kbd> / <kbd>Alt</kbd>+<kbd>F</kbd> | Tint on links / form fields / status line / fullscreen |
+| <kbd>F5</kbd> | [Presentation mode](#presentation-mode) |
 | <kbd>Ctrl</kbd>+<kbd>T</kbd> | Open a file with the desktop's file chooser |
 | <kbd>R</kbd> / <kbd>:</kbd> / <kbd>q</kbd>, <kbd>Z</kbd> <kbd>Q</kbd>, <kbd>Z</kbd> <kbd>Z</kbd>, <kbd>Ctrl</kbd>+<kbd>W</kbd> | Reload / command line / quit |
 | <kbd>Esc</kbd>, <kbd>Ctrl</kbd>+<kbd>C</kbd> | Cancel: closes a bar, hints, the contents or a choice panel; otherwise takes back the last thing: keys, overview, jump, portal, selection, tool, search. Rebind it as `cancel` |
@@ -284,6 +285,34 @@ choose a colour instead, so counts such as `42G` don't work then.
 Some actions have more default keys than shown, such as the arrow keys,
 <kbd>PageUp</kbd> and <kbd>PageDown</kbd>, <kbd>Home</kbd> and <kbd>End</kbd>.
 [`src/default_config.toml`](src/default_config.toml) lists them all.
+
+### Presentation mode
+
+<kbd>F5</kbd> or `:present` (the `toggle_presentation` action) goes fullscreen and shows one page, fit whole to the
+screen on the theme's background, with no status bar, hotbar, bars or tool. The document's own annotations (highlights, ink, notes, fill and sign items, signatures) are shown, but tints, links, search matches and the portal window are not. It starts on the page in the
+middle of the view. The next two pages and the previous one are kept rendered, so turning a page is instant. On the
+blank page it only says "no document open".
+
+| Keys | Action |
+| --- | --- |
+| <kbd>J</kbd>, <kbd>j</kbd>, <kbd>l</kbd>, <kbd>Space</kbd>, <kbd>PageDown</kbd>, <kbd>Down</kbd>, <kbd>Right</kbd>, left click, wheel down | Next page |
+| <kbd>K</kbd>, <kbd>k</kbd>, <kbd>h</kbd>, <kbd>Shift</kbd>+<kbd>Space</kbd>, <kbd>Backspace</kbd>, <kbd>PageUp</kbd>, <kbd>Up</kbd>, <kbd>Left</kbd>, wheel up | Previous page |
+| <kbd>g</kbd> <kbd>g</kbd>, <kbd>Home</kbd> / <kbd>G</kbd>, <kbd>End</kbd> | First / last page |
+| `N` <kbd>G</kbd>, `N` <kbd>Enter</kbd> | Page N |
+| <kbd>t</kbd> / <kbd>r</kbd> | Show or hide the timer / restart it |
+| <kbd>Esc</kbd>, <kbd>Ctrl</kbd>+<kbd>C</kbd>, <kbd>q</kbd>, <kbd>F5</kbd> | Leave (<kbd>Esc</kbd> and <kbd>Ctrl</kbd>+<kbd>C</kbd> first drop a count or <kbd>g</kbd> typed) |
+
+The wheel turns one page per notch, and one per flick of a trackpad. Every other
+key, including <kbd>:</kbd>, <kbd>Ctrl</kbd>+<kbd>W</kbd> and <kbd>Z</kbd><kbd>Z</kbd>, does nothing. The window re-fits when resized.
+
+The timer shows the time since the presentation started, as `mm:ss` (`h:mm:ss`
+from an hour on), in a corner. `presentation.timer = true` shows it from the
+start.
+
+Leaving restores fullscreen, the status bar, the hotbar, the tool and the zoom, and
+goes to the top of the page last shown (or back to where the view was, if still on
+the page it started on). The jump history gets at most one entry for the whole
+presentation.
 
 ### Hints
 
@@ -482,6 +511,7 @@ is no way to protect it in place.
 | `:toc` | Open the table of contents |
 | `:hotbar` | Show or hide the hotbar |
 | `:recent` | List the recent files |
+| `:present` | Start or leave [presentation mode](#presentation-mode) |
 | `:marks` | List the marks, and count the bookmarks |
 | `:bookmark NAME`, `:bm NAME` | Add a named bookmark at this place; an existing name, in any case, moves to it |
 | `:bookmarks` | Pick a bookmark: type <kbd>/</kbd> to filter, <kbd>j</kbd> <kbd>k</kbd> or the arrows and the wheel move, <kbd>Enter</kbd>, <kbd>l</kbd> or a click jumps, <kbd>d</kbd> or <kbd>Delete</kbd> deletes when not filtering, <kbd>Esc</kbd> clears the filter and then closes, <kbd>q</kbd> closes. Names match without regard to case. They are listed in the order of the document, with their page |

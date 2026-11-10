@@ -240,6 +240,17 @@ impl App {
         }
     }
 
+    /// The elapsed time of a presentation, small in the corner.
+    pub fn draw_timer(&self, painter: &Painter, text: &str) {
+        let theme = self.config.active_theme();
+        let area = self.view.rect;
+        let galley = painter.layout_no_wrap(text.to_owned(), font(&self.config), theme.ui_text.egui());
+        let rect =
+            Rect::from_min_size(area.right_bottom() - galley.size() - vec2(PADDING, PADDING) * 2.0, galley.size() + vec2(PADDING, PADDING) * 2.0);
+        painter.rect_filled(rect, 0.0, theme.ui_background.egui());
+        text_line(painter, &self.config, rect.center(), Align2::CENTER_CENTER, text, theme.ui_text.egui());
+    }
+
     fn draw_status(&self, painter: &Painter, rect: Rect) {
         let theme = self.config.active_theme();
         painter.rect_filled(rect, 0.0, theme.ui_background.egui());

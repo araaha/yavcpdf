@@ -64,6 +64,9 @@ y = 0.0                   # from -1 (top) to 1 (bottom)
 width = 720.0
 height = 480.0
 
+[presentation]
+timer = false              # show the elapsed time while presenting; `t` toggles it there, `r` restarts it
+
 [themes.dark]
 background = "#1d1d1d"        # behind the pages
 page = "#242424"
@@ -167,6 +170,7 @@ toggle_light_dark = ["<C-r>"]
 toggle_links = ["gl"]
 toggle_fields = ["gi"]
 toggle_fullscreen = ["<A-f>"]
+toggle_presentation = ["<f5>"]   # one page fit to the screen, nothing else; Esc or q leaves
 reload = ["R"]
 quit = ["q", "ZQ", "ZZ", "<C-w>"]
 open = ["<C-t>"]         # the desktop's file chooser

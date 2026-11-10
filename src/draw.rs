@@ -6,6 +6,7 @@ use crate::app::{App, Mode, Tool, ZOOM_SETTLE};
 use crate::cache::TileKey;
 use crate::config::Color;
 use crate::hint::HintState;
+use crate::present::{PREFETCH_AHEAD, PREFETCH_BEHIND};
 use crate::store::{Annotation, MarkKind, NOTE_SIDE, Portal, mark_rect};
 use crate::view::{View, tile_side, tiles_crossing};
 
@@ -149,17 +150,48 @@ impl App {
         // be evicted itself and asked for again, for ever. Being touched spares it this frame.
         let mut room = self.config.view.texture_budget_mb.saturating_mul(1024 * 1024) / 2;
         for page in after.chain(before) {
-            let place = self.place(view, page, ppp, self.render_zoom);
-            let left = (view.rect.left() - place.origin.x) / place.unit;
-            let right = (view.rect.right() - place.origin.x) / place.unit;
-            for unit in place.units([left, 0.0, right, place.height as f32]) {
-                let (width, height) = unit.map_or((place.width, place.height), |t| (t.w, t.h));
-                let Some(left_over) = room.checked_sub(width as usize * height as usize * 4) else { return };
-                room = left_over;
-                let key = place.key(unit);
-                if self.cache.touch(&key).is_none() && !self.cache.settled(&key) {
-                    self.wants.push(place.request(unit));
-                }
+            if !self.prefetch_page(view, page, ppp, self.render_zoom, &mut room) {
+                return;
+            }
+        }
+    }
+
+    /// Asks for the tiles of one page that `view` would show, as long as `room` (bytes) lasts.
+    /// Returns whether it did: false once the room has run out.
+    fn prefetch_page(&mut self, view: &View, page: usize, ppp: f32, render_zoom: f32, room: &mut usize) -> bool {
+        let place = self.place(view, page, ppp, render_zoom);
+        let left = (view.rect.left() - place.origin.x) / place.unit;
+        let right = (view.rect.right() - place.origin.x) / place.unit;
+        for unit in place.units([left, 0.0, right, place.height as f32]) {
+            let (width, height) = unit.map_or((place.width, place.height), |t| (t.w, t.h));
+            let Some(left_over) = room.checked_sub(width as usize * height as usize * 4) else { return false };
+            *room = left_over;
+            let key = place.key(unit);
+            if self.cache.touch(&key).is_none() && !self.cache.settled(&key) {
+                self.wants.push(place.request(unit));
+            }
+        }
+        true
+    }
+
+    /// Draws the page presented, then asks for the ones around it, each fit to the screen as it
+    /// will be shown, so turning to it finds it rendered.
+    pub fn draw_presentation(&mut self, ui: &egui::Ui, page: usize) {
+        let painter = ui.painter().with_clip_rect(self.view.rect);
+        let ppp = ui.ctx().pixels_per_point();
+        let view = self.view;
+        self.draw_page(&painter, &view, page, ppp, view.zoom);
+        for annotation in self.side.annotations.iter().filter(|a| a.page() == page) {
+            self.draw_annotation(&painter, &view, annotation);
+        }
+        let len = self.doc.layout.len();
+        let ahead = (page + 1..len).take(PREFETCH_AHEAD);
+        let behind = (0..page).rev().take(PREFETCH_BEHIND);
+        let mut room = self.config.view.texture_budget_mb.saturating_mul(1024 * 1024) / 2;
+        for near in ahead.chain(behind) {
+            let near_view = self.presented_view(near);
+            if !self.prefetch_page(&near_view, near, ppp, near_view.zoom, &mut room) {
+                return;
             }
         }
     }

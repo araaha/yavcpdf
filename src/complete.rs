@@ -64,6 +64,7 @@ pub const COMMANDS: &[Command] = &[
     takes("bm", Of::Name, "{name}", true),
     plain("bookmarks"),
     plain("hotbar"),
+    plain("present"),
     takes("export", Of::Path, "[file]", false),
     takes("export!", Of::Path, "[file]", false),
     takes("protect", Of::Path, "[file]", false),

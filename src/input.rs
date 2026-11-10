@@ -71,8 +71,12 @@ impl App {
         let mut skip_text = false;
         for event in events {
             match event {
-                Event::Key { key, pressed: true, modifiers, .. } => {
+                Event::Key { key, pressed: true, repeat, modifiers, .. } => {
                     let stroke = Stroke::from_key(*key, *modifiers);
+                    // Holding the key must not flip the presentation back and forth.
+                    if *repeat && stroke.as_ref().is_some_and(|s| self.keymap.is(s, Action::TogglePresentation)) {
+                        continue;
+                    }
                     skip_text = modifiers.alt || stroke.as_ref().is_some_and(|s| s.key == "space");
                     if let Some(stroke) = stroke {
                         self.on_stroke(ctx, stroke);
@@ -94,6 +98,10 @@ impl App {
     }
 
     fn on_stroke(&mut self, ctx: &egui::Context, stroke: Stroke) {
+        if self.presentation.is_some() {
+            return self.presentation_key(ctx, &stroke);
+        }
+        self.return_to = None;
         match &self.mode {
             Mode::Normal => self.normal_key(ctx, stroke),
             Mode::Bar(_) => self.bar_key(ctx, &stroke),
@@ -616,6 +624,11 @@ impl App {
     pub fn wheel(&mut self, ctx: &egui::Context, events: &[Event]) {
         for event in events {
             let Event::MouseWheel { unit, delta, modifiers, .. } = event else { continue };
+            if self.presentation.is_some() {
+                self.presentation_wheel(ctx, *unit, delta.y);
+                continue;
+            }
+            self.return_to = None;
             let pixels = match unit {
                 MouseWheelUnit::Point => *delta,
                 MouseWheelUnit::Line => *delta * self.config.view.scroll_step,

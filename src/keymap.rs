@@ -83,6 +83,7 @@ pub enum Action {
     OverviewNext,
     OverviewPrev,
     ToggleFullscreen,
+    TogglePresentation,
     Reload,
     Quit,
     Open,
@@ -106,7 +107,7 @@ pub enum Action {
 
 impl Action {
     /// Every action, in declaration order. `the_list_of_actions_is_complete` keeps it whole.
-    pub const ALL: [Self; 89] = [
+    pub const ALL: [Self; 90] = [
         Self::Cancel,
         Self::ScrollDown,
         Self::ScrollUp,
@@ -177,6 +178,7 @@ impl Action {
         Self::OverviewNext,
         Self::OverviewPrev,
         Self::ToggleFullscreen,
+        Self::TogglePresentation,
         Self::Reload,
         Self::Quit,
         Self::Open,
@@ -272,6 +274,7 @@ impl Action {
             Self::OverviewNext => "overview_next",
             Self::OverviewPrev => "overview_prev",
             Self::ToggleFullscreen => "toggle_fullscreen",
+            Self::TogglePresentation => "toggle_presentation",
             Self::Reload => "reload",
             Self::Quit => "quit",
             Self::Open => "open",

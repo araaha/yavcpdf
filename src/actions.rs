@@ -900,6 +900,7 @@ impl App {
                 self.fullscreen = !self.fullscreen;
                 ctx.send_viewport_cmd_to(egui::ViewportId::ROOT, egui::ViewportCommand::Fullscreen(self.fullscreen));
             }
+            Action::TogglePresentation => self.toggle_presentation(ctx),
             Action::Reload => {
                 let path = self.doc.path.clone();
                 match self.open(ctx, &path) {
@@ -1191,6 +1192,7 @@ impl App {
             "bookmark" | "bm" => self.command_bookmark(argument),
             "bookmarks" => self.open_bookmarks(),
             "hotbar" => self.hotbar.toggle(self.tool.is_some()),
+            "present" => self.toggle_presentation(ctx),
             "export" => self.command_export(argument, false),
             "export!" => self.command_export(argument, true),
             "protect" => self.command_protect(Job::Protect, argument, false),
