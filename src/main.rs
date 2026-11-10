@@ -33,7 +33,7 @@ use config::Config;
 const USAGE_HEAD: &str = "usage: yavcpdf [--page N] [--password PW] [--geometry WxH[+X+Y]]
              [--fullscreen|--no-fullscreen] [--statusbar|--no-statusbar] [file.pdf]
 
-With no file, the document opened last is opened again.
+With no file, the document opened last is opened again, or a blank page if there is none.
 --geometry sets the window size in points, and optionally its position.
 ";
 
@@ -142,17 +142,6 @@ fn window_title(path: &Path) -> String {
     format!("{name} - yavcpdf")
 }
 
-/// With no file and no last document: a native file picker where there is no console for the usage text.
-#[cfg(any(windows, target_os = "macos"))]
-fn ask_for_file() -> Option<PathBuf> {
-    rfd::FileDialog::new().set_title("Open a PDF").add_filter("PDF", &["pdf", "PDF"]).pick_file()
-}
-
-#[cfg(not(any(windows, target_os = "macos")))]
-fn ask_for_file() -> Option<PathBuf> {
-    None
-}
-
 /// Shows a message where the user can see it, since a release build on Windows has no console.
 #[cfg(any(windows, target_os = "macos"))]
 fn show_message(level: rfd::MessageLevel, message: &str) {
@@ -204,10 +193,10 @@ pub fn strip_verbatim(path: PathBuf) -> PathBuf {
 }
 
 fn run(args: Args) -> Result<(), String> {
-    let Some(path) = args.file.or_else(store::last_document).or_else(ask_for_file) else {
-        return if cfg!(any(windows, target_os = "macos")) { Ok(()) } else { Err(usage()) };
+    let path = match args.file.or_else(store::last_document) {
+        Some(path) => Some(std::fs::canonicalize(&path).map(strip_verbatim).map_err(|e| format!("{}: {e}", path.display()))?),
+        None => None,
     };
-    let path = std::fs::canonicalize(&path).map(strip_verbatim).map_err(|e| format!("{}: {e}", path.display()))?;
     let (mut config, warning) = Config::load();
     if let Some(on) = args.fullscreen {
         config.view.fullscreen = on;
@@ -218,13 +207,16 @@ fn run(args: Args) -> Result<(), String> {
     // The document and the font don't need the window, so they load while it and its GL context are made.
     let opening = {
         let (path, password, config) = (path.clone(), args.password, config.clone());
-        std::thread::spawn(move || app::Opened::load(&path, password.as_deref(), &config))
+        std::thread::spawn(move || match path {
+            Some(path) => app::Opened::load(&path, password.as_deref(), &config),
+            None => app::Opened::blank(store::data_dir(), &config),
+        })
     };
     let font = {
         let config = config.clone();
         std::thread::spawn(move || chrome::font_bytes(&config))
     };
-    let title = window_title(&path);
+    let title = path.as_deref().map_or_else(|| "yavcpdf".to_owned(), window_title);
     let (width, height) = args.geometry.map_or((1280, 800), |g| g.size);
     // Sizes and offsets are capped at 16384 by parse_geometry, so they are exact in f32.
     let mut viewport = egui::ViewportBuilder::default()

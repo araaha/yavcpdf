@@ -22,8 +22,43 @@ use crate::smart::{Line, Reference, find_definitions, lines_of, references_in, t
 use crate::store::{self, Annotation, MarkKind, NOTE_SIDE, Portal};
 use crate::view::Anchor;
 
+/// Whether `action` changes or writes the document, which the blank page has none of.
+fn edits_document(action: Action) -> bool {
+    use Action::*;
+    matches!(
+        action,
+        Portal
+            | SetMark
+            | DeletePortal
+            | EditPortal
+            | HintForm
+            | ToolHighlight
+            | ToolDraw
+            | ToolErase
+            | ToolNote
+            | ToolFill
+            | FillText
+            | FillDate
+            | FillCheck
+            | FillCross
+            | FillDot
+            | FillLine
+            | FillSign
+            | DeleteAnnotation
+            | Undo
+            | Redo
+            | Reload
+            | Protect
+            | Unprotect
+    )
+}
+
 impl App {
     pub fn run(&mut self, ctx: &egui::Context, action: Action, count: Option<u32>) {
+        if self.blank && edits_document(action) {
+            self.say("no document open");
+            return;
+        }
         if self.overview_action(action, count) {
             return;
         }
@@ -410,6 +445,9 @@ impl App {
 
     /// Takes up the fill & sign tool with `item`.
     pub fn pick_fill(&mut self, item: FillItem) {
+        if self.locked {
+            return;
+        }
         self.set_tool(Some(Tool::Fill));
         self.fill = item;
         if item == FillItem::Sign && self.signature.is_none() {
@@ -487,6 +525,9 @@ impl App {
 
     /// Signs at the place, or asks for a signature first.
     fn add_signature(&mut self, page: usize, at: [f32; 2]) {
+        if self.locked {
+            return;
+        }
         let Some(signature) = self.signature.as_ref() else {
             self.mode = Mode::Sign(SignPad { place: Some((page, at)), ..Default::default() });
             return;
@@ -564,8 +605,10 @@ impl App {
 
     /// Keeps a drawn signature, and signs where it was asked for.
     pub fn sign_done(&mut self, pad: &SignPad) {
-        debug_assert!(!self.locked);
         self.mode = Mode::Normal;
+        if self.locked {
+            return;
+        }
         let Some(signature) = store::normalize_signature(&pad.strokes) else {
             self.say("nothing drawn");
             return;
@@ -580,6 +623,9 @@ impl App {
     }
 
     fn command_export(&mut self, argument: &str, force: bool) {
+        if self.blank {
+            return self.say("no document open");
+        }
         debug_assert!(!self.locked);
         let path = match argument {
             "" => crate::export::default_path(&self.doc.path),
@@ -600,6 +646,9 @@ impl App {
 
     /// Starts a protected or unprotected copy of the document: asks for what is needed first.
     fn command_protect(&mut self, job: Job, argument: &str, force: bool) {
+        if self.blank {
+            return self.say("no document open");
+        }
         debug_assert!(!self.locked);
         let path = match argument {
             "" => crate::protect::default_path(&self.doc.path, job),
@@ -1097,6 +1146,7 @@ impl App {
         match name {
             "" => {}
             "q" | "quit" | "q!" | "wq" | "x" => ctx.send_viewport_cmd_to(egui::ViewportId::ROOT, egui::ViewportCommand::Close),
+            "w" | "write" if self.blank => self.say("no document open"),
             "w" | "write" => {
                 self.save();
                 self.say("saved");
@@ -1116,6 +1166,7 @@ impl App {
             "unprotect" => self.command_protect(Job::Unprotect, argument, false),
             "unprotect!" => self.command_protect(Job::Unprotect, argument, true),
             "clearform" => self.clear_form(),
+            "sign" if self.blank => self.say("no document open"),
             "sign" => self.mode = Mode::Sign(SignPad::default()),
             "marks" => {
                 let marks: String = self.side.marks.keys().collect();
@@ -1259,7 +1310,8 @@ fn count_argument(argument: &str) -> Option<u32> {
 
 #[cfg(test)]
 mod tests {
-    use super::{count_argument, view_top};
+    use super::{count_argument, edits_document, view_top};
+    use crate::keymap::Action;
     use crate::view::{Anchor, Layout, View};
     use egui::{Rect, pos2, vec2};
 
@@ -1322,5 +1374,23 @@ mod tests {
         // A document shorter than the window is centred whatever the percent.
         let short = Layout::new(vec![[600.0, 300.0]], 10.0);
         assert_eq!(landed(&short, 0, 100.0, 50.0, 800.0), -250.0);
+    }
+
+    #[test]
+    fn the_blank_page_refuses_exactly_the_editing_actions() {
+        use Action::*;
+        let editing = [
+            SetMark, Portal, DeletePortal, EditPortal, HintForm, ToolHighlight, ToolDraw, ToolErase, ToolNote, ToolFill, FillText, FillDate, FillCheck,
+            FillCross, FillDot, FillLine, FillSign, DeleteAnnotation, Undo, Redo, Reload, Protect, Unprotect,
+        ];
+        for action in editing {
+            assert!(edits_document(action), "{}", action.name());
+        }
+        for action in Action::ALL.into_iter().filter(|a| !editing.contains(a)) {
+            assert!(!edits_document(action), "{} should work on the blank page", action.name());
+        }
+        for view in [ZoomIn, ZoomOut, ScrollDown, NextPage, Quit, Open, Command, SearchForward, ToggleToc, ToggleFullscreen, Cancel] {
+            assert!(!edits_document(view), "{}", view.name());
+        }
     }
 }

@@ -121,7 +121,8 @@ the file chooser, and `xdg-utils` (`xdg-open`) for links.
 Download `yavcpdf-vX.Y.Z-x86_64-windows.zip` from the
 [releases page](https://github.com/araaha/yavcpdf/releases), together with its
 `.sha256` file. Unzip it anywhere and run `yavcpdf.exe`; with no file given it
-opens the last document, or asks for one if there is none. To make it your PDF
+opens the last document, or a blank page if there is none, where `:open` or
+`:e` open a file. To make it your PDF
 viewer, right-click a PDF, choose **Open with → Choose another app**, pick
 `yavcpdf.exe` and tick "Always use this app". Links open in your default
 browser. Windows may show a SmartScreen warning for the unsigned program:
@@ -155,7 +156,7 @@ working directory.
 
 Double-clicking a PDF in Finder and "Open With" do not open files in yavcpdf
 yet, so run it from Terminal with a file, or launch the app on its own, which
-opens the last document or asks for one.
+opens the last document, or a blank page if there is none, where `:open` or `:e` open a file.
 </details>
 
 <details>
@@ -213,7 +214,7 @@ yavcpdf [--page N] [--password PW] [--geometry WxH[+X+Y]]
         [--fullscreen|--no-fullscreen] [--statusbar|--no-statusbar] [file.pdf]
 ```
 
-With no file, yavcpdf reopens the last document. It reloads the PDF when the
+With no file, yavcpdf reopens the last document, or opens a blank page if there is none, where `:open` or `:e` open a file. It reloads the PDF when the
 file changes. A password-protected PDF opens a [password menu](#password-protected-pdfs). On Windows, and on macOS when not started from a terminal,
 `--help` and argument errors show in a dialog, as do fatal errors.
 

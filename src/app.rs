@@ -484,6 +484,8 @@ pub struct App {
     pub dirty: bool,
     /// The document is a blank stand-in behind the password menu: nothing may be saved.
     pub locked: bool,
+    /// No document is open: `doc` is a blank page, and `locked` is set with it.
+    pub blank: bool,
     last_save: Instant,
 
     pub view: View,
@@ -556,6 +558,8 @@ pub struct Opened {
     pub load_warning: Option<String>,
     /// Set when the document wants a password: `doc` is then a blank stand-in, and this is the menu.
     pub locked: Option<PasswordState>,
+    /// Set when there is no document to open: `doc` is then a blank page, and nothing of it is saved.
+    pub blank: bool,
 }
 
 impl Opened {
@@ -584,7 +588,7 @@ impl Opened {
         let key = hashing.join().map_err(|_| format!("{}: couldn't hash the document", path.display()))?;
         let store = Store::new(data_dir, key);
         let (side, load_warning) = store.load(&doc.path);
-        Ok(Self { doc, store, side, load_warning, locked: None })
+        Ok(Self { doc, store, side, load_warning, locked: None, blank: false })
     }
 
     /// A blank page named `path`, with the password menu over it. Nothing of it is ever saved.
@@ -593,7 +597,14 @@ impl Opened {
         let store = Store::new(data_dir, store::content_key(&bytes));
         let doc = Doc::from_bytes(path, bytes, None, config.active_theme(), config.view.page_gap).map_err(|e| e.to_string())?;
         let locked = Some(PasswordState::new(path.to_owned(), notice));
-        Ok(Self { doc, store, side: Sidecar::default(), load_warning: None, locked })
+        Ok(Self { doc, store, side: Sidecar::default(), load_warning: None, locked, blank: false })
+    }
+
+    /// A blank page standing for no document at all. Nothing of it is ever saved.
+    pub fn blank(data_dir: PathBuf, config: &Config) -> Result<Self, String> {
+        let mut opened = Self::locked(data_dir, Path::new(""), None, config)?;
+        (opened.locked, opened.blank) = (None, true);
+        Ok(opened)
     }
 }
 
@@ -606,8 +617,8 @@ impl App {
         start_page: Option<usize>,
         warning: Option<String>,
     ) -> Self {
-        let Opened { doc, store, side, load_warning, locked } = opened;
-        if locked.is_none() {
+        let Opened { doc, store, side, load_warning, locked, blank } = opened;
+        if locked.is_none() && !blank {
             store::remember_document(&doc.path);
         }
         let (keymap, key_errors) = Keymap::new(&config.keys);
@@ -634,13 +645,14 @@ impl App {
             zoom_changed: now,
             fit: Some(Fit::Width),
             started: false,
-            start_page,
+            start_page: start_page.filter(|_| !blank),
             cache: TileCache::default(),
             wants: Vec::new(),
             queued: Vec::new(),
             queued_text: Vec::new(),
             slow_pages: HashSet::new(),
-            locked: locked.is_some(),
+            locked: locked.is_some() || blank,
+            blank,
             mode: locked.map_or(Mode::Normal, Mode::Password),
             search: None,
             selection: None,
@@ -802,10 +814,11 @@ impl App {
         }
     }
 
-    /// Closes the password menu: the open document stays, and with none there is nothing to show.
+    /// Closes the password menu: the open document stays, and with none the window closes, unless it
+    /// shows the blank page.
     pub fn password_cancel(&mut self, ctx: &egui::Context) {
         let opening = matches!(&self.mode, Mode::Password(s) if s.purpose == Purpose::Open);
-        if self.locked && opening {
+        if self.locked && !self.blank && opening {
             ctx.send_viewport_cmd_to(egui::ViewportId::ROOT, egui::ViewportCommand::Close);
         } else {
             self.mode = Mode::Normal;
@@ -819,6 +832,7 @@ impl App {
         let path = path.as_path();
         self.save();
         self.locked = false;
+        self.blank = false;
         let key = store::content_key(&doc.bytes);
         if same_file {
             self.store = match self.store.clone().moved_to(key, &self.side) {
@@ -881,7 +895,8 @@ impl App {
     }
 
     pub fn set_title(&self, ctx: &egui::Context) {
-        ctx.send_viewport_cmd_to(egui::ViewportId::ROOT, egui::ViewportCommand::Title(format!("{} - yavcpdf", self.doc.file_name())));
+        let title = if self.blank { "yavcpdf".to_owned() } else { format!("{} - yavcpdf", self.doc.file_name()) };
+        ctx.send_viewport_cmd_to(egui::ViewportId::ROOT, egui::ViewportCommand::Title(title));
     }
 
     /// Picks up a changed config file.
@@ -1401,6 +1416,16 @@ mod locked_load_tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    #[test]
+    fn the_blank_page_is_one_page_with_no_password_menu_and_writes_nothing() {
+        let data = scratch("blank-data");
+        let config = Config::load_str("").unwrap();
+        let opened = Opened::blank(data.clone(), &config).unwrap();
+        assert!(opened.blank && opened.locked.is_none());
+        assert_eq!(opened.doc.layout.len(), 1);
+        assert!(listing(&data).is_empty(), "the blank page wrote {:?}", listing(&data));
     }
 
     #[test]
