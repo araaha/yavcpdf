@@ -207,6 +207,10 @@ impl App {
         let place = self.place(view, page, ppp, render_zoom);
         // The columns of the view, all the way down the page.
         let shown = place.rect();
+        // A page wholly to one side of the view, as the other page of a pair can be, has nothing in it.
+        if shown.right() < view.rect.left() || shown.left() > view.rect.right() {
+            return true;
+        }
         let columns = Rect::from_min_max(pos2(view.rect.left(), shown.top()), pos2(view.rect.right(), shown.bottom()));
         for unit in place.units(visible_pixels(place.rotation, place.pixels(), place.origin, place.unit, columns)) {
             let (width, height) = unit.map_or((place.width, place.height), |t| (t.w, t.h));
@@ -465,7 +469,7 @@ impl App {
         let zoom = area.width() / layout.sizes[page][0];
         let mut view = View { x: 0.0, y: layout.tops[page] + portal.target.y, zoom, rect: area, zoom_hold: None };
         view.clamp(layout);
-        view.x = 0.0;
+        view.x = layout.lefts[page] + layout.sizes[page][0] / 2.0;
         let painter = ui.painter().with_clip_rect(area);
         let ppp = ctx.pixels_per_point();
         for shown in view.visible_pages(&self.doc.layout) {

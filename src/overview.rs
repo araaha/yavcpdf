@@ -72,6 +72,7 @@ impl App {
         let zoom = self.view.zoom.clamp(fit * SMALLEST, fit);
         let mut view = View { x: 0.0, y: overview.top, zoom, rect, zoom_hold: None };
         view.clamp(layout);
+        view.x = layout.lefts[page] + layout.sizes[page][0] / 2.0;
         Some(view)
     }
 
@@ -88,11 +89,14 @@ impl App {
     /// Goes to what the overview shows, as a jump that `jump_back` can undo.
     fn goto_overview(&mut self) {
         let Some(view) = self.overview.as_ref().and_then(|o| self.overview_view(o)) else { return };
+        let place = self.overview.as_ref().and_then(|o| o.places.get(o.index)).map(|p| p.0);
         self.overview = None;
         let layout = &self.doc.layout;
-        let page = layout.page_at(view.y.max(0.0));
+        let page = layout.page_near(view.y.max(0.0), self.view.x, self.view.rect.width() / self.view.zoom);
         let y = view.y - layout.tops.get(page).copied().unwrap_or(0.0);
-        self.jump_to(Anchor { page, y, x: self.view.x });
+        // The x that shows the place itself, which may be on the other page of the row.
+        let x = layout.x_for(place.unwrap_or(page), self.view.x, self.view.rect.width() / self.view.zoom);
+        self.jump_to_exact(Anchor { page, y, x });
     }
 
     /// What keys do while the overview is open: those that scroll scroll it, and any other closes

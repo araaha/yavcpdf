@@ -217,6 +217,25 @@ fn rotation_of(value: &serde_json::Value) -> u16 {
     }
 }
 
+/// Reads an on/off setting from any JSON value: a bool or the text "true" or "false" is taken,
+/// anything else is `None`, which means the config's value.
+fn lenient_flag<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Option<bool>, D::Error> {
+    let value = serde_json::Value::deserialize(deserializer).unwrap_or(serde_json::Value::Null);
+    Ok(flag_of(&value))
+}
+
+fn flag_of(value: &serde_json::Value) -> Option<bool> {
+    match value {
+        serde_json::Value::Bool(b) => Some(*b),
+        serde_json::Value::String(text) => match text.trim().to_lowercase().as_str() {
+            "true" => Some(true),
+            "false" => Some(false),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
 /// The sidecar file's contents.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -227,6 +246,11 @@ pub struct Sidecar {
     /// How the pages are turned, clockwise in degrees: 0, 90, 180 or 270.
     #[serde(deserialize_with = "lenient_rotation")]
     pub rotation: u16,
+    /// Whether pages are shown in pairs, and whether the first is alone: `None` follows the config.
+    #[serde(deserialize_with = "lenient_flag")]
+    pub two_page: Option<bool>,
+    #[serde(deserialize_with = "lenient_flag")]
+    pub cover_alone: Option<bool>,
     /// The jump history, oldest first, and where `jump_back` stands in it.
     pub jumps: Vec<Anchor>,
     pub jump_index: usize,
@@ -1704,5 +1728,117 @@ mod rotation_fuzz_tests {
             read(&json!(f64::from_bits(state)));
             read(&json!(state.to_string()));
         }
+    }
+}
+
+#[cfg(test)]
+mod two_page_tests {
+    use super::*;
+
+    #[test]
+    fn the_flags_are_read_leniently_and_missing_means_the_config() {
+        let parse = |text: &str| serde_json::from_str::<Sidecar>(text).unwrap();
+        let none = parse("{}");
+        assert_eq!((none.two_page, none.cover_alone), (None, None));
+        let set = parse(r#"{"two_page":true,"cover_alone":false}"#);
+        assert_eq!((set.two_page, set.cover_alone), (Some(true), Some(false)));
+        for text in [r#""yes""#, "3", "null", "[true]", r#"{"a":1}"#, "1.5"] {
+            let side = parse(&format!(r#"{{"zoom":2.0,"two_page":{text},"cover_alone":{text}}}"#));
+            assert_eq!((side.two_page, side.cover_alone, side.zoom), (None, None, Some(2.0)), "{text}");
+        }
+        assert_eq!(parse(r#"{"two_page":"True"}"#).two_page, Some(true));
+        let config = crate::config::Config::load_str("[view]\ntwo_page = true").unwrap();
+        assert!(none.two_page.unwrap_or(config.view.two_page));
+        assert!(none.cover_alone.unwrap_or(config.view.cover_alone));
+        assert!(!set.cover_alone.unwrap_or(config.view.cover_alone));
+        let text = serde_json::to_string(&set).unwrap();
+        assert_eq!(serde_json::from_str::<Sidecar>(&text).unwrap(), set);
+    }
+}
+
+#[cfg(test)]
+mod two_page_flag_fuzz_tests {
+    use super::*;
+    use serde_json::{Value, json};
+
+    struct Rng(u64);
+
+    impl Rng {
+        fn next(&mut self) -> u64 {
+            self.0 ^= self.0 << 13;
+            self.0 ^= self.0 >> 7;
+            self.0 ^= self.0 << 17;
+            self.0
+        }
+    }
+
+    fn value(rng: &mut Rng, depth: u32) -> Value {
+        match rng.next() % if depth > 2 { 8 } else { 10 } {
+            0 => Value::Null,
+            1 => json!(rng.next().is_multiple_of(2)),
+            2 => json!(rng.next() as i64),
+            3 => json!(rng.next() as f64 / 7.0),
+            4 => {
+                json!(["true", "false", "TRUE", "False", " true ", "\tfalse\n", "yes", "", "1", "0", "tru", "truefalse"][(rng.next() % 12) as usize])
+            }
+            5 => json!(rng.next() % 3),
+            6 => json!("\u{130}\u{fb01} \u{0}"),
+            7 => json!(u64::MAX),
+            8 => Value::Array((0..rng.next() % 3).map(|_| value(rng, depth + 1)).collect()),
+            _ => Value::Object((0..rng.next() % 3).map(|i| (format!("k{i}"), value(rng, depth + 1))).collect()),
+        }
+    }
+
+    fn expected(v: &Value) -> Option<bool> {
+        match v {
+            Value::Bool(b) => Some(*b),
+            Value::String(s) if s.trim().eq_ignore_ascii_case("true") => Some(true),
+            Value::String(s) if s.trim().eq_ignore_ascii_case("false") => Some(false),
+            _ => None,
+        }
+    }
+
+    #[test]
+    fn arbitrary_json_never_fails_the_sidecar() {
+        let mut rng = Rng(0xDEAD_BEEF_CAFE_F00D);
+        for _ in 0..3000 {
+            let (a, b) = (value(&mut rng, 0), value(&mut rng, 0));
+            let text = json!({"path": "x.pdf", "zoom": 1.5, "two_page": a, "cover_alone": b}).to_string();
+            let side: Sidecar = serde_json::from_str(&text).unwrap_or_else(|e| panic!("{text}: {e}"));
+            assert_eq!((side.two_page, side.cover_alone), (expected(&a), expected(&b)), "{text}");
+            assert_eq!(side.zoom, Some(1.5));
+            assert_eq!(side.path, "x.pdf");
+        }
+    }
+
+    #[test]
+    fn booleans_and_missing_keys() {
+        for (text, want) in [("true", Some(true)), ("false", Some(false)), ("null", None)] {
+            let side: Sidecar = serde_json::from_str(&format!(r#"{{"two_page":{text}}}"#)).unwrap();
+            assert_eq!((side.two_page, side.cover_alone), (want, None));
+        }
+        let side: Sidecar = serde_json::from_str(r#"{"cover_alone":true}"#).unwrap();
+        assert_eq!((side.two_page, side.cover_alone), (None, Some(true)));
+        let side: Sidecar = serde_json::from_str("{}").unwrap();
+        assert_eq!((side.two_page, side.cover_alone), (None, None));
+    }
+
+    #[test]
+    fn every_flag_combination_survives_a_write_and_a_read_through_the_store() {
+        let dir = std::env::temp_dir().join(format!("yavcpdf-flags-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let options = [None, Some(true), Some(false)];
+        for (i, &two_page) in options.iter().enumerate() {
+            for (j, &cover_alone) in options.iter().enumerate() {
+                let store = Store::new(dir.clone(), format!("k{i}{j}"));
+                let side = Sidecar { path: "doc.pdf".into(), two_page, cover_alone, ..Default::default() };
+                store.save(&side).unwrap();
+                let (read, warning) = store.load(Path::new("doc.pdf"));
+                assert_eq!(warning, None);
+                assert_eq!((read.two_page, read.cover_alone), (two_page, cover_alone));
+                assert_eq!(read, side);
+            }
+        }
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

@@ -250,10 +250,16 @@ impl App {
         self.render_zoom = saved.render_zoom;
         self.zoom_changed = Instant::now();
         let page = page.min(self.doc.layout.len() - 1);
-        let landing = if page == saved.page { saved.anchor } else { Anchor { page, y: 0.0, x: saved.anchor.x } };
+        let layout = &self.doc.layout;
+        let landing = if page == saved.page {
+            saved.anchor
+        } else {
+            let span = self.view.rect.width() / self.view.zoom;
+            layout.row_anchor(page, layout.x_for(page, saved.anchor.x, span))
+        };
         if page != saved.page {
             self.view.go_to(&self.doc.layout, saved.anchor);
-            self.jump_to(landing);
+            self.jump_to_exact(landing);
         } else {
             self.view.go_to(&self.doc.layout, landing);
         }
@@ -316,7 +322,7 @@ impl App {
         let layout = &self.doc.layout;
         let rect = self.view.rect;
         let (zoom, y) = fit_whole(rect.size(), layout.sizes[page], layout.tops[page]);
-        View { x: 0.0, y, zoom, rect, zoom_hold: None }
+        View { x: layout.lefts[page] + layout.sizes[page][0] / 2.0, y, zoom, rect, zoom_hold: None }
     }
 
     /// Draws one frame of the presentation: the page, and the timer if it is on.

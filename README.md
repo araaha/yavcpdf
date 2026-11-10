@@ -278,6 +278,7 @@ choose a colour instead, so counts such as `42G` don't work then.
 | <kbd>Ctrl</kbd>+<kbd>R</kbd> / <kbd>T</kbd> | Light or dark theme / next theme |
 | <kbd>g</kbd> <kbd>l</kbd> / <kbd>g</kbd> <kbd>i</kbd> / <kbd>Ctrl</kbd>+<kbd>S</kbd> / <kbd>Alt</kbd>+<kbd>F</kbd> | Tint on links / form fields / status line / fullscreen |
 | <kbd>></kbd> / <kbd><</kbd> | Turn the pages a quarter turn clockwise / counter-clockwise (a count turns more); [kept for the document](#what-is-stored-where) |
+| <kbd>D</kbd> / <kbd>g</kbd> <kbd>D</kbd> | Show pages side by side in pairs / with the first page alone on the right, as in a printed book; [kept for the document](#what-is-stored-where). Page keys, `:N` and the fits then work by the row |
 | <kbd>F5</kbd> | [Presentation mode](#presentation-mode) |
 | <kbd>Ctrl</kbd>+<kbd>T</kbd> | Open a file with the desktop's file chooser |
 | <kbd>R</kbd> / <kbd>:</kbd> / <kbd>q</kbd>, <kbd>Z</kbd> <kbd>Q</kbd>, <kbd>Z</kbd> <kbd>Z</kbd>, <kbd>Ctrl</kbd>+<kbd>W</kbd> | Reload / command line / quit |
@@ -510,6 +511,8 @@ is no way to protect it in place.
 | `:zoom PERCENT` | Set the zoom |
 | `:reload` | Reload the document |
 | `:rotate [90\|180\|270\|0\|cw\|ccw]` | Turn all the pages clockwise to that angle, or a quarter turn; with no argument, clockwise. Rotation is a setting of the view, kept per document: the PDF's own `/Rotate` is never changed, not even by `:export` |
+| `:twopage [on\|off]` | Show pages in pairs (the config's `two_page`), or one at a time; with no argument, switch. Kept per document |
+| `:cover [on\|off]` | With two pages, keep the first page alone on the right (`cover_alone`); with no argument, switch. Kept per document, and set even when not in two-page mode |
 | `:toc` | Open the table of contents |
 | `:hotbar` | Show or hide the hotbar |
 | `:recent` | List the recent files |
@@ -611,6 +614,9 @@ jump puts its target, as a percentage of the window height from the bottom (0)
 to the top (100); the default is 50, the middle.
 Destinations at the very top of a page, common in LaTeX/hyperref chapter and section links, show the page top at that height, so at 50 the end of the previous page fills the upper half of the window; set 100 for the old top-of-window behaviour.
 At values near 0 the target sits at the bottom edge, so what follows it is below the window.
+`view.two_page` (default false) shows pages side by side in pairs, and `view.cover_alone` (default true) keeps
+the first page alone on the right of the spine, as in a printed book; the second applies only in two-page mode.
+A lone cover or a trailing page is fit with the width of a full spread, so it keeps its place beside the spine.
 
 ### Key bindings
 
@@ -635,7 +641,7 @@ document's own colours.
 What is stored where
 --------------------
 
-Position, marks, bookmarks, the jump history, the rotation, portals, annotations and the values filled into a form are kept in
+Position, marks, bookmarks, the jump history, the rotation, the two-page layout and cover setting, portals, annotations and the values filled into a form are kept in
 `{hash}.json` in the data folder (`~/.local/share/yavcpdf/` on Linux, other
 systems: see the Settings folders table under Installation).
 The PDF itself is never changed, so other viewers don't show them. A file keeps

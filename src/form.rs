@@ -1238,8 +1238,8 @@ impl App {
     fn named_action(&mut self, name: &str) {
         let page = self.view.current_page(&self.doc.layout);
         match name {
-            "NextPage" => self.jump_to_page((page + 1).min(self.doc.layout.len() - 1)),
-            "PrevPage" => self.jump_to_page(page.saturating_sub(1)),
+            "NextPage" => self.jump_to_page(self.doc.layout.page_by_rows(page, 1)),
+            "PrevPage" => self.jump_to_page(self.doc.layout.page_by_rows(page, -1)),
             "FirstPage" => self.jump_to_page(0),
             "LastPage" => self.jump_to_page(self.doc.layout.len() - 1),
             other => self.say(format!("the {other} action isn't supported")),

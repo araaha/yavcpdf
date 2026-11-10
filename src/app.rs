@@ -628,6 +628,7 @@ impl App {
     ) -> Self {
         let Opened { mut doc, store, side, load_warning, locked, blank } = opened;
         doc.layout.set_rotation(side.rotation.into());
+        doc.layout.set_two_page(side.two_page.unwrap_or(config.view.two_page), side.cover_alone.unwrap_or(config.view.cover_alone));
         if locked.is_none() && !blank {
             store::remember_document(&doc.path);
         }
@@ -768,7 +769,9 @@ impl App {
         if !self.locked
             && let Some(page) = self.start_page.take()
         {
-            self.view.go_to(&self.doc.layout, Anchor { page, y: 0.0, x: self.view.x });
+            let x = self.doc.layout.x_for(page, self.view.x, self.view.rect.width() / self.view.zoom);
+            let top = self.doc.layout.row_anchor(page, x);
+            self.view.go_to(&self.doc.layout, top);
         }
         self.render_zoom = self.view.zoom;
     }
@@ -776,7 +779,7 @@ impl App {
     /// Fits the current page to the window, if a fit is on.
     pub fn apply_fit(&mut self) {
         let page = self.view.current_page(&self.doc.layout);
-        let [w, h] = self.doc.layout.sizes[page];
+        let [w, h] = self.doc.layout.row_size(page);
         let zoom = match self.fit {
             Some(Fit::Width) => self.view.rect.width() * self.config.view.fit_width_ratio / w,
             Some(Fit::Height) => self.view.rect.height() / h,
@@ -924,6 +927,8 @@ impl App {
         self.pending.clear();
         self.doc = doc;
         self.doc.layout.set_rotation(rotation.into());
+        // A reload keeps the live state: a toggle is in `self.side` before it is saved.
+        self.doc.layout.set_two_page(self.two_page_on(), self.cover_on());
         self.form = FormState::fresh();
         self.reset_rendering();
         self.view.clamp(&self.doc.layout);
@@ -969,6 +974,9 @@ impl App {
         self.keymap = keymap;
         self.pending.clear();
         self.config = config;
+        if (self.doc.layout.two_page, self.doc.layout.cover_alone) != (self.two_page_on(), self.cover_on()) {
+            self.refresh_pages();
+        }
         if font_changed {
             crate::chrome::apply_font(ctx, &self.config);
         }

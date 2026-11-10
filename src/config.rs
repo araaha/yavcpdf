@@ -92,6 +92,10 @@ pub struct ViewConfig {
     pub jump_position: f32,
     /// Whether copying joins the lines of a paragraph and undoes hyphenation.
     pub copy_reflow: bool,
+    /// Whether pages sit side by side in pairs.
+    pub two_page: bool,
+    /// With `two_page`, whether the first page sits alone on the right.
+    pub cover_alone: bool,
 }
 
 #[derive(Clone, Debug, Deserialize)]

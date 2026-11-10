@@ -49,6 +49,8 @@ fn edits_document(action: Action) -> bool {
             | Redo
             | RotateCw
             | RotateCcw
+            | ToggleTwoPage
+            | ToggleCover
             | Reload
             | Protect
             | Unprotect
@@ -106,6 +108,8 @@ impl App {
             Action::FitHeight => self.set_fit(Fit::Height),
             Action::RotateCw => self.rotate_by(90 * i64::from(times)),
             Action::RotateCcw => self.rotate_by(-90 * i64::from(times)),
+            Action::ToggleTwoPage => self.set_two_page(!self.two_page_on()),
+            Action::ToggleCover => self.set_cover(!self.cover_on()),
             _ => return false,
         }
         true
@@ -139,11 +143,13 @@ impl App {
         let page = self.view.current_page(&self.doc.layout);
         self.turn_stored_anchors(from, to);
         self.doc.layout.set_rotation(degrees);
-        self.view.go_to(&self.doc.layout, Anchor { page, y: 0.0, x: 0.0 });
+        let top = self.doc.layout.row_anchor(page, 0.0);
+        self.view.go_to(&self.doc.layout, top);
         self.view.zoom_hold = None;
         self.apply_fit();
         self.view.zoom_hold = None;
-        self.view.go_to(&self.doc.layout, Anchor { page, y: 0.0, x: 0.0 });
+        let top = self.doc.layout.row_anchor(page, 0.0);
+        self.view.go_to(&self.doc.layout, top);
         // A search still waiting to jump started from a y in the old rotation.
         let anchor = self.view.anchor(&self.doc.layout);
         if let Some(search) = self.search.as_mut() {
@@ -183,6 +189,76 @@ impl App {
         }
     }
 
+    /// Whether pages are shown in pairs: the document's own setting, else the config's.
+    pub fn two_page_on(&self) -> bool {
+        self.side.two_page.unwrap_or(self.config.view.two_page)
+    }
+
+    /// Whether the first page sits alone in two-page mode.
+    pub fn cover_on(&self) -> bool {
+        self.side.cover_alone.unwrap_or(self.config.view.cover_alone)
+    }
+
+    fn set_two_page(&mut self, on: bool) {
+        self.side.two_page = Some(on);
+        self.refresh_pages();
+        self.say(if on { "two pages" } else { "one page" });
+    }
+
+    fn set_cover(&mut self, alone: bool) {
+        self.side.cover_alone = Some(alone);
+        if self.two_page_on() {
+            self.refresh_pages();
+        } else {
+            self.mark_dirty();
+        }
+        let applies = if self.two_page_on() { "" } else { ", applies in two-page mode" };
+        self.say(format!("{}{applies}", if alone { "cover alone" } else { "cover paired" }));
+    }
+
+    /// Arranges the pages as the settings say, staying on the same page under the fit that is on.
+    pub fn refresh_pages(&mut self) {
+        let (on, cover) = (self.two_page_on(), self.cover_on());
+        let layout = &self.doc.layout;
+        if (layout.two_page, layout.cover_alone) == (on, cover) {
+            self.mark_dirty();
+            return;
+        }
+        let mut anchor = self.view.anchor(layout);
+        // x is from the spine in two-page mode and the column in one-page mode: keep the offset
+        // from the centre of the page being read.
+        let offset = self.view.x - layout.centre_of(anchor.page);
+        self.doc.layout.set_two_page(on, cover);
+        anchor.x = self.doc.layout.centre_of(anchor.page) + offset;
+        self.view.go_to(&self.doc.layout, anchor);
+        self.view.zoom_hold = None;
+        self.apply_fit();
+        self.view.zoom_hold = None;
+        if self.fit.is_some() {
+            self.view.x = 0.0;
+        }
+        self.view.go_to(&self.doc.layout, Anchor { x: self.view.x, ..anchor });
+        // What was picked out or being drawn is where the page was.
+        self.selection = None;
+        self.stroke = None;
+        self.hover = None;
+        self.overview = None;
+        self.mark_dirty();
+    }
+
+    /// `:twopage` and `:cover`: `on`, `off`, or with no argument a switch.
+    fn command_flag(&mut self, argument: &str, current: bool, name: &str) -> Option<bool> {
+        match argument {
+            "" => Some(!current),
+            "on" => Some(true),
+            "off" => Some(false),
+            _ => {
+                self.say(format!("usage: :{name} [on|off]"));
+                None
+            }
+        }
+    }
+
     fn set_fit(&mut self, fit: Fit) {
         self.fit = Some(fit);
         self.apply_fit();
@@ -203,6 +279,12 @@ impl App {
 
     /// Goes to a place, as a jump that `jump_back` can undo.
     pub fn jump_to(&mut self, anchor: Anchor) {
+        let x = self.doc.layout.x_for(anchor.page, anchor.x, self.view.rect.width() / self.view.zoom);
+        self.jump_to_exact(Anchor { x, ..anchor });
+    }
+
+    /// `jump_to` with the anchor's x as it is.
+    pub(crate) fn jump_to_exact(&mut self, anchor: Anchor) {
         self.record_jump();
         self.view.go_to(&self.doc.layout, anchor);
         self.mark_dirty();
@@ -216,8 +298,10 @@ impl App {
     }
 
     pub fn jump_to_page(&mut self, page: usize) {
-        let last = self.doc.layout.len() - 1;
-        self.jump_to(Anchor { page: page.min(last), y: 0.0, x: self.view.x });
+        let layout = &self.doc.layout;
+        let page = page.min(layout.len() - 1);
+        let x = layout.x_for(page, self.view.x, self.view.rect.width() / self.view.zoom);
+        self.jump_to_exact(layout.row_anchor(page, x));
     }
 
     fn jump_history(&mut self, back: bool, count: u32) {
@@ -250,10 +334,13 @@ impl App {
         let page = self.view.anchor(layout).page;
         match action {
             Action::NextPage => {
-                let target = (page + n).min(layout.len() - 1);
-                self.view.go_to(&self.doc.layout, Anchor { page: target, y: 0.0, x: self.view.x });
+                let target = layout.page_by_rows(page, n.min(isize::MAX as usize) as isize);
+                self.view.go_to(&self.doc.layout, layout.row_anchor(target, self.view.x));
             }
-            Action::PrevPage => self.view.go_to(&self.doc.layout, Anchor { page: page.saturating_sub(n), y: 0.0, x: self.view.x }),
+            Action::PrevPage => {
+                let target = layout.page_by_rows(page, -(n.min(isize::MAX as usize) as isize));
+                self.view.go_to(&self.doc.layout, layout.row_anchor(target, self.view.x));
+            }
             Action::GotoFirst => self.jump_to_page(count.map_or(0, |c| c.saturating_sub(1) as usize)),
             Action::GotoLast => match count {
                 Some(c) => self.jump_to_page(c.saturating_sub(1) as usize),
@@ -902,7 +989,7 @@ impl App {
     fn portal_anchor(&self) -> Anchor {
         let layout = &self.doc.layout;
         let middle = self.view.y + self.view.rect.height() / self.view.zoom / 2.0;
-        let page = layout.page_at(middle.max(0.0));
+        let page = layout.page_near(middle.max(0.0), self.view.x, self.view.rect.width() / self.view.zoom);
         Anchor { page, y: middle - layout.tops[page], x: self.view.x }
     }
 
@@ -1267,6 +1354,17 @@ impl App {
             "zoom" => self.command_zoom(argument),
             "reload" => self.run(ctx, Action::Reload, None),
             "rotate" => self.command_rotate(ctx, argument),
+            "twopage" | "cover" if self.blank => self.say("no document open"),
+            "twopage" => {
+                if let Some(on) = self.command_flag(argument, self.two_page_on(), "twopage") {
+                    self.set_two_page(on);
+                }
+            }
+            "cover" => {
+                if let Some(alone) = self.command_flag(argument, self.cover_on(), "cover") {
+                    self.set_cover(alone);
+                }
+            }
             "toc" => self.open_toc(),
             "recent" => self.open_recent(),
             "bookmark" | "bm" => self.command_bookmark(argument),
@@ -1538,6 +1636,8 @@ mod tests {
             Redo,
             RotateCw,
             RotateCcw,
+            ToggleTwoPage,
+            ToggleCover,
             Reload,
             Protect,
             Unprotect,

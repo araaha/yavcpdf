@@ -692,7 +692,7 @@ impl App {
 
 /// The y, in the page's own points, of the middle of the view on `page`.
 fn centre_y(layout: &Layout, view: &View, page: usize) -> f32 {
-    let shown = [view.x + layout.sizes[page][0] / 2.0, view.y + view.rect.height() / view.zoom / 2.0 - layout.tops[page]];
+    let shown = [view.x - layout.lefts[page], view.y + view.rect.height() / view.zoom / 2.0 - layout.tops[page]];
     unrotate_point(layout.rotation, layout.page_sizes[page], shown)[1]
 }
 

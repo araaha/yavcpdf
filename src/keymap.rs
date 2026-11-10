@@ -35,6 +35,8 @@ pub enum Action {
     FitHeight,
     RotateCw,
     RotateCcw,
+    ToggleTwoPage,
+    ToggleCover,
     SearchForward,
     SearchBackward,
     SearchNext,
@@ -109,7 +111,7 @@ pub enum Action {
 
 impl Action {
     /// Every action, in declaration order. `the_list_of_actions_is_complete` keeps it whole.
-    pub const ALL: [Self; 92] = [
+    pub const ALL: [Self; 94] = [
         Self::Cancel,
         Self::ScrollDown,
         Self::ScrollUp,
@@ -132,6 +134,8 @@ impl Action {
         Self::FitHeight,
         Self::RotateCw,
         Self::RotateCcw,
+        Self::ToggleTwoPage,
+        Self::ToggleCover,
         Self::SearchForward,
         Self::SearchBackward,
         Self::SearchNext,
@@ -230,6 +234,8 @@ impl Action {
             Self::FitHeight => "fit_height",
             Self::RotateCw => "rotate_cw",
             Self::RotateCcw => "rotate_ccw",
+            Self::ToggleTwoPage => "toggle_two_page",
+            Self::ToggleCover => "toggle_cover",
             Self::SearchForward => "search_forward",
             Self::SearchBackward => "search_backward",
             Self::SearchNext => "search_next",
@@ -1025,5 +1031,24 @@ mod tests {
         assert!(errors.is_empty(), "{errors:?}");
         assert_eq!(map.exact(&[stroke("<")]), Some(Action::RotateCcw));
         assert_eq!(map.exact(&[stroke(">")]), Some(Action::RotateCw));
+    }
+
+    #[test]
+    fn the_two_page_keys_are_free() {
+        let config = crate::config::Config::load_str("").unwrap();
+        assert_eq!(config.keys.get(&Action::ToggleTwoPage), Some(&vec!["D".to_owned()]));
+        assert_eq!(config.keys.get(&Action::ToggleCover), Some(&vec!["gD".to_owned()]));
+        let (map, errors) = Keymap::new(&config.keys);
+        assert!(errors.is_empty(), "{errors:?}");
+        assert_eq!(map.exact(&[stroke("D")]), Some(Action::ToggleTwoPage));
+        assert_eq!(map.exact(&[stroke("g"), stroke("D")]), Some(Action::ToggleCover));
+        let mut seen = std::collections::BTreeMap::new();
+        for (action, keys) in config.keys.iter().filter(|(a, _)| a.edit().is_none()) {
+            for key in keys {
+                if let Some(other) = seen.insert(key.clone(), action.name()) {
+                    panic!("{key} is bound to both {other} and {}", action.name());
+                }
+            }
+        }
     }
 }
