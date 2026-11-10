@@ -1380,8 +1380,29 @@ mod tests {
     fn the_blank_page_refuses_exactly_the_editing_actions() {
         use Action::*;
         let editing = [
-            SetMark, Portal, DeletePortal, EditPortal, HintForm, ToolHighlight, ToolDraw, ToolErase, ToolNote, ToolFill, FillText, FillDate, FillCheck,
-            FillCross, FillDot, FillLine, FillSign, DeleteAnnotation, Undo, Redo, Reload, Protect, Unprotect,
+            SetMark,
+            Portal,
+            DeletePortal,
+            EditPortal,
+            HintForm,
+            ToolHighlight,
+            ToolDraw,
+            ToolErase,
+            ToolNote,
+            ToolFill,
+            FillText,
+            FillDate,
+            FillCheck,
+            FillCross,
+            FillDot,
+            FillLine,
+            FillSign,
+            DeleteAnnotation,
+            Undo,
+            Redo,
+            Reload,
+            Protect,
+            Unprotect,
         ];
         for action in editing {
             assert!(edits_document(action), "{}", action.name());
