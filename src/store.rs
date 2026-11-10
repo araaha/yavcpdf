@@ -160,6 +160,9 @@ pub struct Sidecar {
     pub path: String,
     pub anchor: Option<Anchor>,
     pub zoom: Option<f32>,
+    /// The jump history, oldest first, and where `jump_back` stands in it.
+    pub jumps: Vec<Anchor>,
+    pub jump_index: usize,
     pub marks: BTreeMap<char, Anchor>,
     pub portals: Vec<Portal>,
     pub annotations: Vec<Annotation>,
@@ -178,6 +181,27 @@ impl Sidecar {
         self.next_id += 1;
         self.next_id
     }
+}
+
+/// How many places the jump history keeps.
+pub const MAX_JUMPS: usize = 100;
+
+/// The newest `MAX_JUMPS` of a jump history, with the index moved to the same place in them.
+pub fn capped_jumps(jumps: &[Anchor], index: usize) -> (Vec<Anchor>, usize) {
+    let dropped = jumps.len().saturating_sub(MAX_JUMPS);
+    (jumps[dropped..].to_vec(), index.min(jumps.len()).saturating_sub(dropped))
+}
+
+/// A saved jump history for a document of `pages` pages. The file may have changed since, so
+/// places beyond the last page are dropped, not moved: a clamped one would point somewhere the
+/// reader never was. The index keeps its place among the rest.
+pub fn restored_jumps(jumps: &[Anchor], index: usize, pages: usize) -> (Vec<Anchor>, usize) {
+    let index = index.min(jumps.len());
+    let kept = |a: &&Anchor| a.page < pages;
+    let before = jumps[..index].iter().filter(kept).count();
+    let all: Vec<Anchor> = jumps.iter().filter(kept).copied().collect();
+    let (all, before) = capped_jumps(&all, before);
+    (all, before)
 }
 
 /// Scales strokes to a width of 1 with their corner at the origin, for placing at any size.
@@ -931,6 +955,46 @@ mod tests {
         assert!(minimal.form.is_empty());
     }
 
+    fn spot(page: usize) -> Anchor {
+        Anchor { page, y: 1.0, x: 0.0 }
+    }
+
+    #[test]
+    fn jumps_survive_a_round_trip() {
+        let side = Sidecar { jumps: vec![spot(1), spot(5)], jump_index: 1, ..Default::default() };
+        let text = serde_json::to_string(&side).unwrap();
+        assert_eq!(serde_json::from_str::<Sidecar>(&text).unwrap(), side);
+    }
+
+    #[test]
+    fn an_old_sidecar_without_jumps_loads() {
+        let old = r#"{"path":"/a.pdf","anchor":null,"zoom":1.5,"marks":{},"portals":[],"annotations":[],"next_id":3}"#;
+        let side: Sidecar = serde_json::from_str(old).unwrap();
+        assert!(side.jumps.is_empty());
+        assert_eq!(side.jump_index, 0);
+    }
+
+    #[test]
+    fn the_jump_list_keeps_the_newest_and_moves_the_index() {
+        let many: Vec<Anchor> = (0..MAX_JUMPS + 10).map(spot).collect();
+        let (kept, index) = capped_jumps(&many, MAX_JUMPS + 5);
+        assert_eq!(kept.len(), MAX_JUMPS);
+        assert_eq!(kept[0].page, 10);
+        assert_eq!(index, MAX_JUMPS - 5);
+        assert_eq!(capped_jumps(&many, 3).1, 0);
+        assert_eq!(capped_jumps(&many[..2], 2), (many[..2].to_vec(), 2));
+    }
+
+    #[test]
+    fn restoring_jumps_drops_pages_past_the_end() {
+        let jumps = [spot(0), spot(9), spot(2), spot(7), spot(3)];
+        let (kept, index) = restored_jumps(&jumps, 4, 5);
+        assert_eq!(kept.iter().map(|a| a.page).collect::<Vec<_>>(), [0, 2, 3]);
+        assert_eq!(index, 2);
+        assert_eq!(restored_jumps(&jumps, 99, 100), (jumps.to_vec(), 5));
+        assert_eq!(restored_jumps(&jumps, 2, 0), (Vec::new(), 0));
+    }
+
     #[test]
     fn form_values_survive_save_and_load() {
         let dir = Scratch::new("vform");
@@ -1059,6 +1123,184 @@ mod tests {
             std::fs::set_permissions(&existing, std::fs::Permissions::from_mode(m)).unwrap();
             Store::new(existing.clone(), "k".to_owned()).save(&Sidecar::default()).unwrap();
             assert_eq!(mode(&existing), m);
+        }
+    }
+
+    mod jump_history_gaps {
+        use super::*;
+
+        fn pages(list: &[Anchor]) -> Vec<usize> {
+            list.iter().map(|a| a.page).collect()
+        }
+
+        fn run(n: usize) -> Vec<Anchor> {
+            (0..n).map(super::spot).collect()
+        }
+
+        #[test]
+        fn capping_clamps_an_index_past_the_length() {
+            let (kept, index) = capped_jumps(&run(3), 50);
+            assert_eq!((kept.len(), index), (3, 3));
+            let (kept, index) = capped_jumps(&run(150), 9999);
+            assert_eq!((kept.len(), index), (MAX_JUMPS, MAX_JUMPS));
+            assert_eq!(kept[0].page, 50);
+            assert_eq!(capped_jumps(&run(3), usize::MAX).1, 3);
+        }
+
+        #[test]
+        fn capping_keeps_an_index_at_the_length_at_the_newest_place() {
+            assert_eq!(capped_jumps(&run(100), 100).1, 100);
+            assert_eq!(capped_jumps(&run(101), 101).1, 100);
+            assert_eq!(capped_jumps(&run(500), 500).1, 100);
+        }
+
+        #[test]
+        fn capping_exactly_100_and_101() {
+            let (kept, index) = capped_jumps(&run(100), 40);
+            assert_eq!((pages(&kept), index), (pages(&run(100)), 40));
+            let (kept, index) = capped_jumps(&run(101), 40);
+            assert_eq!((kept.len(), kept[0].page, index), (100, 1, 39));
+            // An index on the entry that is dropped saturates to the oldest kept one.
+            assert_eq!(capped_jumps(&run(101), 0).1, 0);
+            assert_eq!(capped_jumps(&run(101), 1).1, 0);
+            assert_eq!(capped_jumps(&run(101), 2).1, 1);
+        }
+
+        #[test]
+        fn capping_an_empty_list() {
+            assert_eq!(capped_jumps(&[], 0), (Vec::new(), 0));
+            assert_eq!(capped_jumps(&[], 7), (Vec::new(), 0));
+        }
+
+        #[test]
+        fn restoring_with_an_index_past_the_length_puts_it_at_the_newest_place() {
+            let jumps = run(4);
+            assert_eq!(restored_jumps(&jumps, 10, 10), (jumps.clone(), 4));
+            assert_eq!(restored_jumps(&jumps, usize::MAX, 10), (jumps.clone(), 4));
+            // Past the length with some entries dropped: still at the (new) end.
+            let (kept, index) = restored_jumps(&jumps, 10, 2);
+            assert_eq!((pages(&kept), index), (vec![0, 1], 2));
+        }
+
+        #[test]
+        fn restoring_with_an_index_at_the_length() {
+            let jumps = run(4);
+            assert_eq!(restored_jumps(&jumps, 4, 10), (jumps.clone(), 4));
+            let (kept, index) = restored_jumps(&jumps, 4, 3);
+            assert_eq!((pages(&kept), index), (vec![0, 1, 2], 3));
+        }
+
+        #[test]
+        fn restoring_with_the_index_on_a_dropped_entry() {
+            // Index 1 points at page 9, which is gone: it lands on what followed it.
+            let jumps = [spot(0), spot(9), spot(2)];
+            let (kept, index) = restored_jumps(&jumps, 1, 5);
+            assert_eq!((pages(&kept), index), (vec![0, 2], 1));
+            // Dropped entry last, index on it: ends at the newest place.
+            let jumps = [spot(0), spot(1), spot(9)];
+            let (kept, index) = restored_jumps(&jumps, 2, 5);
+            assert_eq!((pages(&kept), index), (vec![0, 1], 2));
+            // Dropped entries all before the index.
+            let jumps = [spot(9), spot(8), spot(1)];
+            let (kept, index) = restored_jumps(&jumps, 2, 5);
+            assert_eq!((pages(&kept), index), (vec![1], 0));
+        }
+
+        #[test]
+        fn restoring_with_every_entry_dropped() {
+            let jumps = [spot(5), spot(6), spot(7)];
+            assert_eq!(restored_jumps(&jumps, 0, 5), (Vec::new(), 0));
+            assert_eq!(restored_jumps(&jumps, 2, 5), (Vec::new(), 0));
+            assert_eq!(restored_jumps(&jumps, 3, 5), (Vec::new(), 0));
+            assert_eq!(restored_jumps(&jumps, 99, 5), (Vec::new(), 0));
+        }
+
+        #[test]
+        fn restoring_exactly_100_and_101_and_more() {
+            let (kept, index) = restored_jumps(&run(100), 100, 1000);
+            assert_eq!((kept.len(), index), (100, 100));
+            let (kept, index) = restored_jumps(&run(101), 101, 1000);
+            assert_eq!((kept.len(), kept[0].page, index), (100, 1, 100));
+            let (kept, index) = restored_jumps(&run(101), 50, 1000);
+            assert_eq!((kept.len(), index), (100, 49));
+            // Dropping by page and capping together: pages 0..200, document of 150 pages.
+            let (kept, index) = restored_jumps(&run(200), 200, 150);
+            assert_eq!((kept.len(), kept[0].page, index), (100, 50, 100));
+        }
+
+        #[test]
+        fn restoring_an_empty_list_with_a_nonzero_index() {
+            assert_eq!(restored_jumps(&[], 5, 10), (Vec::new(), 0));
+            assert_eq!(restored_jumps(&[], usize::MAX, 10), (Vec::new(), 0));
+        }
+
+        #[test]
+        fn restoring_for_zero_and_one_page_documents() {
+            let jumps = [spot(0), spot(1), spot(0)];
+            assert_eq!(restored_jumps(&jumps, 3, 0), (Vec::new(), 0));
+            let (kept, index) = restored_jumps(&jumps, 3, 1);
+            assert_eq!((pages(&kept), index), (vec![0, 0], 2));
+            let (kept, index) = restored_jumps(&jumps, 1, 1);
+            assert_eq!((pages(&kept), index), (vec![0, 0], 1));
+        }
+
+        #[test]
+        fn anchors_with_odd_numbers_in_json() {
+            let parse = |y: &str| serde_json::from_str::<Sidecar>(&format!(r#"{{"jumps":[{{"page":0,"y":{y},"x":0.0}}],"jump_index":1}}"#));
+            // Negative y is accepted as is, and passes through restore untouched.
+            let side = parse("-12.5").unwrap();
+            assert_eq!(side.jumps[0].y, -12.5);
+            let (kept, index) = restored_jumps(&side.jumps, side.jump_index, 3);
+            assert_eq!((kept.len(), index, kept[0].y), (1, 1, -12.5));
+            // JSON has no NaN literal, and null is not a number.
+            assert!(parse("NaN").is_err());
+            assert!(parse("null").is_err());
+            // A negative page or index is refused for a usize, so the sidecar counts as damaged.
+            assert!(serde_json::from_str::<Sidecar>(r#"{"jumps":[{"page":-1,"y":0,"x":0}]}"#).is_err());
+            assert!(serde_json::from_str::<Sidecar>(r#"{"jump_index":-1}"#).is_err());
+        }
+
+        #[test]
+        fn a_nan_anchor_in_memory_survives_capping_and_restoring() {
+            let nan = Anchor { page: 0, y: f32::NAN, x: f32::NAN };
+            let (kept, index) = restored_jumps(&[nan], 1, 1);
+            assert_eq!((kept.len(), index), (1, 1));
+            assert!(kept[0].y.is_nan());
+            // serde_json writes NaN as null, which then fails to load back: record what happens.
+            let side = Sidecar { jumps: vec![nan], jump_index: 1, ..Default::default() };
+            let text = serde_json::to_string(&side).unwrap();
+            assert!(serde_json::from_str::<Sidecar>(&text).is_err(), "{text}");
+        }
+
+        #[test]
+        fn a_new_sidecar_loads_in_a_build_without_the_new_fields() {
+            #[derive(Debug, Default, serde::Deserialize)]
+            #[serde(default)]
+            struct OldSidecar {
+                path: String,
+                anchor: Option<Anchor>,
+                zoom: Option<f32>,
+                next_id: u64,
+            }
+            let side = Sidecar { path: "/a.pdf".into(), zoom: Some(2.0), jumps: vec![spot(1), spot(2)], jump_index: 1, ..Default::default() };
+            let text = serde_json::to_string_pretty(&side).unwrap();
+            assert!(text.contains("\"jumps\"") && text.contains("\"jump_index\""));
+            let old: OldSidecar = serde_json::from_str(&text).unwrap();
+            assert_eq!(old.path, "/a.pdf");
+            assert_eq!(old.zoom, Some(2.0));
+            assert!(old.anchor.is_none());
+            let _ = old.next_id;
+        }
+
+        #[test]
+        fn the_real_sidecar_tolerates_unknown_fields() {
+            let text = r#"{"path":"/a.pdf","from_the_future":{"a":[1,2]},"jumps":[{"page":2,"y":1.0,"x":0.0}],"jump_index":1}"#;
+            let side: Sidecar = serde_json::from_str(text).unwrap();
+            assert_eq!(side.path, "/a.pdf");
+            assert_eq!((side.jumps.len(), side.jump_index), (1, 1));
+            // Anchors too ignore unknown fields.
+            let text = r#"{"jumps":[{"page":2,"y":1.0,"x":0.0,"extra":true}]}"#;
+            assert_eq!(serde_json::from_str::<Sidecar>(text).unwrap().jumps.len(), 1);
         }
     }
 }

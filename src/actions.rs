@@ -134,7 +134,8 @@ impl App {
         if self.jumps.last() != Some(&here) {
             self.jumps.push(here);
         }
-        self.jump_index = self.jumps.len();
+        (self.jumps, self.jump_index) = store::capped_jumps(&self.jumps, self.jumps.len());
+        self.mark_dirty();
     }
 
     /// Goes to a place, as a jump that `jump_back` can undo.
@@ -166,6 +167,7 @@ impl App {
                 // Leaving the newest place: remember it so jump_forward can return.
                 if self.jump_index == self.jumps.len() {
                     self.jumps.push(here);
+                    (self.jumps, self.jump_index) = store::capped_jumps(&self.jumps, self.jump_index);
                 }
                 self.jump_index -= 1;
             } else {
@@ -712,9 +714,7 @@ impl App {
             }
         };
         let signed = crate::protect::is_signed(bytes, self.doc.password());
-        let mut side = self.side.clone();
-        side.anchor = Some(self.view.anchor(&self.doc.layout));
-        side.zoom = Some(self.view.zoom);
+        let side = self.live_side();
         let kept = crate::protect::copy_sidecar(self.locked, &self.store, &copy, path, &side);
         self.say(copy_message(job, path, signed, kept.err()));
     }

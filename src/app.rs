@@ -630,6 +630,7 @@ impl App {
         cc.egui_ctx.options_mut(|o| o.zoom_with_keyboard = false);
         crate::chrome::apply_font_bytes(&cc.egui_ctx, font);
         let now = Instant::now();
+        let (jumps, jump_index) = store::restored_jumps(&side.jumps, side.jump_index, doc.layout.len());
         let mut app = Self {
             statusbar_visible: config.statusbar.visible,
             stroke_width: config.hotbar.stroke_width,
@@ -679,8 +680,8 @@ impl App {
             undo: Vec::new(),
             redo: Vec::new(),
             form: FormState::fresh(),
-            jumps: Vec::new(),
-            jump_index: 0,
+            jumps,
+            jump_index,
             pending_portal: None,
             portal_window: false,
             fullscreen: config.view.fullscreen,
@@ -721,13 +722,21 @@ impl App {
 
     /// Writes what is kept for the document.
     pub fn save(&mut self) {
-        self.side.anchor = Some(self.view.anchor(&self.doc.layout));
-        self.side.zoom = Some(self.view.zoom);
+        self.side = self.live_side();
         if let Err(e) = save_sidecar(self.locked, &self.store, &self.side) {
             self.say(format!("couldn't save: {e}"));
         }
         self.dirty = false;
         self.last_save = Instant::now();
+    }
+
+    /// The sidecar as it is now: the saved one with the current place, zoom and jump history.
+    pub fn live_side(&self) -> Sidecar {
+        let mut side = self.side.clone();
+        side.anchor = Some(self.view.anchor(&self.doc.layout));
+        side.zoom = Some(self.view.zoom);
+        (side.jumps, side.jump_index) = store::capped_jumps(&self.jumps, self.jump_index);
+        side
     }
 
     /// Sets up the view on the first frame, when the window's size is known.
@@ -862,13 +871,13 @@ impl App {
                 }
             };
             self.search = self.search.take().map(|s| s.restarted(doc.layout.len()));
+            (self.jumps, self.jump_index) = store::restored_jumps(&self.jumps, self.jump_index, doc.layout.len());
         } else {
             self.store = self.store.rekeyed(key);
             let (side, warning) = self.store.load(path);
             self.side = side;
             self.search = None;
-            self.jumps.clear();
-            self.jump_index = 0;
+            (self.jumps, self.jump_index) = store::restored_jumps(&self.side.jumps, self.side.jump_index, doc.layout.len());
             self.undo.clear();
             self.redo.clear();
             self.started = false;
