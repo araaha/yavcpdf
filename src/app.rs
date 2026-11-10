@@ -22,6 +22,7 @@ use crate::search::Search;
 use crate::smart::Reference;
 use crate::store::{self, Annotation, Sidecar, Store, Strokes};
 use crate::view::{Anchor, View};
+use pdfcraft_render::PageText;
 
 /// How long zooming has to stop for before it counts as over: a slow page waits this long to
 /// re-render, and prefetching to resume.
@@ -994,28 +995,16 @@ impl App {
         }
     }
 
-    /// The pages whose text is wanted, most urgent first.
+    /// The pages whose text is wanted, most urgent first. Reading the rest of the document comes last,
+    /// and is always on with `prefetch_text`, or else only while a search or smart lookup waits.
     fn wanted_text(&self) -> Vec<usize> {
         let layout = &self.doc.layout;
-        let missing = |page: &usize| self.doc.text[*page].is_none();
-        let shown = self.view.visible_pages(layout);
-        let (first, last) = (shown.start().saturating_sub(1), (*shown.end() + 1).min(layout.len() - 1));
-        let mut wanted: Vec<usize> = (first..=last).filter(missing).collect();
-        for page in self.doc.contents.iter().map(|r| r.page).filter(missing) {
-            if !wanted.contains(&page) {
-                wanted.push(page);
-            }
+        let sweep = self.config.view.prefetch_text || self.search.as_ref().is_some_and(|s| !s.is_complete()) || self.smart.is_some();
+        if sweep && self.doc.text.iter().all(Option::is_some) {
+            return Vec::new();
         }
-        if self.search.as_ref().is_some_and(|s| !s.is_complete()) || self.smart.is_some() {
-            let from = self.view.current_page(layout);
-            let rest = (0..layout.len()).map(|step| (from + step) % layout.len()).filter(missing);
-            for page in rest {
-                if !wanted.contains(&page) {
-                    wanted.push(page);
-                }
-            }
-        }
-        wanted
+        let contents: Vec<usize> = self.doc.contents.iter().map(|r| r.page).collect();
+        text_order(&self.doc.text, self.view.visible_pages(layout), &contents, self.view.current_page(layout), sweep)
     }
 
     /// Hands the render workers this frame's requests, when they changed.
@@ -1071,8 +1060,17 @@ impl App {
         self.cache.evict(self.config.view.texture_budget_mb.saturating_mul(1024 * 1024));
         // Workers can't wake the UI, so keep looking while anything is on its way.
         let searching = self.search.as_ref().is_some_and(|s| !s.is_complete());
-        if !self.queued.is_empty() || !self.queued_text.is_empty() || searching {
+        // Reading the rest of the text ahead of time is not urgent, so it is looked at less often.
+        let urgent = searching
+            || self.smart.is_some()
+            || self.toc_waiting
+            || matches!(&self.mode, Mode::Hint(state) if !state.ready && state.purpose.needs_text())
+            || self.view.visible_pages(&self.doc.layout).any(|page| self.doc.text[page].is_none());
+        let prefetch = self.config.view.prefetch_text;
+        if !self.queued.is_empty() || (!prefetch || urgent) && !self.queued_text.is_empty() || searching {
             ctx.request_repaint_after(Duration::from_millis(16));
+        } else if !self.queued_text.is_empty() {
+            ctx.request_repaint_after(Duration::from_millis(100));
         }
     }
 
@@ -1095,6 +1093,26 @@ impl App {
         self.draw_document(ui);
         self.draw_chrome(ui, Rect::from_min_max(pos2(area.min.x, rect.max.y), area.max));
     }
+}
+
+/// The pages without text, most urgent first: those showing and one beyond, then the contents, then
+/// with `sweep` the rest from `current` on, wrapping around. Each page comes once.
+fn text_order(text: &[Option<Arc<PageText>>], shown: std::ops::RangeInclusive<usize>, contents: &[usize], current: usize, sweep: bool) -> Vec<usize> {
+    let count = text.len();
+    let mut seen = vec![false; count];
+    let mut wanted = Vec::new();
+    let mut want = |page: usize| {
+        if page < count && text[page].is_none() && !seen[page] {
+            seen[page] = true;
+            wanted.push(page);
+        }
+    };
+    (shown.start().saturating_sub(1)..=(*shown.end() + 1).min(count.saturating_sub(1))).for_each(&mut want);
+    contents.iter().for_each(|&page| want(page));
+    if sweep && count > 0 {
+        (0..count).for_each(|step| want((current + step) % count));
+    }
+    wanted
 }
 
 /// A rendered raster as texture data. Its words are premultiplied RGBA bytes, which is exactly what
@@ -1495,5 +1513,144 @@ mod locked_load_tests {
         assert_eq!(OpenFailure::NeedsPassword.to_string(), "the document needs a password");
         let _ = std::fs::remove_dir_all(&dir);
         let _ = std::fs::remove_dir_all(&data);
+    }
+}
+
+#[cfg(test)]
+mod text_order_tests {
+    use super::*;
+
+    fn pages(count: usize, have: &[usize]) -> Vec<Option<Arc<PageText>>> {
+        (0..count).map(|page| have.contains(&page).then(|| Arc::new(PageText::default()))).collect()
+    }
+
+    #[test]
+    fn showing_pages_come_first_then_contents_then_the_sweep_from_the_current_page() {
+        let text = pages(10, &[]);
+        assert_eq!(text_order(&text, 4..=5, &[0, 9], 4, true), [3, 4, 5, 6, 0, 9, 7, 8, 1, 2]);
+    }
+
+    #[test]
+    fn the_sweep_wraps_and_skips_pages_already_read() {
+        let text = pages(6, &[0, 5]);
+        assert_eq!(text_order(&text, 3..=3, &[], 3, true), [2, 3, 4, 1]);
+    }
+
+    #[test]
+    fn no_page_comes_twice() {
+        let text = pages(8, &[]);
+        let mut order = text_order(&text, 1..=2, &[2, 3, 3, 7], 2, true);
+        order.sort_unstable();
+        assert_eq!(order, (0..8).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn without_a_sweep_only_showing_and_contents_pages_are_wanted() {
+        let text = pages(10, &[]);
+        assert_eq!(text_order(&text, 4..=5, &[9], 4, false), [3, 4, 5, 6, 9]);
+    }
+
+    #[test]
+    fn one_page_is_a_trivial_sweep() {
+        assert_eq!(text_order(&pages(1, &[]), 0..=0, &[], 0, true), [0]);
+    }
+
+    #[test]
+    fn an_empty_document_wants_nothing() {
+        assert!(text_order(&pages(0, &[]), 0..=0, &[], 0, true).is_empty());
+        assert!(text_order(&pages(0, &[]), 0..=0, &[3], 5, false).is_empty());
+    }
+
+    #[test]
+    fn showing_the_last_page_clamps_the_neighbour() {
+        let text = pages(5, &[]);
+        assert_eq!(text_order(&text, 4..=4, &[], 4, false), [3, 4]);
+        assert_eq!(text_order(&text, 4..=4, &[], 4, true), [3, 4, 0, 1, 2]);
+    }
+
+    #[test]
+    fn contents_pages_out_of_range_are_ignored() {
+        let text = pages(4, &[]);
+        assert_eq!(text_order(&text, 0..=0, &[7, 2, 99], 0, false), [0, 1, 2]);
+    }
+
+    #[test]
+    fn a_current_page_out_of_range_still_covers_every_page_once() {
+        let text = pages(5, &[]);
+        let mut order = text_order(&text, 0..=0, &[], 12, true);
+        order.sort_unstable();
+        assert_eq!(order, [0, 1, 2, 3, 4]);
+        assert_eq!(text_order(&text, 0..=0, &[], 4, true), [0, 1, 4, 2, 3]);
+    }
+
+    #[test]
+    fn when_every_page_is_read_nothing_is_wanted() {
+        let text = pages(6, &[0, 1, 2, 3, 4, 5]);
+        assert!(text_order(&text, 2..=3, &[0, 5], 2, true).is_empty());
+        assert!(text_order(&text, 2..=3, &[0, 5], 2, false).is_empty());
+    }
+
+    /// The algorithm `wanted_text` had before `text_order`.
+    fn old_order(text: &[Option<Arc<PageText>>], shown: std::ops::RangeInclusive<usize>, contents: &[usize], from: usize, sweep: bool) -> Vec<usize> {
+        let n = text.len();
+        let missing = |page: &usize| text[*page].is_none();
+        let (first, last) = (shown.start().saturating_sub(1), (*shown.end() + 1).min(n - 1));
+        let mut wanted: Vec<usize> = (first..=last).filter(missing).collect();
+        for page in contents.iter().copied().filter(missing) {
+            if !wanted.contains(&page) {
+                wanted.push(page);
+            }
+        }
+        if sweep {
+            for page in (0..n).map(|s| (from + s) % n).filter(missing) {
+                if !wanted.contains(&page) {
+                    wanted.push(page);
+                }
+            }
+        }
+        wanted
+    }
+
+    #[test]
+    fn the_order_matches_the_old_algorithm() {
+        let mut checked = 0;
+        for n in 1..=9usize {
+            for mask in [0u32, 0b1, 0b10101, 0b110011010, 0b111111111, 0b100000001] {
+                let have: Vec<usize> = (0..n).filter(|p| mask >> p & 1 == 1).collect();
+                let text = pages(n, &have);
+                for a in 0..n {
+                    for b in a..n {
+                        for from in 0..n {
+                            for contents in [vec![], vec![0], vec![n - 1, 0], vec![n / 2, n / 2, 1 % n]] {
+                                for sweep in [false, true] {
+                                    assert_eq!(
+                                        text_order(&text, a..=b, &contents, from, sweep),
+                                        old_order(&text, a..=b, &contents, from, sweep),
+                                        "n={n} have={have:?} shown={a}..={b} contents={contents:?} from={from} sweep={sweep}"
+                                    );
+                                    checked += 1;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        assert!(checked > 1000);
+    }
+
+    #[test]
+    fn a_five_thousand_page_document_is_ordered_quickly() {
+        let text = pages(5000, &[]);
+        let contents: Vec<usize> = (0..200).collect();
+        let start = std::time::Instant::now();
+        let mut total = 0;
+        for _ in 0..100 {
+            total += text_order(&text, 2500..=2501, &contents, 2500, true).len();
+        }
+        let each = start.elapsed() / 100;
+        println!("text_order on 5000 pages: {each:?} per call");
+        assert_eq!(total, 5000 * 100);
+        assert!(each < std::time::Duration::from_millis(50));
     }
 }

@@ -79,6 +79,7 @@ pub struct ViewConfig {
     pub max_zoom: f32,
     pub scroll_step: f32,
     pub prefetch_pages: usize,
+    pub prefetch_text: bool,
     pub texture_budget_mb: usize,
     pub smartcase: bool,
     pub decorations: bool,
@@ -313,6 +314,13 @@ mod tests {
         assert!(Config::load_str("[keys]\nno_such_action = [\"x\"]").is_err());
         assert!(Config::load_str("[view]\nno_such_setting = 1").is_err());
         assert!(Config::load_str("[themes.dark]\npage = \"red\"").is_err());
+    }
+
+    #[test]
+    fn text_prefetching_is_on_by_default_and_can_be_turned_off() {
+        assert!(Config::load_str("").unwrap().view.prefetch_text);
+        assert!(!Config::load_str("[view]\nprefetch_text = false").unwrap().view.prefetch_text);
+        assert!(Config::load_str("[view]\nprefetch_text = false").unwrap().view.highlight_links);
     }
 
     #[test]

@@ -22,6 +22,7 @@ min_zoom = 0.1
 max_zoom = 16.0
 scroll_step = 60.0        # h/j/k/l, in interface pixels
 prefetch_pages = 2        # pages rendered ahead of and behind the view
+prefetch_text = true      # read every page's text in the background, for search and smart jumps
 texture_budget_mb = 256
 smartcase = true          # an upper-case letter makes a search case sensitive
 decorations = false       # window title bar

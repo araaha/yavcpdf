@@ -62,6 +62,13 @@ pub enum Purpose {
     Form,
 }
 
+impl Purpose {
+    /// Whether the labels are made from the text of the pages, so they wait for it.
+    pub fn needs_text(self) -> bool {
+        matches!(self, Purpose::Select | Purpose::Place | Purpose::Smart | Purpose::Overview)
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct HintState {
     pub purpose: Purpose,

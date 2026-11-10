@@ -992,7 +992,7 @@ impl App {
         }
         let purpose = state.purpose;
         let areas = self.visible_areas();
-        let needs_text = matches!(purpose, Purpose::Select | Purpose::Place | Purpose::Smart | Purpose::Overview);
+        let needs_text = purpose.needs_text();
         // The form is read in the background: the labels wait for it.
         if (purpose == Purpose::Form && !self.doc.form.ready) || needs_text && areas.iter().any(|(page, _)| self.doc.text[*page].is_none()) {
             return;
