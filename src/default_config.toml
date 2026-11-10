@@ -32,6 +32,7 @@ highlight_fields = true   # tint the fields of a form; `toggle_fields` turns it 
 fullscreen = false        # start in fullscreen; `toggle_fullscreen` switches
 border = 1.0              # width of the outline, 0 to 8, around the menu, hotbar, contents, signature pad, notes, overview and portal window, in the theme's ui_accent; 0 for none
 jump_position = 50        # where a jump to a link, smart jump or contents entry puts its target: percent of the window height from the bottom (0) to the top (100); 50 centres it
+copy_reflow = true        # copying joins a paragraph's lines and undoes hyphenation
 
 [statusbar]
 visible = true

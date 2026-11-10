@@ -90,6 +90,8 @@ pub struct ViewConfig {
     pub border: f32,
     /// Where a jump puts its target: percent of the window height, 0 at the bottom to 100 at the top.
     pub jump_position: f32,
+    /// Whether copying joins the lines of a paragraph and undoes hyphenation.
+    pub copy_reflow: bool,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -328,6 +330,13 @@ mod tests {
         assert!(Config::load_str("").unwrap().view.highlight_fields);
         assert!(!Config::load_str("[view]\nhighlight_fields = false").unwrap().view.highlight_fields);
         assert!(Config::load_str("[view]\nhighlight_fields = false").unwrap().view.highlight_links);
+    }
+
+    #[test]
+    fn copy_reflow_is_on_by_default_and_can_be_turned_off() {
+        assert!(Config::load_str("").unwrap().view.copy_reflow);
+        assert!(!Config::load_str("[view]\ncopy_reflow = false").unwrap().view.copy_reflow);
+        assert!(Config::load_str("[view]\ncopy_reflow = false").unwrap().view.highlight_links);
     }
 
     #[test]

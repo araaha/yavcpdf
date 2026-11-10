@@ -259,7 +259,7 @@ choose a colour instead, so counts such as `42G` don't work then.
 | <kbd>n</kbd> / <kbd>N</kbd> | Next / previous match |
 | <kbd>m</kbd> then a key / <kbd>'</kbd> or <kbd>`</kbd> then a key / <kbd>'</kbd> <kbd>'</kbd> | Set a mark / go to a mark / jump back |
 | <kbd>Alt</kbd>+<kbd>O</kbd> / <kbd>Alt</kbd>+<kbd>I</kbd> | Jump history, back / forward |
-| <kbd>f</kbd> / <kbd>y</kbd> | Select by hint / copy the selection |
+| <kbd>f</kbd> / <kbd>y</kbd> | Select by hint / copy the selection, with its lines joined and hyphenation undone (`view.copy_reflow = false` copies the lines as they are) |
 | <kbd>F</kbd> | Follow a link by hint; one that names a spot lands there at `view.jump_position` |
 | <kbd>i</kbd> | Fill in a form field, or press a form button, by hint; a click does it too |
 | <kbd>g</kbd> <kbd>d</kbd>, <kbd>Ctrl</kbd>+<kbd>]</kbd> | Smart jump by hint; middle click does it with the mouse |

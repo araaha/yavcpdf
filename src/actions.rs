@@ -322,8 +322,19 @@ impl App {
         parts.iter().map(text_of).collect::<Vec<_>>().join("\n")
     }
 
+    /// The selection as running text, with its lines joined and its hyphenation undone.
+    fn reflowed_selection(&self) -> String {
+        let mut rows = Vec::new();
+        for (page, range) in self.selection_parts() {
+            if let Some(text) = self.doc.text[page].as_ref() {
+                crate::reflow::rows_of(text, range, &mut rows);
+            }
+        }
+        crate::reflow::reflow(&rows)
+    }
+
     fn yank(&mut self, ctx: &egui::Context) {
-        let text = self.selection_text();
+        let text = if self.config.view.copy_reflow { self.reflowed_selection() } else { self.selection_text() };
         if text.is_empty() {
             self.say("nothing selected");
             return;

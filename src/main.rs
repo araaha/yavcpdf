@@ -21,6 +21,7 @@ mod menu;
 mod overview;
 mod protect;
 mod recent;
+mod reflow;
 mod search;
 mod smart;
 mod store;
