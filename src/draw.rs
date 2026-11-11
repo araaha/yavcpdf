@@ -26,6 +26,13 @@ fn font_pixels(size: f32) -> f32 {
     if size < 48.0 { size.round().max(4.0) } else { ((size / 8.0).round() * 8.0).min(512.0) }
 }
 
+/// `area` moved the least that puts it inside `bounds` (as far as it fits).
+fn clamp_into(area: Rect, bounds: Rect) -> Rect {
+    let dx = (bounds.right() - area.right()).min(0.0).max(bounds.left() - area.left());
+    let dy = (bounds.bottom() - area.bottom()).min(0.0).max(bounds.top() - area.top());
+    area.translate(vec2(dx, dy))
+}
+
 fn translucent(color: [u8; 3], alpha: u8) -> Color32 {
     Color32::from_rgba_unmultiplied(color[0], color[1], color[2], alpha)
 }
@@ -302,6 +309,7 @@ impl App {
             self.draw_annotation(painter, view, annotation);
         }
         self.draw_note_texts(painter, view);
+        self.draw_pdf_note_texts(painter, view);
         if let Some((page, points)) = &self.stroke {
             let color = self.config.hotbar.colors[self.color.min(self.config.hotbar.colors.len() - 1)].rgb();
             self.draw_stroke(painter, view, *page, points, color, self.stroke_width);
@@ -371,12 +379,31 @@ impl App {
         }
     }
 
+    /// The PDF's own notes show like the sticky notes: under the pointer (the topmost one only,
+    /// and not while a tool is drawing), or once picked.
+    fn draw_pdf_note_texts(&self, painter: &Painter, view: &View) {
+        let shown = view.visible_pages(&self.doc.layout);
+        let tooling = matches!(self.tool, Some(Tool::Draw | Tool::Erase | Tool::Note | Tool::Fill));
+        let hovered = self
+            .hover
+            .filter(|_| !tooling)
+            .and_then(|p| view.page_under(&self.doc.layout, p))
+            .and_then(|(page, at)| crate::doc::note_at(&self.doc.notes, page, at));
+        let picked = self.shown_note.filter(|i| Some(*i) != hovered);
+        for index in [picked, hovered].into_iter().flatten() {
+            let Some(note) = self.doc.notes.get(index).filter(|n| shown.contains(&n.page)) else { continue };
+            let icon = view.transform(&self.doc.layout, note.page).rect(note.rect);
+            self.draw_note_text(painter, view, icon, &note.text());
+        }
+    }
+
     fn draw_note_text(&self, painter: &Painter, view: &View, icon: Rect, text: &str) {
         let theme = self.config.active_theme();
         let galley = painter.layout(text.to_owned(), FontId::proportional(self.config.font_size), theme.ui_text.egui(), NOTE_WIDTH);
         let size = galley.size() + Vec2::splat(12.0);
         let beside = Rect::from_min_size(icon.right_top() + vec2(6.0, 0.0), size);
         let area = if beside.right() > view.rect.right() { beside.translate(vec2(-(size.x + icon.width() + 12.0), 0.0)) } else { beside };
+        let area = clamp_into(area, view.rect);
         painter.rect_filled(area, 0.0, theme.ui_background.egui());
         painter.rect_stroke(area, 0.0, Stroke::new(self.config.view.border, theme.ui_accent.egui()), egui::StrokeKind::Inside);
         painter.galley(area.min + Vec2::splat(6.0), galley, theme.ui_text.egui());
@@ -516,8 +543,17 @@ impl App {
 
 #[cfg(test)]
 mod tests {
-    use super::clear_of;
+    use super::{clamp_into, clear_of};
     use egui::{Rect, pos2, vec2};
+
+    #[test]
+    fn a_popup_is_kept_inside_the_view() {
+        let view = Rect::from_min_size(pos2(0.0, 0.0), vec2(100.0, 100.0));
+        let popup = |x, y| Rect::from_min_size(pos2(x, y), vec2(30.0, 20.0));
+        assert_eq!(clamp_into(popup(10.0, 10.0), view), popup(10.0, 10.0));
+        assert_eq!(clamp_into(popup(90.0, 95.0), view), popup(70.0, 80.0));
+        assert_eq!(clamp_into(popup(-20.0, -5.0), view), popup(0.0, 0.0));
+    }
 
     fn label(x: f32, y: f32) -> Rect {
         Rect::from_min_size(pos2(x, y), vec2(14.0, 10.0))

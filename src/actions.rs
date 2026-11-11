@@ -1130,6 +1130,9 @@ impl App {
                 out.push(Target { label: String::new(), page: link.page, rect, kind: TargetKind::Link(index) });
             }
         }
+        let notes =
+            self.doc.notes.iter().enumerate().filter(|(_, n)| areas.iter().any(|(page, area)| *page == n.page && hint::intersects(n.rect, *area)));
+        out.extend(notes.map(|(index, n)| Target { label: String::new(), page: n.page, rect: n.rect, kind: TargetKind::PdfNote(index) }));
         out
     }
 
@@ -1208,7 +1211,7 @@ impl App {
             self.mode = Mode::Normal;
             self.say(match purpose {
                 Purpose::Select | Purpose::Place => "no text here",
-                Purpose::Link => "no links here",
+                Purpose::Link => "no links or notes here",
                 Purpose::Form => "no form fields here",
                 Purpose::DeleteAnnotation => "no annotations here",
                 Purpose::Smart | Purpose::Overview => "no references here",
@@ -1280,6 +1283,10 @@ impl App {
             TargetKind::Annotation(id) => {
                 self.mode = Mode::Normal;
                 self.remove_annotation(id);
+            }
+            TargetKind::PdfNote(index) => {
+                self.mode = Mode::Normal;
+                self.shown_note = Some(index);
             }
             TargetKind::Widget(field, widget) => {
                 self.mode = Mode::Normal;

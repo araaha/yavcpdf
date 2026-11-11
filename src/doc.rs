@@ -75,6 +75,102 @@ pub fn placeholder_pdf() -> Vec<u8> {
     out
 }
 
+/// A text annotation the PDF itself carries (a sticky note, a free text, a markup comment). It
+/// is read-only: shown, never written to the sidecar or exported.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PdfNote {
+    pub page: usize,
+    /// In page points as shown, `[x0, y0, x1, y1]`, as a link's.
+    pub rect: [f32; 4],
+    pub contents: String,
+    pub author: Option<String>,
+    /// The replies and statuses of its thread, one line each, in order.
+    pub replies: Vec<String>,
+}
+
+impl PdfNote {
+    /// The text to show: the author, the contents, then the replies.
+    pub fn text(&self) -> String {
+        let mut text = match &self.author {
+            Some(author) => format!("{author}\n\n{}", self.contents),
+            None => self.contents.clone(),
+        };
+        for reply in &self.replies {
+            text.push_str("\n\n");
+            text.push_str(reply);
+        }
+        text
+    }
+}
+
+/// The note at a place on a page, the topmost (last listed) one.
+pub fn note_at(notes: &[PdfNote], page: usize, at: [f32; 2]) -> Option<usize> {
+    let inside = |n: &PdfNote| n.page == page && (n.rect[0]..=n.rect[2]).contains(&at[0]) && (n.rect[1]..=n.rect[3]).contains(&at[1]);
+    notes.iter().rposition(inside)
+}
+
+/// A reply as one line: "Author: text", or "Accepted by Author" for a status. A checkmark is nothing.
+fn reply_line(a: &pdfcraft_render::Annotation) -> Option<String> {
+    if a.is_mark() {
+        return None;
+    }
+    let author = a.author.as_deref().filter(|n| !n.trim().is_empty());
+    let text = a.contents.as_deref().map(str::trim).filter(|c| !c.is_empty());
+    match (&a.state, text, author) {
+        (Some(state), None, Some(author)) => Some(format!("{state} by {author}")),
+        (Some(state), None, None) => Some(state.clone()),
+        // A status usually has its own wording, "Accepted set by X".
+        (Some(_), Some(text), _) => Some(text.to_owned()),
+        (_, Some(text), Some(author)) => Some(format!("{author}: {text}")),
+        (_, Some(text), None) => Some(text.to_owned()),
+        _ => None,
+    }
+}
+
+/// Where a note sits, as shown: the NoRotate flag honoured, then in page points as a link's.
+fn note_rect(info: &DocInfo, a: &pdfcraft_render::Annotation) -> Option<[f32; 4]> {
+    let page = info.pages.get(a.page)?;
+    let r = a.shown_rect(page.rotation);
+    let (p, q) = (page.user_to_view(r[0], r[1]), page.user_to_view(r[2], r[3]));
+    Some([p[0].min(q[0]), p[1].min(q[1]), p[0].max(q[0]), p[1].max(q[1])])
+}
+
+/// The annotations with something written in them, as notes to read. Replies are folded into the
+/// note at the top of their thread; one whose thread has no note stands as a note of its own.
+fn pdf_notes(info: &DocInfo) -> Vec<PdfNote> {
+    let key = |a: &pdfcraft_render::Annotation| (a.page, a.index);
+    let top = |a: &pdfcraft_render::Annotation| {
+        let mut at = a;
+        for _ in 0..info.annotations.len() {
+            let Some(parent) = at.parent else { break };
+            match info.annotations.iter().find(|p| key(p) == parent) {
+                Some(p) => at = p,
+                None => break,
+            }
+        }
+        key(at)
+    };
+    let mut notes: Vec<((usize, usize), PdfNote)> = Vec::new();
+    for a in info.annotations.iter().filter(|a| !a.is_reply()) {
+        let Some(contents) = a.contents.as_ref().filter(|c| !c.trim().is_empty()) else { continue };
+        if matches!(a.subtype.as_str(), "Popup" | "Link" | "Widget") || a.fill_sign || a.grouped {
+            continue;
+        }
+        let Some(rect) = note_rect(info, a) else { continue };
+        notes.push((key(a), PdfNote { page: a.page, rect, contents: contents.clone(), author: a.author.clone(), replies: Vec::new() }));
+    }
+    for a in info.annotations.iter().filter(|a| a.is_reply() && !a.grouped) {
+        let Some(line) = reply_line(a) else { continue };
+        if let Some((_, note)) = notes.iter_mut().find(|(k, _)| *k == top(a)) {
+            note.replies.push(line);
+        } else if let Some(rect) = note_rect(info, a) {
+            // Its thread shows nothing, so it is read where it is.
+            notes.push((key(a), PdfNote { page: a.page, rect, contents: line, author: None, replies: Vec::new() }));
+        }
+    }
+    notes.into_iter().map(|(_, n)| n).collect()
+}
+
 pub struct Doc {
     pub path: PathBuf,
     pub bytes: Arc<Vec<u8>>,
@@ -90,6 +186,8 @@ pub struct Doc {
     pub contents: Vec<Row>,
     /// Each page's links to places in the document, in page points.
     pub internal_links: Vec<Vec<[f32; 4]>>,
+    /// The text annotations the PDF carries, to read.
+    pub notes: Vec<PdfNote>,
     pub text: Vec<Option<Arc<PageText>>>,
     pub pool: RenderPool,
     pub text_pool: RenderPool,
@@ -228,6 +326,7 @@ impl Doc {
             text_pool: RenderPool::new(bytes.clone(), 2, config),
             text: vec![None; info.pages.len()],
             internal_links: internal_links(&info),
+            notes: pdf_notes(&info),
             render_bytes: bytes.clone(),
             form: FormInfo::default(),
             bytes,
@@ -287,7 +386,7 @@ mod tests {
     use pdfcraft_cos::{Algorithm, Document, NewEncryption, SaveOptions, write_full};
     use pdfcraft_render::OpenError;
 
-    use super::{Doc, OpenFailure, TocEntry, dest_point, dest_spot, dest_y, flatten, link_rows, placeholder_pdf};
+    use super::{Doc, OpenFailure, PdfNote, TocEntry, dest_point, dest_spot, dest_y, flatten, link_rows, note_at, placeholder_pdf};
     use crate::config::Config;
 
     fn open_bytes(bytes: Vec<u8>, password: Option<&str>) -> Result<Doc, OpenFailure> {
@@ -661,5 +760,157 @@ mod tests {
             other => panic!("{:?}", other.err()),
         }
         assert_eq!(OpenFailure::NeedsPassword.to_string(), "the document needs a password");
+    }
+
+    /// A one-page PDF with the given page entries and annotation dictionaries (object 4 on).
+    fn one_page(page_extra: &str, annots: &[&str]) -> Vec<u8> {
+        let refs: String = (0..annots.len()).map(|i| format!("{} 0 R ", i + 4)).collect();
+        let mut objects = vec![
+            "<< /Type /Catalog /Pages 2 0 R >>".to_owned(),
+            "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_owned(),
+            format!("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] {page_extra} /Annots [{refs}] >>"),
+        ];
+        objects.extend(annots.iter().map(|a| (*a).to_owned()));
+        let mut out = b"%PDF-1.4\n".to_vec();
+        let mut offsets = Vec::new();
+        for (i, object) in objects.iter().enumerate() {
+            offsets.push(out.len());
+            out.extend_from_slice(format!("{} 0 obj\n{object}\nendobj\n", i + 1).as_bytes());
+        }
+        let xref = out.len();
+        out.extend_from_slice(format!("xref\n0 {}\n0000000000 65535 f \n", objects.len() + 1).as_bytes());
+        for offset in offsets {
+            out.extend_from_slice(format!("{offset:010} 00000 n \n").as_bytes());
+        }
+        out.extend_from_slice(format!("trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n", objects.len() + 1).as_bytes());
+        out
+    }
+
+    #[test]
+    fn the_contents_of_a_note_are_read() {
+        let annots = [
+            "<< /Type /Annot /Subtype /Text /Rect [100 700 120 720] /Contents (Read me) /T (Ann) >>",
+            "<< /Type /Annot /Subtype /Text /Rect [200 700 220 720] /Contents () >>",
+            "<< /Type /Annot /Subtype /Link /Rect [0 0 10 10] /Contents (not a note) >>",
+        ];
+        let doc = open_bytes(one_page("", &annots), None).ok().unwrap();
+        assert_eq!(doc.notes.len(), 1);
+        let note = &doc.notes[0];
+        assert_eq!((note.page, note.contents.as_str(), note.author.as_deref()), (0, "Read me", Some("Ann")));
+        assert_eq!(note.rect, [100.0, 72.0, 120.0, 92.0]);
+        assert_eq!(note.text(), "Ann\n\nRead me");
+    }
+
+    #[test]
+    fn only_the_subtypes_that_carry_text_become_notes() {
+        let annots = [
+            "<< /Type /Annot /Subtype /Text /Rect [10 10 30 30] /Contents (sticky) >>",
+            "<< /Type /Annot /Subtype /FreeText /Rect [40 10 90 30] /Contents (free) /DA (/Helv 9 Tf) >>",
+            "<< /Type /Annot /Subtype /Highlight /Rect [10 50 90 60] /Contents (marked) /QuadPoints [10 60 90 60 10 50 90 50] >>",
+            "<< /Type /Annot /Subtype /Popup /Rect [10 70 90 90] /Contents (popup text) >>",
+            "<< /Type /Annot /Subtype /Link /Rect [10 100 90 110] /Contents (link text) >>",
+            "<< /Type /Annot /Subtype /Widget /FT /Tx /T (f) /Rect [10 120 90 140] /Contents (widget text) >>",
+            "<< /Type /Annot /Subtype /Text /Rect [10 150 30 170] /Contents (   ) >>",
+            "<< /Type /Annot /Subtype /Text /Rect [10 180 30 200] >>",
+        ];
+        let doc = open_bytes(one_page("", &annots), None).ok().unwrap();
+        let mut texts: Vec<&str> = doc.notes.iter().map(|n| n.contents.as_str()).collect();
+        texts.sort_unstable();
+        assert_eq!(texts, ["free", "marked", "sticky"], "{:?}", doc.notes);
+        assert!(doc.notes.iter().all(|n| n.author.is_none()));
+        assert!(doc.notes.iter().any(|n| n.text() == "sticky"));
+    }
+
+    #[test]
+    fn a_group_subordinate_is_not_a_note_but_its_primary_is() {
+        let annots = [
+            "<< /Type /Annot /Subtype /Text /NM (a) /Rect [10 10 30 30] /Contents (primary) >>",
+            "<< /Type /Annot /Subtype /Text /Rect [10 10 30 30] /Contents (member) /IRT 4 0 R /RT /Group >>",
+        ];
+        let doc = open_bytes(one_page("", &annots), None).ok().unwrap();
+        let texts: Vec<&str> = doc.notes.iter().map(|n| n.contents.as_str()).collect();
+        assert_eq!(texts, ["primary"], "{:?}", doc.notes);
+        assert!(doc.notes[0].replies.is_empty());
+    }
+
+    #[test]
+    fn replies_are_folded_into_the_note_they_answer() {
+        let annots = [
+            "<< /Type /Annot /Subtype /Text /Rect [10 10 30 30] /Contents (question) /T (Ann) >>",
+            "<< /Type /Annot /Subtype /Text /Rect [10 10 30 30] /Contents (answer) /T (Bob) /IRT 4 0 R /RT /R >>",
+            "<< /Type /Annot /Subtype /Text /Rect [10 10 30 30] /Contents (again) /T (Cy) /IRT 5 0 R /RT /R >>",
+            "<< /Type /Annot /Subtype /Text /Rect [10 10 30 30] /T (Dee) /IRT 4 0 R /RT /R /State (Accepted) /StateModel (Review) >>",
+            "<< /Type /Annot /Subtype /Text /Rect [10 10 30 30] /T (Eve) /IRT 4 0 R /RT /R /State (Marked) /StateModel (Marked) >>",
+        ];
+        let doc = open_bytes(one_page("", &annots), None).ok().unwrap();
+        assert_eq!(doc.notes.len(), 1, "{:?}", doc.notes);
+        assert_eq!(doc.notes[0].replies, ["Bob: answer", "Cy: again", "Accepted by Dee"]);
+        assert_eq!(doc.notes[0].text(), "Ann\n\nquestion\n\nBob: answer\n\nCy: again\n\nAccepted by Dee");
+    }
+
+    #[test]
+    fn a_reply_whose_note_is_empty_is_still_read() {
+        let annots = [
+            "<< /Type /Annot /Subtype /Text /Rect [10 10 30 30] /Contents () >>",
+            "<< /Type /Annot /Subtype /Text /Rect [10 10 30 30] /Contents (answer) /T (Bob) /IRT 4 0 R /RT /R >>",
+        ];
+        let doc = open_bytes(one_page("", &annots), None).ok().unwrap();
+        assert_eq!(doc.notes.len(), 1, "{:?}", doc.notes);
+        assert_eq!(doc.notes[0].text(), "Bob: answer");
+    }
+
+    #[test]
+    fn the_note_at_a_place_is_the_topmost() {
+        let note = |rect| PdfNote { page: 0, rect, contents: String::new(), author: None, replies: Vec::new() };
+        let notes = [note([0.0, 0.0, 50.0, 50.0]), note([10.0, 10.0, 20.0, 20.0])];
+        assert_eq!(note_at(&notes, 0, [15.0, 15.0]), Some(1));
+        assert_eq!(note_at(&notes, 0, [40.0, 40.0]), Some(0));
+        assert_eq!(note_at(&notes, 1, [15.0, 15.0]), None);
+        assert_eq!(note_at(&notes, 0, [60.0, 5.0]), None);
+    }
+
+    #[test]
+    fn a_note_rect_follows_the_rotation_of_its_page() {
+        let annot = ["<< /Type /Annot /Subtype /Text /Rect [100 700 120 720] /Contents (turned) >>"];
+        for rotation in [0, 90, 180, 270] {
+            let doc = open_bytes(one_page(&format!("/Rotate {rotation}"), &annot), None).ok().unwrap();
+            let [x0, y0, x1, y1] = doc.notes[0].rect;
+            let size = doc.info.pages[0].width.max(doc.info.pages[0].height);
+            assert!(x0 < x1 && y0 < y1, "{rotation}: {:?}", doc.notes[0].rect);
+            assert!(x0 >= 0.0 && y0 >= 0.0 && x1 <= size && y1 <= size);
+            // The same box as the page's own mapping of the two corners.
+            let (p, q) = (doc.info.pages[0].user_to_view(100.0, 700.0), doc.info.pages[0].user_to_view(120.0, 720.0));
+            assert_eq!(doc.notes[0].rect, [p[0].min(q[0]), p[1].min(q[1]), p[0].max(q[0]), p[1].max(q[1])]);
+            assert!((x1 - x0 - 20.0).abs() < 1e-3 && (y1 - y0 - 20.0).abs() < 1e-3);
+        }
+        // A quarter turn: user (x, y) lands at view (y, x), the page being turned clockwise.
+        let doc = open_bytes(one_page("/Rotate 90", &annot), None).ok().unwrap();
+        for (got, want) in doc.notes[0].rect.iter().zip([700.0, 100.0, 720.0, 120.0]) {
+            assert!((got - want).abs() < 1e-2, "{:?}", doc.notes[0].rect);
+        }
+        // A NoRotate (/F 16) note stays upright about its upper-left corner.
+        let turned = ["<< /Type /Annot /Subtype /Text /F 16 /Rect [100 700 120 720] /Contents (upright) >>"];
+        let doc = open_bytes(one_page("/Rotate 90", &turned), None).ok().unwrap();
+        let page = &doc.info.pages[0];
+        let shown = doc.info.annotations[0].shown_rect(page.rotation);
+        let (p, q) = (page.user_to_view(shown[0], shown[1]), page.user_to_view(shown[2], shown[3]));
+        assert_eq!(doc.notes[0].rect, [p[0].min(q[0]), p[1].min(q[1]), p[0].max(q[0]), p[1].max(q[1])]);
+    }
+
+    #[test]
+    fn the_notes_of_the_showcase_are_read() {
+        let Some(home) = std::env::var_os("HOME") else { return };
+        let Ok(bytes) = std::fs::read(Path::new(&home).join("Downloads/showcase.pdf")) else { return };
+        let doc = open_bytes(bytes, None).ok().unwrap();
+        let last: Vec<_> = doc.notes.iter().filter(|n| n.page == 12).collect();
+        assert_eq!(last.len(), 1, "{last:?}");
+        assert_eq!(last[0].contents, "Every widget on this page has /AP normal appearances, so NeedAppearances is false.");
+        assert_eq!(last[0].author.as_deref(), Some("PdfCraft Reviewer"));
+        assert!(doc.notes.iter().all(|n| !n.contents.trim().is_empty()));
+        let thread: Vec<_> = doc.notes.iter().filter(|n| !n.replies.is_empty()).collect();
+        assert_eq!(thread.len(), 1, "{thread:?}");
+        let text: String = thread.iter().map(|n| n.text()).collect();
+        assert!(text.contains("Agreed - and the appearance stream"), "{text}");
+        assert!(text.contains("\n\nAccepted set by PdfCraft Reviewer"), "{text}");
     }
 }

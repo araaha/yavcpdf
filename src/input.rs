@@ -144,7 +144,7 @@ impl App {
     pub fn escape(&mut self) {
         if !self.pending.display().is_empty() {
             self.pending.clear();
-        } else if self.overview.take().is_some() {
+        } else if self.overview.take().is_some() || self.shown_note.take().is_some() {
             // That is all it takes back.
         } else if self.smart.take().is_some() {
             self.say("jump cancelled");
@@ -796,6 +796,11 @@ impl App {
         ui.ctx().set_cursor_icon(icon);
     }
 
+    /// The PDF's own note under a place on a page.
+    pub fn pdf_note_at(&self, page: usize, at: [f32; 2]) -> Option<usize> {
+        crate::doc::note_at(&self.doc.notes, page, at)
+    }
+
     pub fn link_at(&self, page: usize, at: [f32; 2]) -> Option<usize> {
         let info = self.doc.info.pages.get(page)?;
         self.doc.info.links.iter().position(|link| {
@@ -841,10 +846,14 @@ impl App {
             self.selection = None;
             let under = response.interact_pointer_pos().and_then(|p| self.view.page_under(&self.doc.layout, p));
             let field = under.filter(|_| matches!(self.mode, Mode::Normal)).and_then(|(page, at)| self.widget_at(page, at));
-            if let Some((field, widget)) = field {
-                self.form_activate(field, widget);
-            } else if let Some(link) = under.and_then(|(page, at)| self.link_at(page, at)) {
-                self.follow_link(ctx, link);
+            self.shown_note = None;
+            let link = under.and_then(|(page, at)| self.link_at(page, at));
+            let note = under.and_then(|(page, at)| self.pdf_note_at(page, at));
+            match click_target(field, link, note) {
+                Some(ClickTarget::Widget(field, widget)) => self.form_activate(field, widget),
+                Some(ClickTarget::Link(link)) => self.follow_link(ctx, link),
+                Some(ClickTarget::Note(note)) => self.shown_note = Some(note),
+                None => {}
             }
         }
     }
@@ -930,12 +939,33 @@ fn pointer_path(ctx: &egui::Context, response: &Response) -> Vec<Pos2> {
     path
 }
 
+/// What a click on a page lands on.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ClickTarget {
+    Widget(usize, usize),
+    Link(usize),
+    Note(usize),
+}
+
+/// A form widget wins over a link, and a link over a note (a markup note's rect may cover a link).
+fn click_target(widget: Option<(usize, usize)>, link: Option<usize>, note: Option<usize>) -> Option<ClickTarget> {
+    widget.map(|(field, widget)| ClickTarget::Widget(field, widget)).or(link.map(ClickTarget::Link)).or(note.map(ClickTarget::Note))
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{clipboard_stroke, menu_page, menu_page_wins};
+    use super::{ClickTarget, click_target, clipboard_stroke, menu_page, menu_page_wins};
     use crate::app::BarKind;
     use crate::keymap::parse_sequence;
     use egui::Event;
+
+    #[test]
+    fn a_click_prefers_a_widget_then_a_link_then_a_note() {
+        assert_eq!(click_target(Some((1, 2)), Some(3), Some(4)), Some(ClickTarget::Widget(1, 2)));
+        assert_eq!(click_target(None, Some(3), Some(4)), Some(ClickTarget::Link(3)));
+        assert_eq!(click_target(None, None, Some(4)), Some(ClickTarget::Note(4)));
+        assert_eq!(click_target(None, None, None), None);
+    }
 
     #[test]
     fn control_c_reaches_the_bindings_though_it_comes_as_a_copy_event() {

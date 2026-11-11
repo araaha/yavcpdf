@@ -521,6 +521,8 @@ pub struct App {
     pub signature: Option<Strokes>,
     /// Where the pointer is over the view.
     pub hover: Option<Pos2>,
+    /// The PDF's own note (an index into `doc.notes`) picked by hint or click, shown until cancelled.
+    pub shown_note: Option<usize>,
     /// When and where a click closed the choice panel, to swallow the second click of a double click.
     pub choice_closed: Option<(f64, Pos2)>,
     /// When and where a click opened the choice panel, to ignore the second click of a double click.
@@ -676,6 +678,7 @@ impl App {
             fill: FillItem::Text,
             signature: store::load_signature(&store::data_dir()),
             hover: None,
+            shown_note: None,
             choice_closed: None,
             choice_opened: None,
             recent_return: false,
@@ -917,6 +920,7 @@ impl App {
         let rotation = if same_file { self.doc.layout.rotation } else { self.side.rotation };
         self.selection = None;
         self.smart = None;
+        self.shown_note = None;
         self.toc_waiting = false;
         self.overview = None;
         self.view.zoom_hold = None;

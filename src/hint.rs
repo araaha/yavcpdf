@@ -34,6 +34,8 @@ pub enum TargetKind {
     Annotation(u64),
     /// A reference written in the text, by its index in the app's list for these hints.
     Reference(usize),
+    /// A text annotation of the PDF, by its index in the document's list.
+    PdfNote(usize),
     /// A form field's widget: the field's index in the form, and the widget's in the field.
     Widget(usize, usize),
 }
