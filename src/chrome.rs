@@ -649,7 +649,7 @@ impl App {
         let _ = ui.interact(rect, ui.scope_id().with("hotbar"), Sense::click_and_drag());
         let theme = self.config.active_theme().clone();
         painter.rect_filled(rect, 0.0, theme.ui_background.egui());
-        let border = egui::Stroke::new(self.config.hotbar.border.unwrap_or(self.config.view.border), theme.ui_accent.egui());
+        let border = egui::Stroke::new(self.config.view.border, theme.ui_accent.egui());
         painter.rect_stroke(rect, 0.0, border, egui::StrokeKind::Inside);
         let mut at = rect.min + Vec2::splat(PADDING / 2.0);
         let mut clicked = None;

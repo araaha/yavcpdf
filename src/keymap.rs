@@ -78,7 +78,6 @@ pub enum Action {
     Undo,
     Redo,
     ToggleTheme,
-    ToggleLightDark,
     ToggleLinks,
     ToggleFields,
     SmartJump,
@@ -111,7 +110,7 @@ pub enum Action {
 
 impl Action {
     /// Every action, in declaration order. `the_list_of_actions_is_complete` keeps it whole.
-    pub const ALL: [Self; 94] = [
+    pub const ALL: [Self; 93] = [
         Self::Cancel,
         Self::ScrollDown,
         Self::ScrollUp,
@@ -177,7 +176,6 @@ impl Action {
         Self::Undo,
         Self::Redo,
         Self::ToggleTheme,
-        Self::ToggleLightDark,
         Self::ToggleLinks,
         Self::ToggleFields,
         Self::SmartJump,
@@ -277,7 +275,6 @@ impl Action {
             Self::Undo => "undo",
             Self::Redo => "redo",
             Self::ToggleTheme => "toggle_theme",
-            Self::ToggleLightDark => "toggle_light_dark",
             Self::ToggleLinks => "toggle_links",
             Self::ToggleFields => "toggle_fields",
             Self::SmartJump => "smart_jump",
@@ -829,10 +826,9 @@ mod tests {
     }
 
     #[test]
-    fn control_r_toggles_the_theme_and_redo_has_its_own_key() {
+    fn redo_has_its_own_key() {
         let config = crate::config::Config::load_str("").unwrap();
         let (map, _) = Keymap::new(&config.keys);
-        assert_eq!(map.exact(&parse_sequence("<C-r>").unwrap()), Some(Action::ToggleLightDark));
         assert_eq!(map.exact(&parse_sequence("U").unwrap()), Some(Action::Redo));
     }
 

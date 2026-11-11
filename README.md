@@ -275,7 +275,7 @@ choose a colour instead, so counts such as `42G` don't work then.
 | <kbd>1</kbd>-<kbd>5</kbd>, <kbd>[</kbd> <kbd>]</kbd> | With a tool: colour, thinner, thicker (fill & sign: smaller, larger) |
 | <kbd>d</kbd> <kbd>h</kbd> | Delete an annotation by hint |
 | <kbd>u</kbd> / <kbd>U</kbd> | Undo / redo |
-| <kbd>Ctrl</kbd>+<kbd>R</kbd> / <kbd>T</kbd> | Light or dark theme / next theme |
+| <kbd>T</kbd> | Next theme |
 | <kbd>g</kbd> <kbd>l</kbd> / <kbd>g</kbd> <kbd>i</kbd> / <kbd>Ctrl</kbd>+<kbd>S</kbd> / <kbd>Alt</kbd>+<kbd>F</kbd> | Tint on links / form fields / status line / fullscreen |
 | <kbd>></kbd> / <kbd><</kbd> | Turn the pages a quarter turn clockwise / counter-clockwise (a count turns more); [kept for the document](#what-is-stored-where) |
 | <kbd>D</kbd> / <kbd>g</kbd> <kbd>D</kbd> | Show pages side by side in pairs / with the first page alone on the right, as in a printed book; [kept for the document](#what-is-stored-where). Page keys, `:N` and the fits then work by the row |
@@ -625,8 +625,8 @@ link = "#0000ff55"        # links to places in the document
 quit = ["q"]              # ZQ, ZZ and Ctrl-W no longer quit
 ```
 
-`view.border` sets the width of every interface outline, 0 to 8;
-`hotbar.border` overrides it for the hotbar. `view.jump_position` is where a
+`view.border` sets the width of every interface outline, 0 to 8.
+`view.jump_position` is where a
 jump puts its target, as a percentage of the window height from the bottom (0)
 to the top (100); the default is 50, the middle.
 Destinations at the very top of a page, common in LaTeX/hyperref chapter and section links, show the page top at that height, so at 50 the end of the previous page fills the upper half of the window; set 100 for the old top-of-window behaviour.

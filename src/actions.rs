@@ -1146,7 +1146,6 @@ impl App {
             Action::ToggleStatusbar => self.statusbar_visible = !self.statusbar_visible,
             Action::ToggleHotbar => self.hotbar.toggle(self.tool.is_some()),
             Action::ToggleTheme => self.next_theme(),
-            Action::ToggleLightDark => self.toggle_light_dark(),
             Action::ToggleLinks => self.links_shown = !self.links_shown,
             Action::ToggleFields => self.fields_shown = !self.fields_shown,
             Action::ToggleFullscreen => {
@@ -1171,15 +1170,6 @@ impl App {
         self.config.theme = name.to_owned();
         self.doc.apply_theme(self.config.active_theme());
         self.reset_rendering();
-    }
-
-    fn toggle_light_dark(&mut self) {
-        let next = if self.config.theme == "light" { "dark" } else { "light" };
-        if self.config.themes.contains_key(next) {
-            self.set_theme(next);
-        } else {
-            self.say(format!("there is no theme called {next}"));
-        }
     }
 
     fn next_theme(&mut self) {

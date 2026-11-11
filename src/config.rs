@@ -130,8 +130,6 @@ pub struct HotbarConfig {
     pub stroke_width: f32,
     pub fill_size: f32,
     pub date_format: String,
-    /// Overrides `view.border` for the hotbar alone.
-    pub border: Option<f32>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -218,10 +216,8 @@ impl Config {
         if self.view.zoom_step <= 1.0 || self.view.min_zoom <= 0.0 || self.view.max_zoom < self.view.min_zoom {
             return Err("view: zoom_step must be above 1 and min_zoom..max_zoom a positive range".to_owned());
         }
-        for (key, width) in [("view.border", Some(self.view.border)), ("hotbar.border", self.hotbar.border)] {
-            if let Some(width) = width.filter(|w| !w.is_finite() || !(0.0..=8.0).contains(w)) {
-                return Err(format!("{key} = {width} is out of range: use 0 to 8"));
-            }
+        if !self.view.border.is_finite() || !(0.0..=8.0).contains(&self.view.border) {
+            return Err(format!("view.border = {} is out of range: use 0 to 8", self.view.border));
         }
         if !self.view.jump_position.is_finite() || !(0.0..=100.0).contains(&self.view.jump_position) {
             return Err(format!("view.jump_position = {} is out of range: use 0 to 100", self.view.jump_position));
@@ -389,13 +385,10 @@ mod tests {
     }
 
     #[test]
-    fn the_border_is_shared_and_the_hotbar_can_override_it() {
-        let config = Config::load_str("").unwrap();
-        assert_eq!((config.view.border, config.hotbar.border), (1.0, None));
-        let config = Config::load_str("[view]\nborder = 3.0").unwrap();
-        assert_eq!((config.view.border, config.hotbar.border), (3.0, None));
-        let config = Config::load_str("[hotbar]\nborder = 2.0").unwrap();
-        assert_eq!((config.view.border, config.hotbar.border), (1.0, Some(2.0)));
+    fn the_border_defaults_to_one_and_is_set_by_the_view() {
+        assert_eq!(Config::load_str("").unwrap().view.border, 1.0);
+        assert_eq!(Config::load_str("[view]\nborder = 3.0").unwrap().view.border, 3.0);
+        assert!(Config::load_str("[hotbar]\nborder = 2.0").is_err());
         assert!(Config::load_str("[view]\nborder = 0").is_ok());
         assert!(Config::load_str("[view]\nborder = 8").is_ok());
         let error = Config::load_str("[view]\nborder = 25").unwrap_err().to_string();
@@ -441,7 +434,6 @@ mod tests {
     fn a_bad_border_is_reported() {
         for bad in ["-1.0", "9.0", "nan", "inf"] {
             assert!(Config::load_str(&format!("[view]\nborder = {bad}")).is_err(), "view {bad}");
-            assert!(Config::load_str(&format!("[hotbar]\nborder = {bad}")).is_err(), "hotbar {bad}");
         }
     }
 
