@@ -46,7 +46,8 @@ right = "{mode} | {pending} | {selection} | {search} | {message} | {file}"
 
 [hints]
 alphabet = "asdfghjklqwertyuiopzxcvbnm"
-font_size = 10.0
+font_size = 10.0          # the largest size of a label's text, in points
+scale = 0.7               # a label's text is this share of the height of its word, up to font_size
 
 [hotbar]
 position = "bottom"       # top, bottom, left or right
@@ -76,7 +77,7 @@ recolor = true                # false shows the document's own colours
 ui_background = "#242424"
 ui_text = "#ebdbb2"
 ui_accent = "#83a598"
-hint_background = "#83a598"
+hint_background = "#83a598d9"
 hint_text = "#242424"
 search = "#458588aa"
 search_current = "#fabd2faa"
@@ -92,7 +93,7 @@ recolor = true
 ui_background = "#ebdbb2"
 ui_text = "#242424"
 ui_accent = "#458588"
-hint_background = "#458588"
+hint_background = "#458588d9"
 hint_text = "#ebdbb2"
 search = "#45858866"
 search_current = "#d79921aa"

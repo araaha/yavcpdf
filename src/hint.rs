@@ -126,6 +126,48 @@ pub fn word_targets(text: &PageText, page: usize, area: [f32; 4]) -> Vec<Target>
     out
 }
 
+/// The smallest label text, in points: below it a label can't be read.
+pub const MIN_FONT: f32 = 7.0;
+
+/// The size of a label's text over a target `height` tall on screen: `scale` times the height, but
+/// no larger than `max` (the `hints.font_size`) and no smaller than `MIN_FONT`.
+pub fn font_size(height: f32, scale: f32, max: f32) -> f32 {
+    (height * scale).clamp(MIN_FONT.min(max), max)
+}
+
+fn overlap(a: [f32; 4], b: [f32; 4]) -> f32 {
+    let (w, h) = (a[2].min(b[2]) - a[0].max(b[0]), a[3].min(b[3]) - a[1].max(b[1]));
+    if w > 0.0 && h > 0.0 { w * h } else { 0.0 }
+}
+
+/// Where each label goes on screen, as `[left, top, right, bottom]`: `targets` are the screen
+/// rectangles the labels stand for and `sizes` the labels' `[width, height]`. A label is centred on
+/// its target. If that overlaps a label placed before it, it tries the places just above and below
+/// the target, so it is never more than a line away; with no free place it stays where it overlaps
+/// least.
+pub fn place_labels(targets: &[[f32; 4]], sizes: &[[f32; 2]]) -> Vec<[f32; 4]> {
+    let mut placed: Vec<[f32; 4]> = Vec::with_capacity(targets.len());
+    for (t, &[w, h]) in targets.iter().zip(sizes) {
+        let (cx, cy) = ((t[0] + t[2]) / 2.0, (t[1] + t[3]) / 2.0);
+        let at = |x: f32, y: f32| [x, y, x + w, y + h];
+        let candidates = [at(cx - w / 2.0, cy - h / 2.0), at(cx - w / 2.0, t[1] - h), at(cx - w / 2.0, t[3]), at(t[0], t[1] - h), at(t[0], t[3])];
+        let cost = |c: &[f32; 4]| placed.iter().map(|p| overlap(*p, *c)).sum::<f32>();
+        let mut best = candidates[0];
+        let mut least = cost(&best);
+        for c in &candidates[1..] {
+            if least == 0.0 {
+                break;
+            }
+            let this = cost(c);
+            if this < least {
+                (best, least) = (*c, this);
+            }
+        }
+        placed.push(best);
+    }
+    placed
+}
+
 pub fn union(a: [f32; 4], b: [f32; 4]) -> [f32; 4] {
     [a[0].min(b[0]), a[1].min(b[1]), a[2].max(b[2]), a[3].max(b[3])]
 }
@@ -199,6 +241,40 @@ mod tests {
         text.glyphs[3].text = " ".to_owned();
         let targets = word_targets(&text, 0, [0.0, 0.0, 100.0, 100.0]);
         assert_eq!(targets.len(), 2);
+    }
+
+    #[test]
+    fn label_text_follows_the_target_between_the_limits() {
+        let near = |a: f32, b: f32| (a - b).abs() < 1e-4;
+        assert!(near(font_size(10.0, 0.7, 12.0), 7.0));
+        assert_eq!(font_size(20.0, 0.7, 12.0), 12.0);
+        assert!(near(font_size(13.0, 0.7, 12.0), 9.1));
+        assert_eq!(font_size(1.0, 0.7, 12.0), MIN_FONT);
+        assert_eq!(font_size(1.0, 0.7, 5.0), 5.0);
+    }
+
+    #[test]
+    fn a_label_is_centred_on_its_word() {
+        let placed = place_labels(&[[100.0, 50.0, 140.0, 60.0]], &[[10.0, 8.0]]);
+        assert_eq!(placed, [[115.0, 51.0, 125.0, 59.0]]);
+    }
+
+    #[test]
+    fn a_label_in_the_way_moves_a_line_up_or_down_not_along() {
+        // Two short words side by side: centred, their wide labels would overlap.
+        let words = [[100.0, 50.0, 106.0, 60.0], [110.0, 50.0, 116.0, 60.0]];
+        let placed = place_labels(&words, &[[14.0, 8.0], [14.0, 8.0]]);
+        assert_eq!(placed[0], [96.0, 51.0, 110.0, 59.0]);
+        assert_eq!(overlap(placed[0], placed[1]), 0.0);
+        assert!((placed[1][0] - 106.0).abs() < 1e-4, "{:?}", placed[1]);
+        assert!(placed[1][1] >= 42.0 && placed[1][3] <= 68.0, "{:?}", placed[1]);
+    }
+
+    #[test]
+    fn with_no_free_place_a_label_still_gets_one() {
+        let word = [0.0, 0.0, 4.0, 4.0];
+        let placed = place_labels(&[word; 8], &[[6.0, 6.0]; 8]);
+        assert_eq!(placed.len(), 8);
     }
 
     #[test]
