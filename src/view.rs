@@ -415,6 +415,16 @@ impl View {
         PageTransform { origin: pos2(left, top), scale: self.zoom, rotation: layout.rotation, size: layout.page_sizes[page] }
     }
 
+    /// The current page and the part of it on screen, in page points as `[x0, y0, x1, y1]`.
+    pub fn current_area(&self, layout: &Layout) -> (usize, [f32; 4]) {
+        let page = self.current_page(layout);
+        let t = self.transform(layout, page);
+        let (a, b) = (t.to_page(self.rect.min), t.to_page(self.rect.max));
+        let [w, h] = layout.page_sizes[page];
+        let area = [a[0].min(b[0]).max(0.0), a[1].min(b[1]).max(0.0), a[0].max(b[0]).min(w), a[1].max(b[1]).min(h)];
+        (page, area)
+    }
+
     /// The page under a screen position, with the position in its points.
     pub fn page_under(&self, layout: &Layout, p: Pos2) -> Option<(usize, [f32; 2])> {
         self.visible_pages(layout).find_map(|page| {
@@ -518,6 +528,32 @@ mod tests {
 
     fn view(w: f32, h: f32) -> View {
         View { rect: Rect::from_min_size(Pos2::ZERO, vec2(w, h)), ..View::new() }
+    }
+
+    #[test]
+    fn current_area_is_the_whole_current_page_when_zoomed_out() {
+        let l = layout();
+        let mut v = view(1000.0, 1000.0);
+        v.zoom = 0.2;
+        assert!(v.visible_pages(&l).count() > 1);
+        let (page, area) = v.current_area(&l);
+        assert_eq!(page, v.current_page(&l));
+        let [w, h] = l.page_sizes[page];
+        assert_eq!(area, [0.0, 0.0, w, h]);
+    }
+
+    #[test]
+    fn current_area_is_the_part_on_screen_when_zoomed_in() {
+        let l = layout();
+        let mut v = view(300.0, 200.0);
+        v.zoom = 2.0;
+        let (page, area) = v.current_area(&l);
+        assert_eq!(page, v.current_page(&l));
+        let [w, h] = l.page_sizes[page];
+        assert!(area[2] - area[0] < w && area[3] - area[1] < h);
+        assert!(area[0] >= 0.0 && area[1] >= 0.0 && area[2] <= w && area[3] <= h);
+        assert!((area[3] - area[1] - 100.0).abs() < 1e-3);
+        assert!((area[2] - area[0] - 150.0).abs() < 1e-3);
     }
 
     #[test]

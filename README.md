@@ -318,14 +318,15 @@ presentation.
 
 ### Hints
 
-<kbd>f</kbd> labels every word showing. Type a label for the first word, then
+Hints cover the current page only (the one the status bar shows), the part of
+it showing, however far out you zoom. <kbd>f</kbd> labels every word there. Type a label for the first word, then
 one for the last word, or <kbd>Enter</kbd> for just the first. With the
 highlight tool on, the selection is highlighted directly; without it,
 <kbd>y</kbd> copies it.
 
 ### Smart jump
 
-<kbd>g</kbd> <kbd>d</kbd> labels the references on the screen, whether or not
+<kbd>g</kbd> <kbd>d</kbd> labels the references on the current page, whether or not
 the PDF made them links: `Figure 3`, `Table 2`, `Section 3.1`, `Theorem 1.2`,
 `Eq. (4)`, `(4)`, `[12]`, `Smith et al., 2020`. Pick one to go to the caption,
 heading, equation or bibliography entry it names, by reading the text of the
@@ -339,7 +340,7 @@ window by default. <kbd>Alt</kbd>+<kbd>O</kbd> comes back.
 ### Overview
 
 Shows what a reference points at in a window over the page, so you can read a
-figure or a citation without losing your place. It finds what smart jump finds.
+figure or a citation without losing your place. It finds what smart jump finds, on the current page.
 While it is open, the vertical scrolling keys (<kbd>j</kbd> <kbd>k</kbd>, the
 half-page and the screen keys) move it, as does the wheel over it. <kbd>Enter</kbd> or a click on it goes there,
 <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>PageDown</kbd> and
@@ -387,7 +388,7 @@ cancels. Move something by undoing it and placing it again.
 ### Forms
 
 A PDF with a form (AcroForm) shows its fields as they are. Press <kbd>i</kbd>
-to label the fields showing (hidden and read-only ones get no label), or click
+to label the fields on the current page (hidden and read-only ones get no label), or click
 one with no tool in hand, and then:
 
 - **Text fields** open the bar with the current text. <kbd>Enter</kbd> keeps

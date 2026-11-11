@@ -1182,18 +1182,10 @@ impl App {
 
     // Hints.
 
-    /// What hints are shown on, in page points: each page showing and its visible part.
+    /// What hints are shown on, in page points: the current page only, and the part of it showing.
     fn visible_areas(&self) -> Vec<(usize, [f32; 4])> {
-        let layout = &self.doc.layout;
-        let rect = self.view.rect;
-        self.view
-            .visible_pages(layout)
-            .map(|page| {
-                let t = self.view.transform(layout, page);
-                let (a, b) = (t.to_page(rect.min), t.to_page(rect.max));
-                (page, [a[0].min(b[0]), a[1].min(b[1]), a[0].max(b[0]), a[1].max(b[1])])
-            })
-            .collect()
+        let (page, area) = self.view.current_area(&self.doc.layout);
+        if area[2] <= area[0] || area[3] <= area[1] { Vec::new() } else { vec![(page, area)] }
     }
 
     fn link_targets(&self, areas: &[(usize, [f32; 4])]) -> Vec<Target> {
@@ -1236,7 +1228,7 @@ impl App {
         targets
     }
 
-    /// The references written on the pages showing, and the links to places in the document. A
+    /// The references written on the current page, and the links to places in the document. A
     /// reference that is a link already goes by the link, which needs no guessing.
     fn smart_targets(&self, areas: &[(usize, [f32; 4])]) -> (Vec<Target>, Vec<Reference>) {
         let is_internal =
