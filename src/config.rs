@@ -110,10 +110,7 @@ pub struct StatusConfig {
 #[serde(deny_unknown_fields)]
 pub struct HintConfig {
     pub alphabet: String,
-    /// The largest size of a label's text, in points.
     pub font_size: f32,
-    /// A label's text is this share of the height of what it stands for, up to `font_size`.
-    pub scale: f32,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
@@ -221,12 +218,6 @@ impl Config {
         }
         if !self.view.border.is_finite() || !(0.0..=8.0).contains(&self.view.border) {
             return Err(format!("view.border = {} is out of range: use 0 to 8", self.view.border));
-        }
-        if !self.hints.font_size.is_finite() || self.hints.font_size <= 0.0 {
-            return Err(format!("hints.font_size = {} must be above 0", self.hints.font_size));
-        }
-        if !self.hints.scale.is_finite() || !(0.1..=2.0).contains(&self.hints.scale) {
-            return Err(format!("hints.scale = {} is out of range: use 0.1 to 2", self.hints.scale));
         }
         if !self.view.jump_position.is_finite() || !(0.0..=100.0).contains(&self.view.jump_position) {
             return Err(format!("view.jump_position = {} is out of range: use 0 to 100", self.view.jump_position));
@@ -437,17 +428,6 @@ mod tests {
             assert_eq!(error, format!("view.jump_position = {shown} is out of range: use 0 to 100"), "{bad}");
         }
         assert!(pos("\"50\"").is_err());
-    }
-
-    #[test]
-    fn hint_labels_scale_with_their_text_within_limits() {
-        let config = Config::load_str("").unwrap();
-        assert_eq!((config.hints.font_size, config.hints.scale), (10.0, 0.7));
-        assert_eq!(Config::load_str("[hints]\nscale = 1.0").unwrap().hints.scale, 1.0);
-        for bad in ["0.0", "-1.0", "3.0", "nan"] {
-            assert!(Config::load_str(&format!("[hints]\nscale = {bad}")).is_err(), "scale {bad}");
-        }
-        assert!(Config::load_str("[hints]\nfont_size = 0").is_err());
     }
 
     #[test]

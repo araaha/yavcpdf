@@ -324,14 +324,6 @@ one for the last word, or <kbd>Enter</kbd> for just the first. With the
 highlight tool on, the selection is highlighted directly; without it,
 <kbd>y</kbd> copies it.
 
-A label is centred on what it stands for, and its text is `hints.scale` (0.7 by
-default) times the height of that word, so zooming out shrinks the labels with
-the text instead of covering it. `hints.font_size` is the largest a label gets,
-and none is smaller than 7 points. A label that would sit on another goes just
-above or below its word, never along the line. The label colours are
-`hint_background` and `hint_text` of the theme; give the background an alpha
-(`#rrggbbaa`, as the defaults do) to see the text through it.
-
 ### Smart jump
 
 <kbd>g</kbd> <kbd>d</kbd> labels the references on the current page, whether or not

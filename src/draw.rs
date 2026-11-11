@@ -6,7 +6,7 @@ use pdfcraft_render::{RenderRequest, Tile, device_pixels, effective_scale};
 use crate::app::{App, Mode, Tool, ZOOM_SETTLE};
 use crate::cache::TileKey;
 use crate::config::Color;
-use crate::hint::{self, HintState};
+use crate::hint::HintState;
 use crate::present::{PREFETCH_AHEAD, PREFETCH_BEHIND};
 use crate::store::{Annotation, MarkKind, NOTE_SIDE, Portal, mark_rect};
 use crate::view::{View, rotate_point, tile_side, tile_uv, tiles_crossing, visible_pixels};
@@ -35,6 +35,17 @@ fn clamp_into(area: Rect, bounds: Rect) -> Rect {
 
 fn translucent(color: [u8; 3], alpha: u8) -> Color32 {
     Color32::from_rgba_unmultiplied(color[0], color[1], color[2], alpha)
+}
+
+/// Moves a label right, out of the one before it on the same line: a label is often wider than
+/// the short word it stands for.
+fn clear_of(previous: Option<Rect>, label: Rect) -> Rect {
+    match previous {
+        Some(p) if p.right() >= label.left() && p.bottom() > label.center().y && p.top() < label.center().y => {
+            label.translate(vec2(p.right() + 1.0 - label.left(), 0.0))
+        }
+        _ => label,
+    }
 }
 
 /// Where the pixel box `[x, y, width, height]` of an unrotated raster of `pixels` lands on screen,
@@ -437,32 +448,22 @@ impl App {
 
     fn draw_hints(&self, painter: &Painter, view: &View, state: &HintState) {
         let theme = self.config.active_theme();
+        let font = FontId::monospace(self.config.hints.font_size);
         if let Some((page, first, last)) = state.start
             && let Some(text) = self.doc.text.get(page).and_then(|t| t.as_ref())
         {
             self.fill_rects(painter, view, page, &text.line_rects(first..last + 1), theme.selection);
         }
-        // Labels are placed by their whole text, so they stay put while it is typed.
-        let (mut rects, mut sizes) = (Vec::new(), Vec::new());
-        let mut fonts = Vec::new();
+        let mut previous = None;
         for target in &state.targets {
-            let t = view.transform(&self.doc.layout, target.page);
-            let rect = t.rect(target.rect);
-            let extent = if t.rotation.is_multiple_of(180) { rect.height() } else { rect.width() };
-            let font = FontId::monospace(hint::font_size(extent, self.config.hints.scale, self.config.hints.font_size));
-            let size = painter.layout_no_wrap(target.label.clone(), font.clone(), theme.hint_text.egui()).size();
-            rects.push([rect.min.x, rect.min.y, rect.max.x, rect.max.y]);
-            sizes.push([size.x + 2.0, size.y]);
-            fonts.push(font);
-        }
-        let places = hint::place_labels(&rects, &sizes);
-        for ((target, place), font) in state.targets.iter().zip(places).zip(fonts) {
             let Some(rest) = target.label.strip_prefix(state.typed.as_str()) else { continue };
-            let galley = painter.layout_no_wrap(rest.to_owned(), font, theme.hint_text.egui());
-            let center = Rect::from_min_max(pos2(place[0], place[1]), pos2(place[2], place[3])).center();
-            let box_rect = Rect::from_center_size(center, galley.size() + vec2(2.0, 0.0));
+            // The label stays upright at the corner of the target that is top left on screen.
+            let at = view.transform(&self.doc.layout, target.page).rect(target.rect).min;
+            let galley = painter.layout_no_wrap(rest.to_owned(), font.clone(), theme.hint_text.egui());
+            let box_rect = clear_of(previous, Rect::from_min_size(at, galley.size() + vec2(2.0, 0.0)));
             painter.rect_filled(box_rect, 0.0, theme.hint_background.egui());
             painter.galley(box_rect.min + vec2(1.0, 0.0), galley, theme.hint_text.egui());
+            previous = Some(box_rect);
         }
     }
 
@@ -542,7 +543,7 @@ impl App {
 
 #[cfg(test)]
 mod tests {
-    use super::clamp_into;
+    use super::{clamp_into, clear_of};
     use egui::{Rect, pos2, vec2};
 
     #[test]
@@ -554,6 +555,10 @@ mod tests {
         assert_eq!(clamp_into(popup(-20.0, -5.0), view), popup(0.0, 0.0));
     }
 
+    fn label(x: f32, y: f32) -> Rect {
+        Rect::from_min_size(pos2(x, y), vec2(14.0, 10.0))
+    }
+
     #[test]
     fn text_sizes_are_few_and_bounded() {
         assert_eq!(super::font_pixels(13.4), 13.0);
@@ -562,6 +567,23 @@ mod tests {
         assert_eq!(super::font_pixels(9000.0), 512.0);
     }
 
+    #[test]
+    fn a_label_moves_out_of_the_one_before_it() {
+        let moved = clear_of(Some(label(100.0, 50.0)), label(105.0, 50.0));
+        assert_eq!(moved.left(), 115.0);
+        assert_eq!(moved.width(), 14.0);
+    }
+
+    #[test]
+    fn labels_with_room_stay_where_they_are() {
+        assert_eq!(clear_of(None, label(5.0, 5.0)), label(5.0, 5.0));
+        assert_eq!(clear_of(Some(label(0.0, 50.0)), label(40.0, 50.0)), label(40.0, 50.0));
+    }
+
+    #[test]
+    fn the_next_line_starts_again_at_its_word() {
+        assert_eq!(clear_of(Some(label(300.0, 50.0)), label(20.0, 70.0)), label(20.0, 70.0));
+    }
     #[test]
     fn a_tile_lands_where_the_turned_page_puts_it() {
         // A raster of 1000 x 2000 pixels with a tile of 100 x 50 at (10, 20), at 0.5 points a pixel.
