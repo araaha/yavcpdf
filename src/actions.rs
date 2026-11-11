@@ -8,7 +8,8 @@ use egui::Pos2;
 use pdfcraft_render::LinkTarget;
 
 use crate::app::{
-    App, Bar, BarKind, Edit, Entry, EntryKind, FillItem, Fit, Landing, MarkOp, Mode, PasswordState, PendingPortal, Selection, SignPad, TocState, Tool,
+    App, Bar, BarKind, Edit, Entry, EntryKind, FillItem, Fit, Landing, MarkOp, Mode, PasswordState, PendingPortal, Selection, SignPad, SignPlace,
+    TocState, Tool,
 };
 use crate::config::expand_home;
 use crate::doc::dest_spot;
@@ -20,6 +21,90 @@ use crate::protect::{Job, Security};
 use crate::smart::{Line, Reference, find_definitions, lines_of, references_in, touches};
 use crate::store::{self, Annotation, MarkKind, NOTE_SIDE, Portal, Sidecar};
 use crate::view::{Anchor, Layout, normalize_rotation};
+
+/// What picking a place to sign comes to.
+#[derive(Debug, PartialEq)]
+enum SignChoice {
+    /// Not done, and why.
+    Refuse(&'static str),
+    /// There is no saved signature: draw one, then sign at the place.
+    OpenPad(SignPlace),
+    /// Sign at the place.
+    Sign(SignPlace),
+    /// Sign at the place, swapping the signature with this id for the new one.
+    Replace(u64, SignPlace),
+}
+
+/// Decides what to do: `signed` is whether the PDF has signed the field, `saved` the saved
+/// signature and `existing` the id of a signature of the user's already in the field.
+fn sign_choice(signed: bool, saved: Option<&store::Strokes>, existing: Option<u64>, place: SignPlace) -> SignChoice {
+    match (signed, saved, existing) {
+        (true, ..) => SignChoice::Refuse("this field is already signed"),
+        (false, None, _) => SignChoice::OpenPad(place),
+        (false, Some(_), None) => SignChoice::Sign(place),
+        (false, Some(_), Some(old)) => SignChoice::Replace(old, place),
+    }
+}
+
+/// The annotations after signing at `place` with the annotation `id`, and the edit that makes
+/// it: one step that swaps `old` for the new signature, or a plain addition.
+fn signing(
+    annotations: &[Annotation],
+    id: u64,
+    saved: &store::Strokes,
+    place: SignPlace,
+    fill_size: f32,
+    old: Option<u64>,
+) -> (Edit, Vec<Annotation>) {
+    let (page, strokes, width) = match place {
+        // A signature runs about twelve times as wide as the text beside it is tall.
+        SignPlace::At(page, at) => (page, store::place_signature(saved, at, fill_size * 12.5), fill_size / 10.0),
+        SignPlace::Field(page, rect) => {
+            let strokes = store::fit_signature(saved, rect);
+            let width = store::field_pen_width(&strokes);
+            (page, strokes, width)
+        }
+    };
+    let signed = Annotation::Signature { id, page, strokes, width };
+    let mut list = annotations.to_vec();
+    let removed = old.and_then(|old| list.iter().position(|a| a.id() == old)).map(|index| list.remove(index));
+    list.push(signed.clone());
+    let edit = match removed {
+        Some(removed) => Edit::Group(vec![Edit::Removed(vec![removed]), Edit::Added(vec![signed])]),
+        None => Edit::Added(vec![signed]),
+    };
+    (edit, list)
+}
+
+/// Applies a change to `annotations`, returning its opposite. A change to something else is
+/// given to `other`.
+fn apply_annotation_edit(annotations: &mut Vec<Annotation>, edit: Edit, other: &mut dyn FnMut(Edit) -> Edit) -> Edit {
+    match edit {
+        Edit::Added(items) => {
+            annotations.retain(|a| !items.iter().any(|i| i.id() == a.id()));
+            Edit::Removed(items)
+        }
+        Edit::Removed(items) => {
+            annotations.extend(items.iter().cloned());
+            Edit::Added(items)
+        }
+        Edit::Replaced { before, after } => {
+            if let Some(slot) = annotations.iter_mut().find(|a| a.id() == after.id()) {
+                *slot = before.clone();
+            }
+            Edit::Replaced { before: after, after: before }
+        }
+        // Undone in the opposite order, so that the opposite redoes them in the first.
+        Edit::Group(steps) => {
+            let mut opposite = Vec::with_capacity(steps.len());
+            for step in steps.into_iter().rev() {
+                opposite.push(apply_annotation_edit(annotations, step, other));
+            }
+            Edit::Group(opposite)
+        }
+        edit => other(edit),
+    }
+}
 
 /// Whether `action` changes or writes the document, which the blank page has none of.
 fn edits_document(action: Action) -> bool {
@@ -559,26 +644,15 @@ impl App {
 
     /// Applies a change, returning its opposite.
     fn apply_edit(&mut self, edit: Edit) -> Edit {
-        match edit {
-            Edit::Added(items) => {
-                self.side.annotations.retain(|a| !items.iter().any(|i| i.id() == a.id()));
-                Edit::Removed(items)
-            }
-            Edit::Removed(items) => {
-                self.side.annotations.extend(items.iter().cloned());
-                Edit::Added(items)
-            }
-            Edit::Replaced { before, after } => {
-                if let Some(slot) = self.side.annotations.iter_mut().find(|a| a.id() == after.id()) {
-                    *slot = before.clone();
-                }
-                Edit::Replaced { before: after, after: before }
-            }
+        // The form and hidden changes leave the annotations alone, so they can be taken out.
+        let mut annotations = std::mem::take(&mut self.side.annotations);
+        let opposite = apply_annotation_edit(&mut annotations, edit, &mut |other| match other {
             Edit::Form(changes) => self.apply_form_edit(changes),
             Edit::Hidden(changes) => self.apply_hidden_edit(changes),
-            // Undone in the opposite order, so that the opposite redoes them in the first.
-            Edit::Group(steps) => Edit::Group(steps.into_iter().rev().map(|s| self.apply_edit(s)).collect()),
-        }
+            other => other,
+        });
+        self.side.annotations = annotations;
+        opposite
     }
 
     fn undo_redo(&mut self, undo: bool) {
@@ -706,19 +780,33 @@ impl App {
         self.add_annotations(vec![Annotation::Text { id, page, at, size: self.fill_size, text }]);
     }
 
-    /// Signs at the place, or asks for a signature first.
-    fn add_signature(&mut self, page: usize, at: [f32; 2]) {
+    /// Signs at the place, or asks for a signature first. `signed` is whether the PDF itself has
+    /// signed the field.
+    pub fn add_signature(&mut self, place: SignPlace, signed: bool) {
         if self.locked {
             return;
         }
-        let Some(signature) = self.signature.as_ref() else {
-            self.mode = Mode::Sign(SignPad { place: Some((page, at)), ..Default::default() });
-            return;
+        let old = match place {
+            SignPlace::Field(page, rect) => store::signature_in(&self.side.annotations, page, rect),
+            SignPlace::At(..) => None,
         };
-        // A signature runs about twelve times as wide as the text beside it is tall.
-        let strokes = store::place_signature(signature, at, self.fill_size * 12.5);
-        let (id, width) = (self.side.take_id(), self.fill_size / 10.0);
-        self.add_annotations(vec![Annotation::Signature { id, page, strokes, width }]);
+        match sign_choice(signed, self.signature.as_ref(), old, place) {
+            SignChoice::Refuse(why) => self.say(why),
+            SignChoice::OpenPad(place) => self.mode = Mode::Sign(SignPad { place: Some(place), ..Default::default() }),
+            choice @ (SignChoice::Sign(_) | SignChoice::Replace(..)) => {
+                let (place, old) = match choice {
+                    SignChoice::Replace(old, place) => (place, Some(old)),
+                    SignChoice::Sign(place) | SignChoice::OpenPad(place) => (place, None),
+                    SignChoice::Refuse(_) => return,
+                };
+                let (Some(signature), id) = (self.signature.as_ref(), self.side.take_id()) else { return };
+                let (edit, annotations) = signing(&self.side.annotations, id, signature, place, self.fill_size, old);
+                self.side.annotations = annotations;
+                self.undo.push(edit);
+                self.redo.clear();
+                self.mark_dirty();
+            }
+        }
     }
 
     /// Text starts level with the place it was put at, rather than below it.
@@ -750,7 +838,7 @@ impl App {
             (Some(Tool::Fill), FillItem::Cross) => self.add_mark(page, at, MarkKind::Cross),
             (Some(Tool::Fill), FillItem::Dot) => self.add_mark(page, at, MarkKind::Dot),
             (Some(Tool::Fill), FillItem::Line) => self.add_mark(page, at, MarkKind::Line),
-            (Some(Tool::Fill), FillItem::Sign) => self.add_signature(page, at),
+            (Some(Tool::Fill), FillItem::Sign) => self.add_signature(SignPlace::At(page, at), false),
             _ => {}
         }
     }
@@ -800,8 +888,8 @@ impl App {
             self.say(format!("couldn't keep the signature: {e}"));
         }
         self.signature = Some(signature);
-        if let Some((page, at)) = pad.place {
-            self.add_signature(page, at);
+        if let Some(place) = pad.place {
+            self.add_signature(place, false);
         }
     }
 
@@ -1770,5 +1858,84 @@ mod turn_anchor_tests {
         }
         turn_anchors(&layout, 0, 90, &mut [], &mut side, None);
         assert_eq!(side.bookmarks.len(), 4);
+    }
+}
+
+#[cfg(test)]
+mod sign_tests {
+    use super::{SignChoice, apply_annotation_edit, sign_choice, signing};
+    use crate::app::Edit;
+    use crate::app::SignPlace;
+    use crate::store::Annotation;
+
+    const FIELD: SignPlace = SignPlace::Field(0, [0.0, 0.0, 100.0, 40.0]);
+
+    #[test]
+    fn signing_is_decided_by_what_is_signed_saved_and_there() {
+        let saved = vec![vec![[0.0, 0.0], [1.0, 0.5]]];
+        let at = SignPlace::At(2, [5.0, 6.0]);
+        assert!(matches!(sign_choice(true, Some(&saved), None, FIELD), SignChoice::Refuse(_)));
+        assert!(matches!(sign_choice(true, None, Some(3), FIELD), SignChoice::Refuse(_)));
+        assert_eq!(sign_choice(false, None, None, FIELD), SignChoice::OpenPad(FIELD), "the pad remembers the field");
+        assert_eq!(sign_choice(false, None, None, at), SignChoice::OpenPad(at), "and the point");
+        assert_eq!(sign_choice(false, None, Some(3), FIELD), SignChoice::OpenPad(FIELD));
+        assert_eq!(sign_choice(false, Some(&saved), None, FIELD), SignChoice::Sign(FIELD));
+        assert_eq!(sign_choice(false, Some(&saved), None, at), SignChoice::Sign(at));
+        assert_eq!(sign_choice(false, Some(&saved), Some(3), FIELD), SignChoice::Replace(3, FIELD));
+    }
+
+    #[test]
+    fn a_finished_pad_signs_into_the_field_it_remembers() {
+        // What the pad does once done is `sign_choice` with a saved signature, now there.
+        let saved = vec![vec![[0.0, 0.0], [1.0, 0.5]]];
+        let SignChoice::Sign(place) = sign_choice(false, Some(&saved), None, FIELD) else { panic!("signs") };
+        let (_, list) = signing(&[], 1, &saved, place, 12.0, None);
+        let Annotation::Signature { strokes, .. } = &list[0] else { panic!("a signature") };
+        let xs = strokes.iter().flatten().map(|p| p[0]);
+        assert!(xs.clone().all(|x| (0.0..=100.0).contains(&x)), "inside the field, not at a point");
+    }
+
+    #[test]
+    fn the_pen_follows_the_fit_for_a_field_and_not_for_a_point() {
+        let saved = vec![vec![[0.0, 0.0], [1.0, 0.5]]];
+        let width = |place| match &signing(&[], 1, &saved, place, 12.0, None).1[0] {
+            Annotation::Signature { width, .. } => *width,
+            _ => panic!("a signature"),
+        };
+        assert!(width(SignPlace::Field(0, [0.0, 0.0, 400.0, 200.0])) > width(SignPlace::Field(0, [0.0, 0.0, 40.0, 20.0])));
+        assert_eq!(width(SignPlace::At(0, [0.0, 0.0])), 1.2);
+    }
+
+    #[test]
+    fn signing_over_a_signature_undoes_and_redoes_as_one_step() {
+        let saved = vec![vec![[0.0, 0.0], [1.0, 0.5]]];
+        let sig = |id| Annotation::Signature { id, page: 0, strokes: vec![vec![[10.0, 10.0], [60.0, 30.0]]], width: 1.0 };
+        let note = Annotation::Signature { id: 9, page: 1, strokes: vec![vec![[0.0, 0.0]]], width: 1.0 };
+        let before = vec![note.clone(), sig(1)];
+        let ids = |list: &[Annotation]| list.iter().map(Annotation::id).collect::<Vec<_>>();
+        let (edit, mut list) = signing(&before, 2, &saved, FIELD, 12.0, Some(1));
+        assert_eq!(ids(&list), [9, 2], "the old one is swapped for the new");
+        let mut keep = |e| e;
+        let undone = apply_annotation_edit(&mut list, edit, &mut keep);
+        assert_eq!(ids(&list), [9, 1], "one undo brings the old one back");
+        apply_annotation_edit(&mut list, undone, &mut keep);
+        assert_eq!(ids(&list), [9, 2], "redo signs again");
+        // Without one there, it is a plain addition.
+        let (edit, mut list) = signing(&before, 3, &saved, FIELD, 12.0, None);
+        assert_eq!(ids(&list), [9, 1, 3]);
+        apply_annotation_edit(&mut list, edit, &mut keep);
+        assert_eq!(ids(&list), [9, 1]);
+    }
+
+    #[test]
+    fn a_group_is_applied_last_step_first_and_hands_back_the_opposite_group() {
+        let sig = |id| Annotation::Signature { id, page: 0, strokes: vec![vec![[0.0, 0.0]]], width: 1.0 };
+        let mut keep = |e| e;
+        // Added then Removed of the same item: undone last step first, the item is added back and then taken out again.
+        let mut list = vec![sig(1)];
+        let opposite = apply_annotation_edit(&mut list, Edit::Group(vec![Edit::Added(vec![sig(1)]), Edit::Removed(vec![sig(1)])]), &mut keep);
+        assert_eq!(list.iter().map(Annotation::id).collect::<Vec<_>>(), Vec::<u64>::new(), "steps run in reverse");
+        let Edit::Group(steps) = opposite else { panic!("a group comes back") };
+        assert!(matches!(steps[0], Edit::Added(_)) && matches!(steps[1], Edit::Removed(_)), "the opposite is in the order the steps were undone");
     }
 }

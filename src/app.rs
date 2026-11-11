@@ -110,7 +110,16 @@ pub struct SignPad {
     /// Set by an undo mid-stroke: the pointer is ignored until the button is released.
     pub wait_for_release: bool,
     /// Where to put the signature once it is drawn.
-    pub place: Option<(usize, [f32; 2])>,
+    pub place: Option<SignPlace>,
+}
+
+/// Where a drawn signature goes.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum SignPlace {
+    /// Starting at a point on a page.
+    At(usize, [f32; 2]),
+    /// Fitted into a form field's rectangle (view points) on a page.
+    Field(usize, [f32; 4]),
 }
 
 impl SignPad {

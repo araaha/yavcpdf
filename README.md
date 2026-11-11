@@ -262,7 +262,7 @@ choose a colour instead, so counts such as `42G` don't work then.
 | <kbd>Alt</kbd>+<kbd>O</kbd> / <kbd>Alt</kbd>+<kbd>I</kbd> | Jump history, back / forward; the last 100 places are kept per document between sessions |
 | <kbd>f</kbd> / <kbd>y</kbd> | Select by hint / copy the selection, with its lines joined and hyphenation undone (`view.copy_reflow = false` copies the lines as they are) |
 | <kbd>F</kbd> | Follow a link by hint; one that names a spot lands there at `view.jump_position`. The PDF's notes (sticky notes and other comments with text) appear among the link hints; picking one pins its text |
-| <kbd>i</kbd> | Fill in a form field, or press a form button, by hint; a click does it too |
+| <kbd>i</kbd> | Fill in a form field, press a form button, or sign into a signature field, by hint; a click does it too |
 | <kbd>g</kbd> <kbd>d</kbd>, <kbd>Ctrl</kbd>+<kbd>]</kbd> | Smart jump by hint; middle click does it with the mouse |
 | <kbd>g</kbd> <kbd>o</kbd>, <kbd>Alt</kbd>+<kbd>C</kbd> | Overview by hint; right click does it with the mouse |
 | <kbd>Tab</kbd> | Table of contents (<kbd>j</kbd> <kbd>k</kbd>, <kbd>/</kbd> filters, <kbd>Enter</kbd>) |
@@ -445,9 +445,18 @@ page may take a moment to refresh after a change.
 > **JavaScript is never run.** Scripts that format, check, calculate or react to
 > a click do nothing, and a button that needs one says so. Submitting a form is
 > not supported, and nothing is ever sent. Password fields can't be filled in,
-> as what is typed would be kept as plain text in the sidecar. Signature fields
-> aren't supported either: sign with fill & sign (<kbd>t</kbd> <kbd>f</kbd>,
-> <kbd>t</kbd> <kbd>S</kbd>).
+> as what is typed would be kept as plain text in the sidecar.
+
+Picking a **signature field** (or clicking it) signs into it: your saved
+signature is scaled to fit the field, centred. The first time, with none saved,
+the signature pad opens (as for fill & sign) and the drawing is signed into the
+field when you finish it. Picking a field with a signature of
+yours mostly inside it, including one placed by hand with the fill tool,
+replaces that signature, and one undo brings the old one back. Read-only
+signature fields can't be picked, and one that the PDF has already signed is
+refused. The signature is kept in the
+sidecar like other fill & sign marks and leaves the viewer through `:export`;
+it is a drawing, not a cryptographic signature.
 
 ### Portals
 

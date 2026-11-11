@@ -16,7 +16,7 @@ use pdfcraft_forms::{Field, FieldKind, FieldValue, Widget, fields, flags, name_t
 use pdfcraft_render::PageInfo;
 use serde::{Deserialize, Serialize};
 
-use crate::app::{App, Bar, BarKind, ChoiceState, Edit, Mode};
+use crate::app::{App, Bar, BarKind, ChoiceState, Edit, Mode, SignPlace};
 use crate::field::Field as TextField;
 use crate::hint::{self, Target, TargetKind};
 
@@ -80,6 +80,21 @@ pub enum ButtonCmd {
     Unsupported,
     /// The button has no action.
     Nothing,
+}
+
+/// Whether a field, or a field above it, has a `/V` that is not null.
+fn has_value(doc: &Document, r: ObjRef) -> bool {
+    let mut seen = HashSet::new();
+    let mut cur = Some(r);
+    while let Some(c) = cur.filter(|c| seen.len() <= 64 && seen.insert(*c)) {
+        let obj = doc.get(c);
+        let Some(d) = obj.as_dict() else { return false };
+        if let Some(v) = d.get(b"V") {
+            return !matches!(*doc.resolve(v), Object::Null);
+        }
+        cur = d.get(b"Parent").and_then(Object::as_ref);
+    }
+    false
 }
 
 /// The action dictionary of a widget or field: `/A`, else the mouse-up action `/AA /U`.
@@ -366,6 +381,8 @@ pub struct FormInfo {
     pub base_hidden: HashSet<(String, usize)>,
     /// The view rectangles of the widgets that can be picked (not hidden or read-only), by page.
     pub widget_rects: Vec<Vec<[f32; 4]>>,
+    /// The signature fields the PDF itself has signed.
+    pub signed: HashSet<ObjRef>,
     /// The form has been read once.
     pub ready: bool,
 }
@@ -384,6 +401,8 @@ pub struct Built {
     pub fields: Vec<Field>,
     pub base: HashMap<String, FormValue>,
     pub base_hidden: HashSet<(String, usize)>,
+    /// The signature fields that hold a value in the document itself.
+    pub signed: HashSet<ObjRef>,
     /// Values that couldn't be put in, with why.
     pub failed: Vec<(String, String)>,
     /// The values that were tried, to tell a failure of one from a newer value of the same field.
@@ -424,6 +443,7 @@ fn build_inner(bytes: Arc<Vec<u8>>, password: Option<&str>, values: &BTreeMap<St
     }
     let base = before.iter().map(|f| (f.name.clone(), FormValue::of(f))).collect();
     let base_hidden = hidden_widgets(&before);
+    let signed = signed_fields(&doc, &before);
     let (_, failed, recalc) = fill(&mut doc, values);
     apply_hidden(&mut doc, &before, hidden);
     let untouched = values.is_empty() && hidden.is_empty();
@@ -435,7 +455,13 @@ fn build_inner(bytes: Arc<Vec<u8>>, password: Option<&str>, values: &BTreeMap<St
     } else {
         Some(write_incremental(shown.as_ref().unwrap_or(&doc), &SaveOptions::default()).map_err(|e| format!("{e:?}"))?)
     };
-    Ok(Built { render, fields: now, base, base_hidden, failed, tried: values.clone(), recalc })
+    Ok(Built { render, fields: now, base, base_hidden, signed, failed, tried: values.clone(), recalc })
+}
+
+/// The signature fields of `all` that hold a value in `doc`: the form reading keeps only text
+/// values, and a signature isn't one.
+fn signed_fields(doc: &Document, all: &[Field]) -> HashSet<ObjRef> {
+    all.iter().filter(|f| f.kind == FieldKind::Signature && has_value(doc, f.obj)).map(|f| f.obj).collect()
 }
 
 /// The widgets of `all` that don't show, by field name and place in the field.
@@ -955,9 +981,9 @@ impl App {
             // Not the fault of any one value, and the same again on a second try.
             self.say(format!("the calculated fields: {why}"));
         }
-        let Built { render, fields, base, base_hidden, .. } = built;
+        let Built { render, fields, base, base_hidden, signed, .. } = built;
         let widget_rects = widget_rects_by_page(&fields, &self.doc.info.pages);
-        self.doc.form = FormInfo { fields, base, base_hidden, widget_rects, ready: true };
+        self.doc.form = FormInfo { fields, base, base_hidden, widget_rects, signed, ready: true };
         let bytes = match render {
             Some(bytes) => Arc::new(bytes),
             None if Arc::ptr_eq(&self.doc.render_bytes, &self.doc.bytes) => return,
@@ -1136,8 +1162,24 @@ impl App {
             },
             FieldKind::Combo | FieldKind::List => self.open_form_choice(&field),
             FieldKind::PushButton => self.form_button(fi, wi),
-            FieldKind::Signature => self.say("signature fields aren't supported: sign with the fill & sign tool (tf, then tS)"),
+            FieldKind::Signature => self.sign_field(&field, wi),
         }
+    }
+
+    /// Signs into a signature field with the saved signature, or draws one first.
+    fn sign_field(&mut self, field: &Field, wi: usize) {
+        if self.blank {
+            return self.say("no document open");
+        }
+        if self.locked {
+            return;
+        }
+        let widget = field.widgets.get(wi);
+        let (Some(page), Some(info)) = (widget.and_then(|w| w.page), widget.and_then(|w| w.page).and_then(|p| self.doc.info.pages.get(p))) else {
+            return;
+        };
+        let rect = view_rect(info, widget.map_or([0.0; 4], |w| w.rect));
+        self.add_signature(SignPlace::Field(page, rect), self.doc.form.signed.contains(&field.obj));
     }
 
     fn open_form_bar(&mut self, edit: FormEdit) {
@@ -1887,6 +1929,67 @@ mod tests {
         assert_eq!(cmd(&d), ButtonCmd::Reset { fields: None, exclude: false });
         let d = button_pdf("", "");
         assert_eq!(cmd(&d), ButtonCmd::Nothing);
+    }
+
+    #[test]
+    fn a_signature_field_with_a_value_counts_as_signed() {
+        let sig = |extra: &str| {
+            open(raw_pdf(&[
+                "<< /Type /Catalog /Pages 2 0 R /AcroForm << /Fields [4 0 R] >> >>",
+                "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+                "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 600 800] /Resources << >> >>",
+                &format!("<< /FT /Sig /T (s) {extra} >>"),
+            ]))
+        };
+        assert!(has_value(&sig("/V << /Type /Sig /Filter /Adobe.PPKLite >>"), obj(4)));
+        assert!(!has_value(&sig(""), obj(4)));
+        assert!(!has_value(&sig("/V null"), obj(4)));
+    }
+
+    #[test]
+    fn the_build_notes_which_signature_fields_are_signed() {
+        let bytes = raw_pdf(&[
+            "<< /Type /Catalog /Pages 2 0 R /AcroForm << /Fields [4 0 R 5 0 R] >> >>",
+            "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 600 800] /Resources << >> >>",
+            "<< /FT /Sig /T (a) /V << /Type /Sig >> >>",
+            "<< /FT /Sig /T (b) >>",
+        ]);
+        let built = build(Arc::new(bytes), None, &BTreeMap::new(), &Hidden::default()).unwrap();
+        assert_eq!(built.signed, HashSet::from([obj(4)]));
+    }
+
+    #[test]
+    fn a_value_is_inherited_from_a_parent_field_and_a_parent_cycle_ends() {
+        let tree = |parent: &str, child: &str| {
+            open(raw_pdf(&[
+                "<< /Type /Catalog /Pages 2 0 R /AcroForm << /Fields [4 0 R] >> >>",
+                "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+                "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 600 800] /Resources << >> >>",
+                &format!("<< /FT /Sig /T (p) /Kids [5 0 R] {parent} >>"),
+                &format!("<< /T (c) /Parent 4 0 R {child} >>"),
+            ]))
+        };
+        assert!(has_value(&tree("/V << /Type /Sig >>", ""), obj(5)), "inherited");
+        assert!(!has_value(&tree("", ""), obj(5)), "nowhere");
+        assert!(!has_value(&tree("/V << /Type /Sig >>", "/V null"), obj(5)), "the child's own null wins");
+        assert!(has_value(&tree("", "/V << /Type /Sig >>"), obj(5)), "own value");
+        // 4 and 5 are each other's parent, with no value anywhere: must end, and say no.
+        let cyclic = open(raw_pdf(&[
+            "<< /Type /Catalog /Pages 2 0 R /AcroForm << /Fields [4 0 R] >> >>",
+            "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 600 800] /Resources << >> >>",
+            "<< /FT /Sig /T (p) /Parent 5 0 R >>",
+            "<< /T (c) /Parent 4 0 R >>",
+        ]));
+        assert!(!has_value(&cyclic, obj(5)));
+        let own = open(raw_pdf(&[
+            "<< /Type /Catalog /Pages 2 0 R >>",
+            "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 600 800] /Resources << >> >>",
+            "<< /FT /Sig /T (p) /Parent 4 0 R >>",
+        ]));
+        assert!(!has_value(&own, obj(4)), "a field its own parent");
     }
 
     fn obj(num: u32) -> ObjRef {

@@ -297,14 +297,17 @@ pub fn restored_jumps(jumps: &[Anchor], index: usize, pages: usize) -> (Vec<Anch
     (all, before)
 }
 
+/// The box `[left, top, right, bottom]` that holds all the points, or none if there are none.
+pub fn signature_extent(strokes: &[Vec<[f32; 2]>]) -> Option<[f32; 4]> {
+    let fold =
+        |pick: fn(&[f32; 2]) -> f32| strokes.iter().flatten().map(pick).fold((f32::INFINITY, f32::NEG_INFINITY), |(a, b), v| (a.min(v), b.max(v)));
+    let ((left, right), (top, bottom)) = (fold(|p| p[0]), fold(|p| p[1]));
+    left.is_finite().then_some([left, top, right, bottom])
+}
+
 /// Scales strokes to a width of 1 with their corner at the origin, for placing at any size.
 pub fn normalize_signature(strokes: &[Vec<[f32; 2]>]) -> Option<Strokes> {
-    let points = || strokes.iter().flatten();
-    let (left, right) = points().fold((f32::INFINITY, f32::NEG_INFINITY), |(a, b), p| (a.min(p[0]), b.max(p[0])));
-    let top = points().fold(f32::INFINITY, |a, p| a.min(p[1]));
-    if !left.is_finite() {
-        return None;
-    }
+    let [left, top, right, _] = signature_extent(strokes)?;
     let width = (right - left).max(1e-3);
     let scaled = |p: &[f32; 2]| [(p[0] - left) / width, (p[1] - top) / width];
     Some(strokes.iter().filter(|s| !s.is_empty()).map(|s| s.iter().map(scaled).collect()).collect())
@@ -312,9 +315,41 @@ pub fn normalize_signature(strokes: &[Vec<[f32; 2]>]) -> Option<Strokes> {
 
 /// A saved signature, `width` points wide, with its left edge at `at` and its middle level with it.
 pub fn place_signature(strokes: &[Vec<[f32; 2]>], at: [f32; 2], width: f32) -> Strokes {
-    let (top, bottom) = strokes.iter().flatten().fold((f32::INFINITY, f32::NEG_INFINITY), |(a, b), p| (a.min(p[1]), b.max(p[1])));
+    let Some([_, top, _, bottom]) = signature_extent(strokes) else { return Vec::new() };
     let middle = (top + bottom) / 2.0;
     strokes.iter().map(|s| s.iter().map(|p| [at[0] + p[0] * width, at[1] + (p[1] - middle) * width]).collect()).collect()
+}
+
+/// A saved signature scaled to fit inside `rect` (view points) with a small margin, centred, its
+/// shape kept. A dot, which has no size to scale, is put in the middle at its own size.
+pub fn fit_signature(strokes: &[Vec<[f32; 2]>], rect: [f32; 4]) -> Strokes {
+    let Some([left, top, right, bottom]) = signature_extent(strokes) else { return Vec::new() };
+    let (field_w, field_h) = ((rect[2] - rect[0]).max(0.0), (rect[3] - rect[1]).max(0.0));
+    let margin = (field_w.min(field_h) * 0.1).min(4.0);
+    let (width, height) = (right - left, bottom - top);
+    let room = |field: f32, size: f32| if size > 1e-6 { (field - 2.0 * margin).max(0.0) / size } else { f32::INFINITY };
+    let scale = room(field_w, width).min(room(field_h, height));
+    let scale = if scale.is_finite() { scale } else { 1.0 };
+    let origin = [(rect[0] + rect[2]) / 2.0 - (left + right) / 2.0 * scale, (rect[1] + rect[3]) / 2.0 - (top + bottom) / 2.0 * scale];
+    strokes.iter().map(|s| s.iter().map(|p| [origin[0] + p[0] * scale, origin[1] + p[1] * scale]).collect()).collect()
+}
+
+/// The pen width for a signature fitted into a field: the same share of the signature's width as
+/// a point placement has (a tenth of the text size to twelve and a half times it), kept in range.
+pub fn field_pen_width(fitted: &[Vec<[f32; 2]>]) -> f32 {
+    let width = signature_extent(fitted).map_or(0.0, |e| e[2] - e[0]);
+    (width / 125.0).clamp(0.5, 3.0)
+}
+
+/// The signature annotation on `page` that sits in `rect`: inside it, or mostly overlapping it.
+pub fn signature_in(annotations: &[Annotation], page: usize, rect: [f32; 4]) -> Option<u64> {
+    let mostly = |a: &&Annotation| {
+        let b = a.bounds();
+        let (w, h) = ((b[2] - b[0]).max(1.0), (b[3] - b[1]).max(1.0));
+        let (iw, ih) = (b[2].min(rect[2]) - b[0].max(rect[0]), b[3].min(rect[3]) - b[1].max(rect[1]));
+        iw > 0.0 && ih > 0.0 && iw * ih >= 0.5 * w * h
+    };
+    annotations.iter().filter(|a| matches!(a, Annotation::Signature { .. }) && a.page() == page).rfind(mostly).map(Annotation::id)
 }
 
 fn signature_file(dir: &Path) -> PathBuf {
@@ -1841,5 +1876,128 @@ mod two_page_flag_fuzz_tests {
             }
         }
         let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+#[cfg(test)]
+mod signature_tests {
+    use super::*;
+
+    fn extent(strokes: &[Vec<[f32; 2]>]) -> [f32; 4] {
+        signature_extent(strokes).unwrap()
+    }
+
+    #[test]
+    fn a_signature_fits_a_wide_field() {
+        let normal = normalize_signature(&[vec![[0.0, 0.0], [100.0, 50.0]]]).unwrap();
+        let [l, t, r, b] = extent(&fit_signature(&normal, [100.0, 100.0, 300.0, 180.0]));
+        assert!(l >= 100.0 && r <= 300.0 && t >= 100.0 && b <= 180.0);
+        assert!(((r - l) / (b - t) - 2.0).abs() < 1e-3, "aspect kept");
+        assert!(((l + r) / 2.0 - 200.0).abs() < 1e-3 && ((t + b) / 2.0 - 140.0).abs() < 1e-3, "centred");
+        assert!((b - t - 72.0).abs() < 1e-3, "the height limits it");
+    }
+
+    #[test]
+    fn a_signature_fits_a_tall_field() {
+        let normal = normalize_signature(&[vec![[0.0, 0.0], [100.0, 50.0]]]).unwrap();
+        let [l, t, r, b] = extent(&fit_signature(&normal, [0.0, 0.0, 60.0, 200.0]));
+        assert!(l >= 0.0 && r <= 60.0 && t >= 0.0 && b <= 200.0);
+        assert!((r - l - 52.0).abs() < 1e-3, "the width limits it");
+        assert!(((t + b) / 2.0 - 100.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn a_dot_is_centred_without_dividing_by_zero() {
+        let normal = normalize_signature(&[vec![[5.0, 5.0]]]).unwrap();
+        let fitted = fit_signature(&normal, [10.0, 20.0, 50.0, 40.0]);
+        assert_eq!(fitted.len(), 1);
+        let p = fitted[0][0];
+        assert!(p[0].is_finite() && p[1].is_finite());
+        assert!((p[0] - 30.0).abs() < 1e-3 && (p[1] - 30.0).abs() < 1e-3);
+        assert!(fit_signature(&[], [0.0, 0.0, 1.0, 1.0]).is_empty());
+    }
+
+    #[test]
+    fn a_signature_is_found_in_the_field_it_sits_in() {
+        let sig = |id, page, x: f32| Annotation::Signature { id, page, strokes: vec![vec![[x, 10.0], [x + 20.0, 20.0]]], width: 1.0 };
+        let all = [sig(1, 0, 15.0), sig(2, 1, 15.0), sig(3, 0, 300.0), sig(4, 0, 90.0)];
+        let field = [10.0, 0.0, 110.0, 40.0];
+        assert_eq!(signature_in(&all[..3], 0, field), Some(1));
+        assert_eq!(signature_in(&all[1..2], 0, field), None, "another page");
+        assert_eq!(signature_in(&all[2..3], 0, field), None, "far away");
+        assert_eq!(signature_in(&all, 0, field), Some(4), "mostly overlapping, the newest first");
+    }
+
+    fn assert_fits(strokes: &[Vec<[f32; 2]>], rect: [f32; 4]) {
+        let source = extent(strokes);
+        let [l, t, r, b] = extent(&fit_signature(strokes, rect));
+        let (fw, fh) = (rect[2] - rect[0], rect[3] - rect[1]);
+        let margin = (fw.min(fh) * 0.1).min(4.0);
+        let eps = 1e-3;
+        assert!(l >= rect[0] + margin - eps && r <= rect[2] - margin + eps, "{rect:?} x: {l}..{r}");
+        assert!(t >= rect[1] + margin - eps && b <= rect[3] - margin + eps, "{rect:?} y: {t}..{b}");
+        let (sw, sh) = (source[2] - source[0], source[3] - source[1]);
+        assert!((((r - l) * sh) - ((b - t) * sw)).abs() < 1e-2 * sw.max(sh).max(1.0), "{rect:?} aspect: {}x{}", r - l, b - t);
+        assert!(((l + r) / 2.0 - (rect[0] + rect[2]) / 2.0).abs() < eps, "{rect:?} centred x");
+        assert!(((t + b) / 2.0 - (rect[1] + rect[3]) / 2.0).abs() < eps, "{rect:?} centred y");
+        // One dimension is used up, so it is as large as can be.
+        let (room_w, room_h) = (fw - 2.0 * margin, fh - 2.0 * margin);
+        assert!((r - l - room_w).abs() < eps || (b - t - room_h).abs() < eps, "{rect:?} one side fills the room");
+    }
+
+    #[test]
+    fn fitted_signatures_stay_inside_keep_their_shape_and_are_centred() {
+        let wavy = vec![vec![[0.0, 0.0], [30.0, 40.0], [80.0, 10.0]], vec![[10.0, 55.0], [90.0, 60.0]]];
+        let tall = vec![vec![[0.0, 0.0], [10.0, 100.0]]];
+        let flat = vec![vec![[0.0, 0.0], [100.0, 5.0]]];
+        for strokes in [wavy, tall, flat] {
+            for rect in [
+                [100.0, 100.0, 300.0, 180.0],
+                [0.0, 0.0, 60.0, 200.0],
+                [50.0, 70.0, 250.0, 250.0],
+                [-20.0, -10.0, 400.0, 30.0],
+                [10.0, 10.0, 13.0, 12.0],
+                [5.0, 5.0, 5.5, 5.25],
+            ] {
+                assert_fits(&strokes, rect);
+            }
+        }
+    }
+
+    #[test]
+    fn a_degenerate_field_gives_finite_points() {
+        let normal = normalize_signature(&[vec![[0.0, 0.0], [100.0, 50.0]]]).unwrap();
+        for rect in [[10.0, 10.0, 10.0, 10.0], [20.0, 20.0, 10.0, 10.0]] {
+            let fitted = fit_signature(&normal, rect);
+            assert!(fitted.iter().flatten().all(|p| p[0].is_finite() && p[1].is_finite()), "{rect:?}");
+        }
+    }
+
+    #[test]
+    fn a_signature_is_in_a_field_at_exactly_half_but_not_below_it() {
+        let sig = [Annotation::Signature { id: 7, page: 0, strokes: vec![vec![[0.0, 0.0], [10.0, 10.0]]], width: 1.0 }];
+        assert_eq!(signature_in(&sig, 0, [0.0, 0.0, 5.0, 10.0]), Some(7), "exactly half");
+        assert_eq!(signature_in(&sig, 0, [0.0, 0.0, 4.5, 10.0]), None, "under half");
+        assert_eq!(signature_in(&sig, 0, [0.0, 0.0, 5.5, 10.0]), Some(7), "over half");
+        assert_eq!(signature_in(&sig, 0, [10.0, 0.0, 20.0, 10.0]), None, "only touching");
+        assert_eq!(signature_in(&sig, 1, [0.0, 0.0, 10.0, 10.0]), None, "other page");
+    }
+
+    #[test]
+    fn placing_at_a_point_puts_the_left_edge_there_and_the_middle_level() {
+        let normal = normalize_signature(&[vec![[0.0, 0.0], [100.0, 50.0]]]).unwrap();
+        let [l, t, r, b] = extent(&place_signature(&normal, [40.0, 60.0], 120.0));
+        assert!((l - 40.0).abs() < 1e-3 && (r - 160.0).abs() < 1e-3, "width as asked");
+        assert!(((t + b) / 2.0 - 60.0).abs() < 1e-3 && (b - t - 60.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn the_pen_scales_with_the_fit_within_a_range() {
+        let normal = normalize_signature(&[vec![[0.0, 0.0], [100.0, 50.0]]]).unwrap();
+        let pen = |w: f32| field_pen_width(&fit_signature(&normal, [0.0, 0.0, w, 1000.0]));
+        assert!(pen(400.0) > pen(200.0));
+        assert_eq!(pen(10.0), 0.5, "a tiny field has a floor");
+        assert_eq!(pen(5000.0), 3.0, "a huge one a ceiling");
+        assert_eq!(field_pen_width(&[]), 0.5);
     }
 }
