@@ -363,14 +363,17 @@ impl App {
             state.typed.pop();
         } else if stroke.is("cr") {
             // Enter after the first word selects just that word.
+            // Enter also takes a link's number that starts a longer one: 1 when there is a 12.
             if let Some(start) = state.start {
                 self.finish_selection(start);
+            } else if let Some(target) = state.chosen().cloned() {
+                self.hint_chosen(ctx, &target);
             }
         } else if let Some(c) = typed_char(stroke) {
             state.typed.push(c);
             if !state.matches() {
                 state.typed.pop();
-            } else if let Some(target) = state.chosen().cloned() {
+            } else if let Some(target) = state.settled().cloned() {
                 self.hint_chosen(ctx, &target);
             }
         }

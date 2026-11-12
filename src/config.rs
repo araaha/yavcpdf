@@ -54,6 +54,9 @@ pub struct Theme {
     /// The keys of a hint after the next one.
     pub hint_key2_background: Color,
     pub hint_key2_text: Color,
+    /// Over the links that `hint_link` numbers. Optional, so a theme written before it still loads.
+    #[serde(default = "default_hint_link")]
+    pub hint_link: Color,
     pub search: Color,
     pub search_current: Color,
     pub selection: Color,
@@ -63,6 +66,10 @@ pub struct Theme {
     /// Optional, so a theme written before fields were tinted still loads.
     #[serde(default = "default_field")]
     pub field: Color,
+}
+
+fn default_hint_link() -> Color {
+    Color([250, 189, 47, 102])
 }
 
 fn default_link() -> Color {
@@ -384,6 +391,7 @@ mod tests {
         let mine = config.active_theme();
         assert_eq!(mine.field.0, [250, 189, 47, 51]);
         assert_eq!(mine.link.0, [0, 0, 255, 85]);
+        assert_eq!(mine.hint_link.0, [250, 189, 47, 102]);
         let old = theme.replace("hint_key1_background", "hint_background");
         assert!(Config::load_str(&format!("theme = \"mine\"\n[themes.mine]\n{old}")).is_err());
         let config = Config::load_str(&format!("theme = \"mine\"\n[themes.mine]\n{theme}field = \"#11223344\"")).unwrap();

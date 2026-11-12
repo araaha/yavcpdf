@@ -23,6 +23,12 @@ pub fn labels(n: usize, alphabet: &[char]) -> Vec<String> {
         .collect()
 }
 
+/// The numbers from 1 as labels. A short one can start a longer one, so a number is taken once
+/// nothing longer could follow it, or with Enter.
+pub fn numbers(n: usize) -> Vec<String> {
+    (1..=n).map(|i| i.to_string()).collect()
+}
+
 /// What is left of a label to type, as the key to press next and the keys after it. They are
 /// drawn in two colours.
 pub fn next_and_later(rest: &str) -> (&str, &str) {
@@ -93,9 +99,9 @@ impl HintState {
         Self { purpose, targets: Vec::new(), ready: false, typed: String::new(), start: None }
     }
 
-    /// Gives the targets their labels, top to bottom.
+    /// Gives the targets their labels in order: numbers for links, letters of `alphabet` otherwise.
     pub fn assign(&mut self, mut targets: Vec<Target>, alphabet: &[char]) {
-        let names = labels(targets.len(), alphabet);
+        let names = if self.purpose == Purpose::Link { numbers(targets.len()) } else { labels(targets.len(), alphabet) };
         for (target, label) in targets.iter_mut().zip(names) {
             target.label = label;
         }
@@ -106,6 +112,12 @@ impl HintState {
     /// The target whose whole label is typed.
     pub fn chosen(&self) -> Option<&Target> {
         self.targets.iter().find(|t| t.label == self.typed)
+    }
+
+    /// The target whose whole label is typed, once no longer label could be meant.
+    pub fn settled(&self) -> Option<&Target> {
+        let longer = self.targets.iter().any(|t| t.label != self.typed && t.label.starts_with(&self.typed));
+        if longer { None } else { self.chosen() }
     }
 
     /// Whether any label still starts with what is typed.
@@ -205,6 +217,24 @@ mod tests {
         text.glyphs[3].text = " ".to_owned();
         let targets = word_targets(&text, 0, [0.0, 0.0, 100.0, 100.0]);
         assert_eq!(targets.len(), 2);
+    }
+
+    #[test]
+    fn links_are_numbered_from_one_and_wait_while_a_longer_number_could_follow() {
+        let target = |i| Target { label: String::new(), page: 0, rect: [0.0; 4], kind: TargetKind::Link(i) };
+        let mut state = HintState::new(Purpose::Link);
+        state.assign((0..12).map(target).collect(), &chars("ab"));
+        assert_eq!(state.targets[0].label, "1");
+        assert_eq!(state.targets[11].label, "12");
+        state.typed = "1".to_owned();
+        assert!(state.settled().is_none());
+        assert_eq!(state.chosen().unwrap().kind, TargetKind::Link(0));
+        state.typed = "12".to_owned();
+        assert_eq!(state.settled().unwrap().kind, TargetKind::Link(11));
+        state.typed = "3".to_owned();
+        assert_eq!(state.settled().unwrap().kind, TargetKind::Link(2));
+        state.typed = "0".to_owned();
+        assert!(!state.matches());
     }
 
     #[test]

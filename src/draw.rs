@@ -6,7 +6,7 @@ use pdfcraft_render::{RenderRequest, Tile, device_pixels, effective_scale};
 use crate::app::{App, Mode, Tool, ZOOM_SETTLE};
 use crate::cache::TileKey;
 use crate::config::Color;
-use crate::hint::{HintState, Target, next_and_later};
+use crate::hint::{HintState, Purpose, Target, next_and_later};
 use crate::present::{PREFETCH_AHEAD, PREFETCH_BEHIND};
 use crate::store::{Annotation, MarkKind, NOTE_SIDE, Portal, mark_rect};
 use crate::view::{View, rotate_point, tile_side, tile_uv, tiles_crossing, visible_pixels};
@@ -455,6 +455,12 @@ impl App {
             self.fill_rects(painter, view, page, &text.line_rects(first..last + 1), theme.selection);
         }
         let left = |target: &&Target| target.label.starts_with(state.typed.as_str());
+        // The links still in the running are covered whole, under every label.
+        if state.purpose == Purpose::Link {
+            for target in state.targets.iter().filter(left) {
+                self.fill_rects(painter, view, target.page, &[target.rect], theme.hint_link);
+            }
+        }
         let mut previous = None;
         for target in state.targets.iter().filter(left) {
             // A number typed in full that waits for Enter has nothing left to show but its link.
