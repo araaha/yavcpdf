@@ -23,6 +23,12 @@ pub fn labels(n: usize, alphabet: &[char]) -> Vec<String> {
         .collect()
 }
 
+/// What is left of a label to type, as the key to press next and the keys after it. They are
+/// drawn in two colours.
+pub fn next_and_later(rest: &str) -> (&str, &str) {
+    rest.split_at(rest.chars().next().map_or(0, char::len_utf8))
+}
+
 /// What a label stands for.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TargetKind {
@@ -199,6 +205,14 @@ mod tests {
         text.glyphs[3].text = " ".to_owned();
         let targets = word_targets(&text, 0, [0.0, 0.0, 100.0, 100.0]);
         assert_eq!(targets.len(), 2);
+    }
+
+    #[test]
+    fn the_next_key_of_a_label_is_split_from_the_later_ones() {
+        assert_eq!(next_and_later("whabc"), ("w", "habc"));
+        assert_eq!(next_and_later("h"), ("h", ""));
+        assert_eq!(next_and_later(""), ("", ""));
+        assert_eq!(next_and_later("éa"), ("é", "a"));
     }
 
     #[test]

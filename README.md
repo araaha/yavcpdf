@@ -324,6 +324,11 @@ one for the last word, or <kbd>Enter</kbd> for just the first. With the
 highlight tool on, the selection is highlighted directly; without it,
 <kbd>y</kbd> copies it.
 
+A label is drawn in two parts, each with its own colours in the theme: the key
+to press next in `hint_key1_background` and `hint_key1_text`, the keys after it
+in `hint_key2_background` and `hint_key2_text`. As you type, the next key takes
+the first pair in turn.
+
 ### Smart jump
 
 <kbd>g</kbd> <kbd>d</kbd> labels the references on the current page, whether or not

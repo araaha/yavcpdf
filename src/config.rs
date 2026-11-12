@@ -48,8 +48,12 @@ pub struct Theme {
     pub ui_background: Color,
     pub ui_text: Color,
     pub ui_accent: Color,
-    pub hint_background: Color,
-    pub hint_text: Color,
+    /// The key of a hint to press next.
+    pub hint_key1_background: Color,
+    pub hint_key1_text: Color,
+    /// The keys of a hint after the next one.
+    pub hint_key2_background: Color,
+    pub hint_key2_text: Color,
     pub search: Color,
     pub search_current: Color,
     pub selection: Color,
@@ -373,12 +377,15 @@ mod tests {
     fn a_theme_without_a_field_colour_gets_the_default() {
         let theme = "background = \"#000000\"\npage = \"#000000\"\npage_text = \"#ffffff\"\nrecolor = false\n\
             ui_background = \"#000000\"\nui_text = \"#ffffff\"\nui_accent = \"#ffffff\"\n\
-            hint_background = \"#ffffff\"\nhint_text = \"#000000\"\nsearch = \"#ffffff\"\n\
+            hint_key1_background = \"#ffffff\"\nhint_key1_text = \"#000000\"\n\
+            hint_key2_background = \"#ffffff\"\nhint_key2_text = \"#000000\"\nsearch = \"#ffffff\"\n\
             search_current = \"#ffffff\"\nselection = \"#ffffff\"\n";
         let config = Config::load_str(&format!("theme = \"mine\"\n[themes.mine]\n{theme}")).unwrap();
         let mine = config.active_theme();
         assert_eq!(mine.field.0, [250, 189, 47, 51]);
         assert_eq!(mine.link.0, [0, 0, 255, 85]);
+        let old = theme.replace("hint_key1_background", "hint_background");
+        assert!(Config::load_str(&format!("theme = \"mine\"\n[themes.mine]\n{old}")).is_err());
         let config = Config::load_str(&format!("theme = \"mine\"\n[themes.mine]\n{theme}field = \"#11223344\"")).unwrap();
         assert_eq!(config.active_theme().field.0, [0x11, 0x22, 0x33, 0x44]);
         assert_eq!(Config::load_str("").unwrap().active_theme().field.0, [0xfa, 0xbd, 0x2f, 0x33]);

@@ -6,7 +6,7 @@ use pdfcraft_render::{RenderRequest, Tile, device_pixels, effective_scale};
 use crate::app::{App, Mode, Tool, ZOOM_SETTLE};
 use crate::cache::TileKey;
 use crate::config::Color;
-use crate::hint::HintState;
+use crate::hint::{HintState, Target, next_and_later};
 use crate::present::{PREFETCH_AHEAD, PREFETCH_BEHIND};
 use crate::store::{Annotation, MarkKind, NOTE_SIDE, Portal, mark_rect};
 use crate::view::{View, rotate_point, tile_side, tile_uv, tiles_crossing, visible_pixels};
@@ -454,15 +454,33 @@ impl App {
         {
             self.fill_rects(painter, view, page, &text.line_rects(first..last + 1), theme.selection);
         }
+        let left = |target: &&Target| target.label.starts_with(state.typed.as_str());
         let mut previous = None;
-        for target in &state.targets {
-            let Some(rest) = target.label.strip_prefix(state.typed.as_str()) else { continue };
+        for target in state.targets.iter().filter(left) {
+            // A number typed in full that waits for Enter has nothing left to show but its link.
+            let (next, later) = next_and_later(&target.label[state.typed.len()..]);
+            if next.is_empty() {
+                continue;
+            }
+            let (back1, text1) = (theme.hint_key1_background, theme.hint_key1_text);
+            let (back2, text2) = (theme.hint_key2_background, theme.hint_key2_text);
+            // Asked of the text: a galley laid out from no text does not count as empty.
+            let last = later.is_empty();
+            let next = painter.layout_no_wrap(next.to_owned(), font.clone(), text1.egui());
+            let later = painter.layout_no_wrap(later.to_owned(), font.clone(), text2.egui());
             // The label stays upright at the corner of the target that is top left on screen.
             let at = view.transform(&self.doc.layout, target.page).rect(target.rect).min;
-            let galley = painter.layout_no_wrap(rest.to_owned(), font.clone(), theme.hint_text.egui());
-            let box_rect = clear_of(previous, Rect::from_min_size(at, galley.size() + vec2(2.0, 0.0)));
-            painter.rect_filled(box_rect, 0.0, theme.hint_background.egui());
-            painter.galley(box_rect.min + vec2(1.0, 0.0), galley, theme.hint_text.egui());
+            let size = vec2(next.size().x + if last { 0.0 } else { later.size().x } + 2.0, next.size().y);
+            let box_rect = clear_of(previous, Rect::from_min_size(at, size));
+            // Each key sits on its own background, which meet where the next key ends.
+            let meet = if last { box_rect.right() } else { box_rect.left() + 1.0 + next.size().x };
+            let (first, rest) = box_rect.split_left_right_at_x(meet);
+            painter.rect_filled(first, 0.0, back1.egui());
+            if !last {
+                painter.rect_filled(rest, 0.0, back2.egui());
+                painter.galley(pos2(meet, box_rect.top()), later, text2.egui());
+            }
+            painter.galley(box_rect.min + vec2(1.0, 0.0), next, text1.egui());
             previous = Some(box_rect);
         }
     }
