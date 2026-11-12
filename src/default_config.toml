@@ -46,7 +46,9 @@ right = "{mode} | {pending} | {selection} | {search} | {message} | {file}"
 
 [hints]
 alphabet = "asdfghjklqwertyuiopzxcvbnm"
-font_size = 10.0
+font_size = 10.0       # label size at 100% zoom and the largest it gets, in points
+scale = true           # shrink labels as you zoom out; false keeps them at font_size
+min_font_size = 6.0    # the smallest a label gets when scaling
 
 [hotbar]
 position = "bottom"       # top, bottom, left or right

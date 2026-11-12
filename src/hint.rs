@@ -1,6 +1,16 @@
 //! Hint mode: labels over what can be picked, chosen by typing.
 use pdfcraft_render::PageText;
 
+use crate::config::HintConfig;
+
+/// The font size of every label at `zoom`: `font_size` scaled by the zoom, kept between
+/// `min_font_size` and `font_size`, whichever of the two is smaller being the minimum. Without
+/// `scale` it is `font_size`.
+pub fn label_size(zoom: f32, config: &HintConfig) -> f32 {
+    let (max, min) = (config.font_size, config.min_font_size.min(config.font_size));
+    if config.scale { (max * zoom).clamp(min, max) } else { max }
+}
+
 /// Equal-length labels from `alphabet`, so no label is the start of another. The first labels use
 /// the first letters, which the default alphabet puts on the home row.
 pub fn labels(n: usize, alphabet: &[char]) -> Vec<String> {
@@ -156,6 +166,25 @@ pub fn intersects(a: [f32; 4], b: [f32; 4]) -> bool {
 mod tests {
     use super::*;
     use pdfcraft_render::TextGlyph;
+
+    fn hint_config(scale: bool) -> HintConfig {
+        HintConfig { alphabet: "ab".to_owned(), font_size: 10.0, scale, min_font_size: 6.0 }
+    }
+
+    #[test]
+    fn labels_scale_with_the_zoom_between_the_minimum_and_the_font_size() {
+        let config = hint_config(true);
+        assert_eq!(label_size(3.0, &config), 10.0);
+        assert_eq!(label_size(1.0, &config), 10.0);
+        assert_eq!(label_size(0.8, &config), 8.0);
+        assert_eq!(label_size(0.1, &config), 6.0);
+        assert_eq!(label_size(0.1, &hint_config(false)), 10.0);
+        assert_eq!(label_size(3.0, &hint_config(false)), 10.0);
+        // A minimum above the font size gives way to it.
+        let small = HintConfig { font_size: 4.0, ..hint_config(true) };
+        assert_eq!(label_size(0.1, &small), 4.0);
+        assert_eq!(label_size(1.0, &small), 4.0);
+    }
 
     fn chars(s: &str) -> Vec<char> {
         s.chars().collect()

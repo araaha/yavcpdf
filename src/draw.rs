@@ -6,7 +6,7 @@ use pdfcraft_render::{RenderRequest, Tile, device_pixels, effective_scale};
 use crate::app::{App, Mode, Tool, ZOOM_SETTLE};
 use crate::cache::TileKey;
 use crate::config::Color;
-use crate::hint::{HintState, Purpose, Target, next_and_later};
+use crate::hint::{HintState, Purpose, Target, label_size, next_and_later};
 use crate::present::{PREFETCH_AHEAD, PREFETCH_BEHIND};
 use crate::store::{Annotation, MarkKind, NOTE_SIDE, Portal, mark_rect};
 use crate::view::{View, rotate_point, tile_side, tile_uv, tiles_crossing, visible_pixels};
@@ -448,7 +448,7 @@ impl App {
 
     fn draw_hints(&self, painter: &Painter, view: &View, state: &HintState) {
         let theme = self.config.active_theme();
-        let font = FontId::monospace(self.config.hints.font_size);
+        let font = FontId::monospace(label_size(view.zoom, &self.config.hints));
         if let Some((page, first, last)) = state.start
             && let Some(text) = self.doc.text.get(page).and_then(|t| t.as_ref())
         {

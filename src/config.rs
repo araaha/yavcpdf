@@ -120,8 +120,14 @@ pub struct StatusConfig {
 #[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct HintConfig {
+    /// The keys labels are made of.
     pub alphabet: String,
+    /// Label size at 100% zoom, and the largest it gets, in points.
     pub font_size: f32,
+    /// Shrink labels as the view zooms out.
+    pub scale: bool,
+    /// The smallest a label gets when scaling, or `font_size` if that is smaller.
+    pub min_font_size: f32,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
@@ -221,6 +227,7 @@ impl Config {
         if letters.len() < 2 {
             return Err("hints.alphabet needs at least two different characters".to_owned());
         }
+        self.validate_hint_sizes()?;
         if self.hotbar.colors.is_empty() {
             return Err("hotbar.colors needs at least one colour".to_owned());
         }
@@ -232,6 +239,16 @@ impl Config {
         }
         if !self.view.jump_position.is_finite() || !(0.0..=100.0).contains(&self.view.jump_position) {
             return Err(format!("view.jump_position = {} is out of range: use 0 to 100", self.view.jump_position));
+        }
+        Ok(())
+    }
+
+    fn validate_hint_sizes(&self) -> Result<(), String> {
+        let hints = &self.hints;
+        for (name, size) in [("font_size", hints.font_size), ("min_font_size", hints.min_font_size)] {
+            if !size.is_finite() || size <= 0.0 {
+                return Err(format!("hints.{name} = {size} is out of range: it must be above 0"));
+            }
         }
         Ok(())
     }
@@ -397,6 +414,36 @@ mod tests {
         let config = Config::load_str(&format!("theme = \"mine\"\n[themes.mine]\n{theme}field = \"#11223344\"")).unwrap();
         assert_eq!(config.active_theme().field.0, [0x11, 0x22, 0x33, 0x44]);
         assert_eq!(Config::load_str("").unwrap().active_theme().field.0, [0xfa, 0xbd, 0x2f, 0x33]);
+    }
+
+    #[test]
+    fn hint_sizes_have_defaults_and_must_be_positive() {
+        let hints = Config::load_str("").unwrap().hints;
+        assert_eq!((hints.font_size, hints.scale, hints.min_font_size), (10.0, true, 6.0));
+        assert!(Config::load_str("[hints]\nscale = false").is_ok());
+        assert!(Config::load_str("[hints]\nfont_size = 0").is_err());
+        assert!(Config::load_str("[hints]\nfont_size = -3.0").is_err());
+        assert!(Config::load_str("[hints]\nmin_font_size = 0").is_err());
+        assert!(Config::load_str("[hints]\nfont_size = nan").is_err());
+        assert!(Config::load_str("[hints]\nmin_font_size = 12.0").is_ok());
+        assert!(Config::load_str("[hints]\nfont_size = 4.0").is_ok());
+        assert!(Config::load_str("[hints]\nfont_size = 4.0\nmin_font_size = 2.0").is_ok());
+    }
+
+    #[test]
+    fn infinite_and_negative_hint_sizes_are_rejected_by_name() {
+        for text in [
+            "[hints]\nfont_size = inf",
+            "[hints]\nfont_size = -inf",
+            "[hints]\nmin_font_size = inf",
+            "[hints]\nmin_font_size = -inf",
+            "[hints]\nmin_font_size = nan",
+            "[hints]\nmin_font_size = -1.0",
+        ] {
+            let error = Config::load_str(text).expect_err(text);
+            assert!(error.contains("hints."), "{text}: {error}");
+        }
+        assert!(Config::load_str("[hints]\nfont_size = inf\nscale = false").is_err());
     }
 
     #[test]

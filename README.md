@@ -334,6 +334,11 @@ to press next in `hint_key1_background` and `hint_key1_text`, the keys after it
 in `hint_key2_background` and `hint_key2_text`. As you type, the next key takes
 the first pair in turn.
 
+Labels shrink as you zoom out. `hints.font_size` is the size in points at 100%
+zoom and the largest a label gets, `hints.scale = false` keeps every label at
+that size, and `hints.min_font_size` is the smallest a label gets when scaling
+(or `font_size`, if that is smaller).
+
 ### Smart jump
 
 <kbd>g</kbd> <kbd>d</kbd> labels the references on the current page, whether or not
