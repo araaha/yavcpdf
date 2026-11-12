@@ -28,6 +28,7 @@ mod search;
 mod smart;
 mod store;
 mod view;
+mod websearch;
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;

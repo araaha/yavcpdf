@@ -108,6 +108,14 @@ selection = "#45858866"
 link = "#0000ff33"
 field = "#d7992133"
 
+# Search the selected text on a website. Each site has `keys`, a key sequence (as in [keys]), and `url`, where `{}` is
+# replaced by the text. Override a site's `keys` or `url` alone, add a site, or turn a default off with `keys = ""`.
+[web_search]
+scholar = { keys = "ss", url = "https://scholar.google.com/scholar?q={}" }
+google = { keys = "sg", url = "https://www.google.com/search?q={}" }
+wikipedia = { keys = "sw", url = "https://en.wikipedia.org/w/index.php?search={}" }
+arxiv = { keys = "sa", url = "https://arxiv.org/search/?query={}&searchtype=all" }
+
 [keys]
 cancel = ["<esc>", "<C-c>"]
 scroll_down = ["j", "<down>"]

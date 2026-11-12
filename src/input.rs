@@ -135,8 +135,8 @@ impl App {
                 return;
             }
         }
-        if let Some((action, count)) = self.pending.feed(&self.keymap, stroke) {
-            self.run(ctx, action, count);
+        if let Some((bound, count)) = self.pending.feed(&self.keymap, stroke) {
+            self.run_bound(ctx, bound, count);
         }
     }
 

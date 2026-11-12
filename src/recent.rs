@@ -212,7 +212,7 @@ mod tests {
     #[test]
     fn the_default_config_leaves_q_colon_j_and_k_out_of_the_labels() {
         let config = crate::config::Config::load_str("").unwrap();
-        let (keymap, _) = crate::keymap::Keymap::new(&config.keys);
+        let (keymap, _) = crate::keymap::Keymap::new(&config.keys, &Default::default());
         let bound = keymap.typed_by(&PASSED_ON);
         for key in [':', 'q'] {
             assert!(bound.contains(&key), "{key}");
@@ -250,7 +250,7 @@ mod tests {
             "[keys]\nquit = [\"a\", \"s\", \"ZZ\"]\nopen = [\"d\"]\ncommand = [\"f\", \";\"]\ntoggle_fullscreen = [\"<C-f>\", \"g\"]",
         )
         .unwrap();
-        let (keymap, errors) = crate::keymap::Keymap::new(&config.keys);
+        let (keymap, errors) = crate::keymap::Keymap::new(&config.keys, &Default::default());
         assert!(errors.is_empty(), "{errors:?}");
         let bound = keymap.typed_by(&PASSED_ON);
         for key in ['a', 's', 'd', 'f', ';', 'g'] {
@@ -268,7 +268,7 @@ mod tests {
     #[test]
     fn labels_fall_back_to_digits_when_quit_eats_the_alphabet() {
         let config = crate::config::Config::load_str("[hints]\nalphabet = \"abjk\"\n[keys]\nquit = [\"a\", \"b\"]").unwrap();
-        let (keymap, _) = crate::keymap::Keymap::new(&config.keys);
+        let (keymap, _) = crate::keymap::Keymap::new(&config.keys, &Default::default());
         let bound = keymap.typed_by(&PASSED_ON);
         let state = RecentState::new(files(4), &config.hints.alphabet, &bound);
         assert!(state.labels.iter().all(|l| l.chars().all(|c| c.is_ascii_digit())), "{:?}", state.labels);
@@ -278,7 +278,7 @@ mod tests {
     #[test]
     fn labels_never_use_a_digit_bound_to_quit() {
         let config = crate::config::Config::load_str("[hints]\nalphabet = \"jk\"\n[keys]\nquit = [\"1\", \"2\"]").unwrap();
-        let (keymap, _) = crate::keymap::Keymap::new(&config.keys);
+        let (keymap, _) = crate::keymap::Keymap::new(&config.keys, &Default::default());
         let bound = keymap.typed_by(&PASSED_ON);
         let state = RecentState::new(files(7), &config.hints.alphabet, &bound);
         assert!(state.labels.iter().all(|l| !l.contains(['1', '2'])), "{:?}", state.labels);

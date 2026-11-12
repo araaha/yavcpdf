@@ -16,7 +16,7 @@ use crate::doc::dest_spot;
 use crate::field::Field;
 use crate::form::Report;
 use crate::hint::{self, HintState, Purpose, Target, TargetKind};
-use crate::keymap::Action;
+use crate::keymap::{Action, Bound};
 use crate::protect::{Job, Security};
 use crate::smart::{Line, Reference, find_definitions, lines_of, references_in, touches};
 use crate::store::{self, Annotation, MarkKind, NOTE_SIDE, Portal, Sidecar};
@@ -586,8 +586,13 @@ impl App {
         crate::reflow::reflow(&rows)
     }
 
+    /// The selected text as `yank` copies it: reflowed or as laid out, by `copy_reflow`.
+    fn copied_selection(&self) -> String {
+        if self.config.view.copy_reflow { self.reflowed_selection() } else { self.selection_text() }
+    }
+
     fn yank(&mut self, ctx: &egui::Context) {
-        let text = if self.config.view.copy_reflow { self.reflowed_selection() } else { self.selection_text() };
+        let text = self.copied_selection();
         if text.is_empty() {
             self.say("nothing selected");
             return;
@@ -596,6 +601,32 @@ impl App {
         ctx.copy_text(text);
         self.selection = None;
         self.say(format!("copied {chars} characters"));
+    }
+
+    /// Runs what a key sequence is bound to. A web search takes no count.
+    pub fn run_bound(&mut self, ctx: &egui::Context, bound: Bound, count: Option<u32>) {
+        match bound {
+            Bound::Action(action) => self.run(ctx, action, count),
+            Bound::Web(site) => self.web_search(&site),
+        }
+    }
+
+    /// Searches the selected text on the website `site` of `[web_search]`, in the browser.
+    pub fn web_search(&mut self, site: &str) {
+        let Some(site_config) = self.config.web_search.get(site) else {
+            self.say(format!("no web search \"{site}\""));
+            return;
+        };
+        let text = self.copied_selection();
+        let Some(query) = crate::websearch::query(&text) else {
+            self.say("nothing selected");
+            return;
+        };
+        let url = crate::websearch::search_url(&site_config.url, &query);
+        match launch_uri(&url) {
+            Ok(()) => self.say(format!("searching {site} for \"{}\"", crate::websearch::shortened(&query, 40))),
+            Err(message) => self.say(message),
+        }
     }
 
     fn current_color(&self) -> [u8; 3] {
@@ -1385,24 +1416,9 @@ impl App {
     }
 
     pub fn open_uri(&mut self, uri: &str) {
-        let lower = uri.to_lowercase();
-        if !["http://", "https://", "mailto:"].iter().any(|s| lower.starts_with(s)) {
-            self.say(format!("not opening {uri}"));
-            return;
-        }
-        // The URI is one argument, never parsed by a shell.
-        #[cfg(windows)]
-        const OPENER: &str = "explorer.exe";
-        #[cfg(target_os = "macos")]
-        const OPENER: &str = "open";
-        #[cfg(not(any(windows, target_os = "macos")))]
-        const OPENER: &str = "xdg-open";
-        match std::process::Command::new(OPENER).arg(uri).spawn() {
-            Ok(mut child) => {
-                std::thread::spawn(move || child.wait());
-                self.say(format!("opened {uri}"));
-            }
-            Err(e) => self.say(format!("{OPENER}: {e}")),
+        match launch_uri(uri) {
+            Ok(()) => self.say(format!("opened {uri}")),
+            Err(message) => self.say(message),
         }
     }
 
@@ -1597,6 +1613,24 @@ fn count_argument(argument: &str) -> Option<u32> {
     let digits = !argument.is_empty() && argument.bytes().all(|b| b.is_ascii_digit());
     let count = if digits { argument.parse().unwrap_or(u32::MAX) } else { 0 };
     (count > 0).then_some(count)
+}
+
+/// Hands `uri` to the desktop's opener. Only http, https and mailto are opened.
+fn launch_uri(uri: &str) -> Result<(), String> {
+    let lower = uri.to_lowercase();
+    if !["http://", "https://", "mailto:"].iter().any(|s| lower.starts_with(s)) {
+        return Err(format!("not opening {uri}"));
+    }
+    // The URI is one argument, never parsed by a shell.
+    #[cfg(windows)]
+    const OPENER: &str = "explorer.exe";
+    #[cfg(target_os = "macos")]
+    const OPENER: &str = "open";
+    #[cfg(not(any(windows, target_os = "macos")))]
+    const OPENER: &str = "xdg-open";
+    let mut child = std::process::Command::new(OPENER).arg(uri).spawn().map_err(|e| format!("{OPENER}: {e}"))?;
+    std::thread::spawn(move || child.wait());
+    Ok(())
 }
 
 /// Turns the anchors that are kept, the jump history, marks, bookmarks, portals and the portal being

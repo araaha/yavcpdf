@@ -261,6 +261,7 @@ choose a colour instead, so counts such as `42G` don't work then.
 | <kbd>M</kbd> / <kbd>g</kbd> <kbd>b</kbd> | Name a bookmark here (opens `:bookmark `) / pick a bookmark: <kbd>j</kbd> <kbd>k</kbd> move, <kbd>Enter</kbd>, <kbd>l</kbd> or a click jumps (<kbd>Alt</kbd>+<kbd>O</kbd> comes back), <kbd>/</kbd> filters, <kbd>Esc</kbd> clears the filter and then closes, <kbd>q</kbd> closes, <kbd>d</kbd> or <kbd>Delete</kbd> deletes the highlighted one when not filtering |
 | <kbd>Alt</kbd>+<kbd>O</kbd> / <kbd>Alt</kbd>+<kbd>I</kbd> | Jump history, back / forward; the last 100 places are kept per document between sessions |
 | <kbd>f</kbd> / <kbd>y</kbd> | Select by hint / copy the selection, with its lines joined and hyphenation undone (`view.copy_reflow = false` copies the lines as they are) |
+| <kbd>s</kbd> <kbd>s</kbd> / <kbd>s</kbd> <kbd>g</kbd> / <kbd>s</kbd> <kbd>w</kbd> / <kbd>s</kbd> <kbd>a</kbd> | Search the selected text on Google Scholar / Google / Wikipedia / arXiv, in the browser; the selection stays. [Sites are configurable](#searching-the-web) |
 | <kbd>F</kbd> | Follow a link by hint; one that names a spot lands there at `view.jump_position`. The PDF's notes (sticky notes and other comments with text) appear among the link hints; picking one pins its text |
 | <kbd>i</kbd> | Fill in a form field, press a form button, or sign into a signature field, by hint; a click does it too |
 | <kbd>g</kbd> <kbd>d</kbd>, <kbd>Ctrl</kbd>+<kbd>]</kbd> | Smart jump by hint; middle click does it with the mouse |
@@ -650,6 +651,27 @@ At values near 0 the target sits at the bottom edge, so what follows it is below
 `view.two_page` (default false) shows pages side by side in pairs, and `view.cover_alone` (default true) keeps
 the first page alone on the right of the spine, as in a printed book; the second applies only in two-page mode.
 A lone cover or a trailing page is fit with the width of a full spread, so it keeps its place beside the spine.
+
+### Searching the web
+
+Select text (for example with <kbd>f</kbd>) and press <kbd>s</kbd> <kbd>s</kbd> to
+search it on Google Scholar. The text is read as for copying, with its lines joined, and
+opens in your browser. A count is ignored, and the selection is kept so that
+you can search it elsewhere too. The sites are under `[web_search]`:
+
+```toml
+[web_search]
+scholar = { keys = "ss", url = "https://scholar.google.com/scholar?q={}" }
+```
+
+Each site has `keys`, a key sequence written as under [Key bindings](#key-bindings),
+and `url`, an `http://` or `https://` address in which every `{}` is replaced by
+the text, percent-encoded. A site's settings merge with the defaults, so you can change
+just its keys (`scholar = { keys = "sx" }`) or just its `url`, add a site under a new
+name, or turn a default off with `keys = ""`. A url without `{}` or with another scheme,
+or keys that can't be read, make the configuration fail to load. Keys that an action already uses, or
+that an earlier site (by name) uses, are reported and skipped. A site key may begin another binding, such as
+`g` and `gg`: the shorter one then runs after a short pause.
 
 ### Key bindings
 

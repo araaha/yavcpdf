@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use serde::Deserialize;
 
 use crate::keymap::Action;
+use crate::websearch::WebSite;
 
 const DEFAULTS: &str = include_str!("default_config.toml");
 
@@ -187,6 +188,9 @@ pub struct Config {
     pub presentation: PresentationConfig,
     pub themes: BTreeMap<String, Theme>,
     pub keys: BTreeMap<Action, Vec<String>>,
+    /// Optional, so a config written before web searches still loads.
+    #[serde(default)]
+    pub web_search: BTreeMap<String, WebSite>,
 }
 
 /// Merges `over` into `base`: tables key by key, anything else replaced whole.
@@ -239,6 +243,9 @@ impl Config {
         }
         if !self.view.jump_position.is_finite() || !(0.0..=100.0).contains(&self.view.jump_position) {
             return Err(format!("view.jump_position = {} is out of range: use 0 to 100", self.view.jump_position));
+        }
+        for (name, site) in &self.web_search {
+            crate::websearch::check(name, site)?;
         }
         Ok(())
     }
@@ -388,6 +395,70 @@ mod tests {
         // A user's own binding replaces the default whole.
         let config = Config::load_str("[keys]\ntoggle_presentation = [\"<f6>\"]").unwrap();
         assert_eq!(config.keys[&Action::TogglePresentation], vec!["<f6>".to_owned()]);
+    }
+
+    #[test]
+    fn the_default_web_searches_are_present() {
+        let config = Config::load_str("").unwrap();
+        let keys: Vec<_> = ["scholar", "google", "wikipedia", "arxiv"].iter().map(|n| config.web_search[*n].keys.as_str()).collect();
+        assert_eq!(keys, ["ss", "sg", "sw", "sa"]);
+    }
+
+    #[test]
+    fn a_web_search_can_be_overridden_added_or_disabled() {
+        let config = Config::load_str("[web_search.scholar]\nkeys = \"sx\"").unwrap();
+        assert_eq!(config.web_search["scholar"].keys, "sx");
+        assert!(config.web_search["scholar"].url.contains("scholar.google.com"));
+        let config = Config::load_str("[web_search.scholar]\nurl = \"https://example.org/?q={}\"").unwrap();
+        assert_eq!(config.web_search["scholar"].keys, "ss");
+        let config = Config::load_str("[web_search]\nnew = { keys = \"sn\", url = \"https://n.org/{}\" }").unwrap();
+        assert_eq!(config.web_search.len(), 5);
+        let config = Config::load_str("[web_search]\nscholar = { keys = \"\" }").unwrap();
+        assert!(!crate::websearch::bindings(&config.web_search).contains_key("scholar"));
+        assert_eq!(crate::websearch::bindings(&config.web_search).len(), 3);
+    }
+
+    #[test]
+    fn a_bad_web_search_is_an_error() {
+        assert!(Config::load_str("[web_search.scholar]\nurl = \"https://example.org/\"").is_err());
+        assert!(Config::load_str("[web_search.scholar]\nurl = \"ftp://example.org/{}\"").is_err());
+        assert!(Config::load_str("[web_search.scholar]\nkeys = \"<nope>\"").is_err());
+    }
+
+    #[test]
+    fn a_user_web_search_with_an_empty_or_missing_url_is_an_error() {
+        let err = Config::load_str("[web_search.mine]\nkeys = \"sm\"\nurl = \"\"").unwrap_err();
+        assert!(err.contains("web_search.mine"), "{err}");
+        assert!(Config::load_str("[web_search.mine]\nkeys = \"sm\"").is_err());
+        assert!(Config::load_str("[web_search.scholar]\nurl = \"\"").is_err());
+        assert!(Config::load_str("[web_search.mine]\nurl = \"https://m.org/{}\"").is_err(), "keys are required");
+    }
+
+    #[test]
+    fn a_disabled_web_search_needs_no_url() {
+        assert!(Config::load_str("[web_search]\nmine = { keys = \"\" }").is_ok());
+    }
+
+    #[test]
+    fn a_web_search_with_an_unknown_field_or_bad_keys_is_an_error() {
+        assert!(Config::load_str("[web_search.scholar]\nhotkey = \"sx\"").is_err());
+        assert!(Config::load_str("[web_search.scholar]\nkeys = \"<nope>\"").is_err());
+    }
+
+    #[test]
+    fn a_disabled_web_search_is_not_checked_further() {
+        let config = Config::load_str("[web_search.mine]\nkeys = \"\"\nurl = \"\"").unwrap();
+        assert!(!crate::websearch::bindings(&config.web_search).contains_key("mine"));
+        assert!(Config::load_str("[web_search.scholar]\nkeys = \"\"\nurl = \"nonsense\"").is_ok());
+    }
+
+    #[test]
+    fn an_old_config_without_web_searches_still_loads() {
+        let table: toml::Table = DEFAULTS.parse().unwrap();
+        let mut table = table;
+        table.remove("web_search");
+        let config: Config = toml::Value::Table(table).try_into().unwrap();
+        assert!(config.web_search.is_empty());
     }
 
     #[test]

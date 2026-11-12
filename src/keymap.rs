@@ -507,15 +507,25 @@ pub fn parse_sequence(text: &str) -> Result<Vec<Stroke>, String> {
     if out.is_empty() { Err("empty key binding".to_owned()) } else { Ok(out) }
 }
 
+/// What a key sequence runs: an action, or the web search of the site of that name.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Bound {
+    Action(Action),
+    Web(String),
+}
+
 /// All bindings.
 #[derive(Clone, Debug, Default)]
 pub struct Keymap {
     binds: Vec<(Vec<Stroke>, Action)>,
+    sites: Vec<(Vec<Stroke>, String)>,
 }
 
 impl Keymap {
-    /// Builds the keymap from the config table. Invalid bindings are skipped and reported.
-    pub fn new(table: &BTreeMap<Action, Vec<String>>) -> (Self, Vec<String>) {
+    /// Builds the keymap from the config tables: `sites` holds the keys of each web search by name.
+    /// Invalid bindings are skipped and reported. A site never replaces an action's binding, nor
+    /// another site's: the first by name keeps it.
+    pub fn new(table: &BTreeMap<Action, Vec<String>>, sites: &BTreeMap<String, String>) -> (Self, Vec<String>) {
         let mut map = Self::default();
         let mut errors = Vec::new();
         for (action, keys) in table {
@@ -526,7 +536,27 @@ impl Keymap {
                 }
             }
         }
+        map.add_sites(sites, &mut errors);
         (map, errors)
+    }
+
+    fn add_sites(&mut self, sites: &BTreeMap<String, String>, errors: &mut Vec<String>) {
+        for (name, keys) in sites {
+            let sequence = match parse_sequence(keys) {
+                Ok(sequence) => sequence,
+                Err(e) => {
+                    errors.push(format!("web_search.{name}: {e}"));
+                    continue;
+                }
+            };
+            if self.binds.iter().any(|(s, a)| a.edit().is_none() && *s == sequence) {
+                errors.push(format!("web_search.{name}: \"{keys}\" is already bound to an action"));
+            } else if let Some((_, other)) = self.sites.iter().find(|(s, _)| *s == sequence) {
+                errors.push(format!("web_search.{name}: \"{keys}\" is already used by web_search.{other}"));
+            } else {
+                self.sites.push((sequence, name.clone()));
+            }
+        }
     }
 
     /// Whether this one stroke is bound to `cancel`. A printable key never is here, so that it
@@ -554,12 +584,14 @@ impl Keymap {
         self.binds.iter().find(|(s, a)| a.edit().is_some() && s.as_slice() == std::slice::from_ref(stroke)).and_then(|(_, a)| a.edit())
     }
 
-    fn exact(&self, strokes: &[Stroke]) -> Option<Action> {
-        self.binds.iter().find(|(s, a)| s == strokes && a.edit().is_none()).map(|(_, a)| *a)
+    fn exact(&self, strokes: &[Stroke]) -> Option<Bound> {
+        let action = self.binds.iter().find(|(s, a)| s == strokes && a.edit().is_none()).map(|(_, a)| Bound::Action(*a));
+        action.or_else(|| self.sites.iter().find(|(s, _)| s == strokes).map(|(_, name)| Bound::Web(name.clone())))
     }
 
     fn has_longer(&self, strokes: &[Stroke]) -> bool {
-        self.binds.iter().any(|(s, _)| s.len() > strokes.len() && s.starts_with(strokes))
+        let longer = |s: &Vec<Stroke>| s.len() > strokes.len() && s.starts_with(strokes);
+        self.binds.iter().any(|(s, _)| longer(s)) || self.sites.iter().any(|(s, _)| longer(s))
     }
 }
 
@@ -583,8 +615,8 @@ impl Pending {
         format!("{count}{keys}")
     }
 
-    /// Feeds one stroke, returning the action it completes with its count.
-    pub fn feed(&mut self, map: &Keymap, stroke: Stroke) -> Option<(Action, Option<u32>)> {
+    /// Feeds one stroke, returning what it completes with its count.
+    pub fn feed(&mut self, map: &Keymap, stroke: Stroke) -> Option<(Bound, Option<u32>)> {
         if self.strokes.is_empty() && self.feed_count(&stroke) {
             return None;
         }
@@ -613,7 +645,7 @@ impl Pending {
 
     /// When a sequence that is also a binding has waited long enough, runs it. Returns how long
     /// to keep waiting otherwise.
-    pub fn tick(&mut self, map: &Keymap, now: Instant) -> (Option<(Action, Option<u32>)>, Option<Duration>) {
+    pub fn tick(&mut self, map: &Keymap, now: Instant) -> (Option<(Bound, Option<u32>)>, Option<Duration>) {
         let Some(since) = self.since else { return (None, None) };
         let Some(action) = map.exact(&self.strokes) else { return (None, None) };
         let waited = now.saturating_duration_since(since);
@@ -632,7 +664,7 @@ mod tests {
     use super::*;
 
     fn map(binds: &[(&str, Action)]) -> Keymap {
-        Keymap { binds: binds.iter().map(|(k, a)| (parse_sequence(k).unwrap(), *a)).collect() }
+        Keymap { binds: binds.iter().map(|(k, a)| (parse_sequence(k).unwrap(), *a)).collect(), sites: Vec::new() }
     }
 
     #[test]
@@ -645,6 +677,13 @@ mod tests {
     }
 
     fn type_keys(p: &mut Pending, m: &Keymap, keys: &str) -> Option<(Action, Option<u32>)> {
+        type_bound(p, m, keys).map(|(b, c)| match b {
+            Bound::Action(a) => (a, c),
+            Bound::Web(name) => panic!("unexpected web search {name}"),
+        })
+    }
+
+    fn type_bound(p: &mut Pending, m: &Keymap, keys: &str) -> Option<(Bound, Option<u32>)> {
         parse_sequence(keys).unwrap().into_iter().filter_map(|s| p.feed(m, s)).last()
     }
 
@@ -672,7 +711,7 @@ mod tests {
     }
 
     fn default_keymap() -> Keymap {
-        let (map, errors) = Keymap::new(&crate::config::Config::load_str("").unwrap().keys);
+        let (map, errors) = Keymap::new(&crate::config::Config::load_str("").unwrap().keys, &Default::default());
         assert_eq!(errors, Vec::<String>::new());
         map
     }
@@ -684,11 +723,11 @@ mod tests {
     #[test]
     fn gi_toggles_fields_gl_toggles_links_and_i_hints_a_form_at_once() {
         let map = default_keymap();
-        assert_eq!(map.exact(&[stroke("g"), stroke("i")]), Some(Action::ToggleFields));
-        assert_eq!(map.exact(&[stroke("g"), stroke("l")]), Some(Action::ToggleLinks));
+        assert_eq!(map.exact(&[stroke("g"), stroke("i")]), Some(Bound::Action(Action::ToggleFields)));
+        assert_eq!(map.exact(&[stroke("g"), stroke("l")]), Some(Bound::Action(Action::ToggleLinks)));
         assert_eq!(Action::from_name("toggle_fields"), Some(Action::ToggleFields));
         let mut p = Pending::default();
-        assert_eq!(p.feed(&map, stroke("i")), Some((Action::HintForm, None)));
+        assert_eq!(p.feed(&map, stroke("i")), Some((Bound::Action(Action::HintForm), None)));
         assert_eq!(type_keys(&mut p, &map, "gi"), Some((Action::ToggleFields, None)));
         assert_eq!(type_keys(&mut p, &map, "gl"), Some((Action::ToggleLinks, None)));
     }
@@ -696,9 +735,9 @@ mod tests {
     #[test]
     fn p_and_e_prefixes_protect_and_edit_portal() {
         let map = default_keymap();
-        assert_eq!(map.exact(&[stroke("P"), stroke("p")]), Some(Action::Protect));
-        assert_eq!(map.exact(&[stroke("P"), stroke("u")]), Some(Action::Unprotect));
-        assert_eq!(map.exact(&[stroke("e"), stroke("p")]), Some(Action::EditPortal));
+        assert_eq!(map.exact(&[stroke("P"), stroke("p")]), Some(Bound::Action(Action::Protect)));
+        assert_eq!(map.exact(&[stroke("P"), stroke("u")]), Some(Bound::Action(Action::Unprotect)));
+        assert_eq!(map.exact(&[stroke("e"), stroke("p")]), Some(Bound::Action(Action::EditPortal)));
         assert_eq!(map.exact(&[stroke("P")]), None);
         assert_eq!(map.exact(&[stroke("e")]), None);
         let mut p = Pending::default();
@@ -732,8 +771,8 @@ mod tests {
     #[test]
     fn gb_picks_a_bookmark_and_capital_m_names_one_without_clashing() {
         let map = default_keymap();
-        assert_eq!(map.exact(&[stroke("g"), stroke("b")]), Some(Action::ShowBookmarks));
-        assert_eq!(map.exact(&[stroke("M")]), Some(Action::AddBookmark));
+        assert_eq!(map.exact(&[stroke("g"), stroke("b")]), Some(Bound::Action(Action::ShowBookmarks)));
+        assert_eq!(map.exact(&[stroke("M")]), Some(Bound::Action(Action::AddBookmark)));
         let on = |a: Action| map.binds.iter().filter(|(_, x)| *x == a).count();
         assert_eq!((on(Action::ShowBookmarks), on(Action::AddBookmark)), (1, 1));
         let starts_with_g = map.binds.iter().filter(|(seq, _)| seq[0] == stroke("g")).filter(|(seq, _)| seq.get(1) == Some(&stroke("b"))).count();
@@ -757,10 +796,10 @@ mod tests {
         let config = Config::load_str(&old).unwrap();
         assert_eq!(config.keys[&Action::ShowBookmarks], ["gb"]);
         assert_eq!(config.keys[&Action::AddBookmark], ["M"]);
-        let (map, errors) = Keymap::new(&config.keys);
+        let (map, errors) = Keymap::new(&config.keys, &Default::default());
         assert!(errors.is_empty(), "{errors:?}");
-        assert_eq!(map.exact(&[stroke("g"), stroke("b")]), Some(Action::ShowBookmarks));
-        assert_eq!(map.exact(&[stroke("M")]), Some(Action::AddBookmark));
+        assert_eq!(map.exact(&[stroke("g"), stroke("b")]), Some(Bound::Action(Action::ShowBookmarks)));
+        assert_eq!(map.exact(&[stroke("M")]), Some(Bound::Action(Action::AddBookmark)));
         let mut p = Pending::default();
         assert_eq!(type_keys(&mut p, &map, "gb"), Some((Action::ShowBookmarks, None)));
         assert_eq!(type_keys(&mut p, &map, "M"), Some((Action::AddBookmark, None)));
@@ -790,36 +829,36 @@ mod tests {
     #[test]
     fn the_editing_keys_keep_their_meaning_in_normal_mode() {
         let map = default_keymap();
-        assert_eq!(map.exact(&[stroke("<left>")]), Some(Action::ScrollLeft));
-        assert_eq!(map.exact(&[stroke("<C-u>")]), Some(Action::HalfUp));
-        assert_eq!(map.exact(&[stroke("<C-w>")]), Some(Action::Quit));
-        assert_eq!(map.exact(&[stroke("<home>")]), Some(Action::GotoFirst));
+        assert_eq!(map.exact(&[stroke("<left>")]), Some(Bound::Action(Action::ScrollLeft)));
+        assert_eq!(map.exact(&[stroke("<C-u>")]), Some(Bound::Action(Action::HalfUp)));
+        assert_eq!(map.exact(&[stroke("<C-w>")]), Some(Bound::Action(Action::Quit)));
+        assert_eq!(map.exact(&[stroke("<home>")]), Some(Bound::Action(Action::GotoFirst)));
         assert_eq!(map.exact(&[stroke("<C-bs>")]), None, "editing alone");
     }
 
     #[test]
     fn a_printable_key_bound_to_an_edit_still_types() {
         let table = BTreeMap::from([(Action::EditLeft, vec!["x".to_owned()])]);
-        let (map, _) = Keymap::new(&table);
+        let (map, _) = Keymap::new(&table, &Default::default());
         assert_eq!(map.edit(&Stroke::plain("x")), None);
     }
 
     #[test]
     fn every_default_binding_parses() {
         let config = crate::config::Config::load_str("").unwrap();
-        let (_, errors) = Keymap::new(&config.keys);
+        let (_, errors) = Keymap::new(&config.keys, &Default::default());
         assert!(errors.is_empty(), "{errors:?}");
     }
 
     #[test]
     fn cancel_is_escape_and_control_c_by_default_and_can_be_rebound() {
         let config = crate::config::Config::load_str("").unwrap();
-        let (map, _) = Keymap::new(&config.keys);
+        let (map, _) = Keymap::new(&config.keys, &Default::default());
         let ctrl_c = parse_sequence("<C-c>").unwrap().remove(0);
         assert!(map.cancels(&Stroke::plain("esc")) && map.cancels(&ctrl_c));
         assert!(!map.cancels(&Stroke::plain("c")));
         let config = crate::config::Config::load_str("[keys]\ncancel = [\"<C-g>\", \"x\"]").unwrap();
-        let (map, _) = Keymap::new(&config.keys);
+        let (map, _) = Keymap::new(&config.keys, &Default::default());
         assert!(!map.cancels(&ctrl_c) && !map.cancels(&Stroke::plain("esc")));
         assert!(map.cancels(&parse_sequence("<C-g>").unwrap()[0]));
         assert!(!map.cancels(&Stroke::plain("x")), "a printable key must stay typable in a bar");
@@ -828,8 +867,8 @@ mod tests {
     #[test]
     fn redo_has_its_own_key() {
         let config = crate::config::Config::load_str("").unwrap();
-        let (map, _) = Keymap::new(&config.keys);
-        assert_eq!(map.exact(&parse_sequence("U").unwrap()), Some(Action::Redo));
+        let (map, _) = Keymap::new(&config.keys, &Default::default());
+        assert_eq!(map.exact(&parse_sequence("U").unwrap()), Some(Bound::Action(Action::Redo)));
     }
 
     #[test]
@@ -858,7 +897,7 @@ mod tests {
         let (fired, wait) = p.tick(&m, Instant::now());
         assert!(fired.is_none() && wait.is_some());
         let (fired, _) = p.tick(&m, Instant::now() + AMBIGUOUS_WAIT);
-        assert_eq!(fired, Some((Action::Undo, None)));
+        assert_eq!(fired, Some((Bound::Action(Action::Undo), None)));
         assert_eq!(type_keys(&mut p, &m, "dh"), Some((Action::DeleteAnnotation, None)));
     }
 
@@ -935,24 +974,24 @@ mod tests {
         assert_eq!(config.keys.get(&Action::EditUndo), Some(&vec!["<C-z>".to_owned()]));
         assert!(config.keys.iter().filter(|(a, _)| **a != Action::EditUndo).all(|(_, keys)| !keys.iter().any(|k| k == "<C-z>")));
         let config = crate::config::Config::load_str("[keys]\nedit_undo = [\"<C-y>\"]").unwrap();
-        let (map, errors) = Keymap::new(&config.keys);
+        let (map, errors) = Keymap::new(&config.keys, &Default::default());
         assert!(errors.is_empty(), "{errors:?}");
         assert_eq!(map.edit(&ctrl_z), None);
         assert_eq!(map.edit(&stroke("<C-y>")), Some(Edit::Undo));
         let config = crate::config::Config::load_str("[keys]\nedit_undo = []").unwrap();
-        let (map, errors) = Keymap::new(&config.keys);
+        let (map, errors) = Keymap::new(&config.keys, &Default::default());
         assert!(errors.is_empty(), "{errors:?}");
         assert_eq!(map.edit(&ctrl_z), None);
         // Bound to a normal-mode action by the user, it still edits in a field and acts in the document.
         let config = crate::config::Config::load_str("[keys]\nquit = [\"<C-z>\"]").unwrap();
-        let (map, _) = Keymap::new(&config.keys);
-        assert_eq!(map.exact(std::slice::from_ref(&ctrl_z)), Some(Action::Quit));
+        let (map, _) = Keymap::new(&config.keys, &Default::default());
+        assert_eq!(map.exact(std::slice::from_ref(&ctrl_z)), Some(Bound::Action(Action::Quit)));
         assert_eq!(map.edit(&ctrl_z), Some(Edit::Undo));
     }
 
     fn typed(table: &str, actions: &[Action]) -> Vec<char> {
         let config = crate::config::Config::load_str(table).unwrap();
-        let (map, errors) = Keymap::new(&config.keys);
+        let (map, errors) = Keymap::new(&config.keys, &Default::default());
         assert!(errors.is_empty(), "{errors:?}");
         let mut chars = map.typed_by(actions);
         chars.sort_unstable();
@@ -1009,8 +1048,8 @@ mod tests {
             }
         }
         let map = default_keymap();
-        assert_eq!(map.exact(&[stroke(">")]), Some(Action::RotateCw));
-        assert_eq!(map.exact(&[stroke("<")]), Some(Action::RotateCcw));
+        assert_eq!(map.exact(&[stroke(">")]), Some(Bound::Action(Action::RotateCw)));
+        assert_eq!(map.exact(&[stroke("<")]), Some(Bound::Action(Action::RotateCcw)));
     }
 
     #[test]
@@ -1023,10 +1062,10 @@ mod tests {
             assert_eq!(parse_sequence(text).unwrap(), vec![Stroke::plain(">")], "{text}");
         }
         let table: BTreeMap<Action, Vec<String>> = [(Action::RotateCw, vec![">".to_owned()]), (Action::RotateCcw, vec!["<lt>".to_owned()])].into();
-        let (map, errors) = Keymap::new(&table);
+        let (map, errors) = Keymap::new(&table, &Default::default());
         assert!(errors.is_empty(), "{errors:?}");
-        assert_eq!(map.exact(&[stroke("<")]), Some(Action::RotateCcw));
-        assert_eq!(map.exact(&[stroke(">")]), Some(Action::RotateCw));
+        assert_eq!(map.exact(&[stroke("<")]), Some(Bound::Action(Action::RotateCcw)));
+        assert_eq!(map.exact(&[stroke(">")]), Some(Bound::Action(Action::RotateCw)));
     }
 
     #[test]
@@ -1034,10 +1073,10 @@ mod tests {
         let config = crate::config::Config::load_str("").unwrap();
         assert_eq!(config.keys.get(&Action::ToggleTwoPage), Some(&vec!["D".to_owned()]));
         assert_eq!(config.keys.get(&Action::ToggleCover), Some(&vec!["gD".to_owned()]));
-        let (map, errors) = Keymap::new(&config.keys);
+        let (map, errors) = Keymap::new(&config.keys, &Default::default());
         assert!(errors.is_empty(), "{errors:?}");
-        assert_eq!(map.exact(&[stroke("D")]), Some(Action::ToggleTwoPage));
-        assert_eq!(map.exact(&[stroke("g"), stroke("D")]), Some(Action::ToggleCover));
+        assert_eq!(map.exact(&[stroke("D")]), Some(Bound::Action(Action::ToggleTwoPage)));
+        assert_eq!(map.exact(&[stroke("g"), stroke("D")]), Some(Bound::Action(Action::ToggleCover)));
         let mut seen = std::collections::BTreeMap::new();
         for (action, keys) in config.keys.iter().filter(|(a, _)| a.edit().is_none()) {
             for key in keys {
@@ -1046,5 +1085,138 @@ mod tests {
                 }
             }
         }
+    }
+
+    fn sites(list: &[(&str, &str)]) -> BTreeMap<String, String> {
+        list.iter().map(|(n, k)| ((*n).to_owned(), (*k).to_owned())).collect()
+    }
+
+    fn with_sites(list: &[(&str, &str)]) -> (Keymap, Vec<String>) {
+        Keymap::new(&crate::config::Config::load_str("").unwrap().keys, &sites(list))
+    }
+
+    #[test]
+    fn a_site_sequence_resolves_to_its_web_search() {
+        let (map, errors) = with_sites(&[("scholar", "ss")]);
+        assert!(errors.is_empty(), "{errors:?}");
+        let mut p = Pending::default();
+        assert_eq!(p.feed(&map, stroke("s")), None);
+        assert_eq!(p.display(), "s");
+        assert_eq!(p.feed(&map, stroke("s")), Some((Bound::Web("scholar".to_owned()), None)));
+        assert_eq!(type_bound(&mut p, &map, "3ss"), Some((Bound::Web("scholar".to_owned()), Some(3))));
+        assert_eq!(type_bound(&mut p, &map, "sx"), None);
+        assert_eq!(p.display(), "");
+    }
+
+    #[test]
+    fn a_site_prefix_of_an_action_waits_then_fires() {
+        let (map, errors) = with_sites(&[("g", "g")]);
+        assert!(errors.is_empty(), "{errors:?}");
+        let mut p = Pending::default();
+        assert_eq!(p.feed(&map, stroke("g")), None);
+        let (fired, _) = p.tick(&map, Instant::now() + AMBIGUOUS_WAIT);
+        assert_eq!(fired, Some((Bound::Web("g".to_owned()), None)));
+        assert_eq!(type_keys(&mut p, &map, "gg"), Some((Action::GotoFirst, None)));
+    }
+
+    #[test]
+    fn a_site_cannot_take_an_actions_keys_or_another_sites() {
+        let (map, errors) = with_sites(&[("a", "gg"), ("b", "sb"), ("c", "sb"), ("d", "<nope>")]);
+        assert_eq!(errors.len(), 3, "{errors:?}");
+        let mut p = Pending::default();
+        assert_eq!(type_bound(&mut p, &map, "gg"), Some((Bound::Action(Action::GotoFirst), None)));
+        assert_eq!(type_bound(&mut p, &map, "sb"), Some((Bound::Web("b".to_owned()), None)));
+    }
+
+    fn default_sites() -> (Keymap, Vec<String>) {
+        let config = crate::config::Config::load_str("").unwrap();
+        Keymap::new(&config.keys, &crate::websearch::bindings(&config.web_search))
+    }
+
+    #[test]
+    fn the_default_sites_bind_without_conflicts_and_fire_at_once() {
+        let (map, errors) = default_sites();
+        assert!(errors.is_empty(), "{errors:?}");
+        let mut p = Pending::default();
+        for (keys, name) in [("ss", "scholar"), ("sg", "google"), ("sw", "wikipedia"), ("sa", "arxiv")] {
+            assert_eq!(type_bound(&mut p, &map, keys), Some((Bound::Web(name.to_owned()), None)), "{keys}");
+            assert_eq!(p.display(), "");
+        }
+        assert_eq!(type_bound(&mut p, &map, "12sg"), Some((Bound::Web("google".to_owned()), Some(12))));
+    }
+
+    #[test]
+    fn an_unbound_stroke_after_s_yields_nothing_and_clears_pending() {
+        let (map, _) = default_sites();
+        let mut p = Pending::default();
+        assert_eq!(p.feed(&map, stroke("s")), None);
+        assert_eq!(p.display(), "s");
+        assert_eq!(p.feed(&map, stroke("z")), None);
+        assert_eq!(p.display(), "");
+        let (fired, wait) = p.tick(&map, Instant::now() + AMBIGUOUS_WAIT);
+        assert!(fired.is_none() && wait.is_none());
+        assert_eq!(type_keys(&mut p, &map, "gg"), Some((Action::GotoFirst, None)), "pending is usable again");
+    }
+
+    #[test]
+    fn a_lone_s_never_fires_on_a_tick() {
+        let (map, _) = default_sites();
+        let mut p = Pending::default();
+        assert_eq!(p.feed(&map, stroke("s")), None);
+        let (fired, _) = p.tick(&map, Instant::now() + AMBIGUOUS_WAIT * 10);
+        assert_eq!(fired, None);
+        assert_eq!(p.display(), "s", "still waiting for the next key");
+    }
+
+    #[test]
+    fn a_count_still_works_for_actions_with_the_sites_in() {
+        let (map, _) = default_sites();
+        let mut p = Pending::default();
+        assert_eq!(type_keys(&mut p, &map, "5j"), Some((Action::ScrollDown, Some(5))));
+        assert_eq!(type_keys(&mut p, &map, "10k"), Some((Action::ScrollUp, Some(10))));
+        assert_eq!(type_keys(&mut p, &map, "3gg"), Some((Action::GotoFirst, Some(3))));
+        assert_eq!(type_keys(&mut p, &map, "j"), Some((Action::ScrollDown, None)));
+    }
+
+    #[test]
+    fn a_site_with_a_prefix_waits_with_a_count_and_the_wait_is_reported_before_it_is_over() {
+        let (map, _) = with_sites(&[("g", "g")]);
+        let mut p = Pending::default();
+        assert_eq!(type_bound(&mut p, &map, "4g"), None);
+        let (fired, wait) = p.tick(&map, Instant::now());
+        assert!(fired.is_none() && wait.is_some());
+        let (fired, _) = p.tick(&map, Instant::now() + AMBIGUOUS_WAIT);
+        assert_eq!(fired, Some((Bound::Web("g".to_owned()), Some(4))));
+    }
+
+    #[test]
+    fn a_site_with_no_keys_is_not_in_the_keymap() {
+        let config = crate::config::Config::load_str("[web_search]\nscholar = { keys = \"\" }").unwrap();
+        let (map, errors) = Keymap::new(&config.keys, &crate::websearch::bindings(&config.web_search));
+        assert!(errors.is_empty(), "{errors:?}");
+        assert_eq!(map.sites.len(), 3);
+        assert!(map.sites.iter().all(|(_, name)| name != "scholar"));
+        let mut p = Pending::default();
+        assert_eq!(type_bound(&mut p, &map, "ss"), None);
+        // An empty key string handed to the keymap directly is reported, not bound.
+        let (map, errors) = with_sites(&[("x", "")]);
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert!(map.sites.is_empty());
+    }
+
+    #[test]
+    fn conflicts_with_actions_and_sites_are_warned_by_name() {
+        let (_, errors) = with_sites(&[("a", "gg"), ("b", "sb"), ("c", "sb")]);
+        assert_eq!(errors.len(), 2, "{errors:?}");
+        assert!(errors[0].contains("web_search.a") && errors[0].contains("action"), "{errors:?}");
+        assert!(errors[1].contains("web_search.c") && errors[1].contains("web_search.b"), "{errors:?}");
+    }
+
+    #[test]
+    fn a_site_may_use_a_key_bound_only_to_an_edit_action() {
+        let (map, errors) = with_sites(&[("a", "<C-z>")]);
+        assert!(errors.is_empty(), "{errors:?}");
+        let mut p = Pending::default();
+        assert_eq!(p.feed(&map, stroke("<C-z>")), Some((Bound::Web("a".to_owned()), None)));
     }
 }

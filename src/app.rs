@@ -643,7 +643,7 @@ impl App {
         if locked.is_none() && !blank {
             store::remember_document(&doc.path);
         }
-        let (keymap, key_errors) = Keymap::new(&config.keys);
+        let (keymap, key_errors) = Keymap::new(&config.keys, &crate::websearch::bindings(&config.web_search));
         let watcher = Watcher::start(cc.egui_ctx.clone(), &doc.path);
         cc.egui_ctx.options_mut(|o| o.zoom_with_keyboard = false);
         crate::chrome::apply_font_bytes(&cc.egui_ctx, font);
@@ -983,7 +983,7 @@ impl App {
             (old.page, old.page_text, old.recolor) != (new.page, new.page_text, new.recolor)
         };
         let font_changed = (&self.config.font, self.config.font_size) != (&config.font, config.font_size);
-        let (keymap, errors) = Keymap::new(&config.keys);
+        let (keymap, errors) = Keymap::new(&config.keys, &crate::websearch::bindings(&config.web_search));
         self.keymap = keymap;
         self.pending.clear();
         self.config = config;
@@ -1126,8 +1126,8 @@ impl App {
             ctx.request_repaint_after(SAVE_EVERY);
         }
         let (fired, wait) = self.pending.tick(&self.keymap, Instant::now());
-        if let Some((action, count)) = fired {
-            self.run(ctx, action, count);
+        if let Some((bound, count)) = fired {
+            self.run_bound(ctx, bound, count);
         }
         if let Some(wait) = wait {
             ctx.request_repaint_after(wait);

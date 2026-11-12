@@ -218,7 +218,7 @@ mod tests {
     use crate::view::Anchor;
 
     fn keymap() -> Keymap {
-        Keymap::new(&Config::load_str("").unwrap().keys).0
+        Keymap::new(&Config::load_str("").unwrap().keys, &Default::default()).0
     }
 
     fn list(names: &[&str]) -> Vec<Bookmark> {
