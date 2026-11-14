@@ -238,6 +238,7 @@ fn run(args: Args) -> Result<(), String> {
     let mut viewport = egui::ViewportBuilder::default()
         .with_title(title)
         .with_app_id("yavcpdf")
+        .with_icon(icon())
         .with_decorations(config.view.decorations)
         .with_inner_size([width as f32, height as f32])
         .with_fullscreen(config.view.fullscreen);
@@ -284,9 +285,22 @@ fn main() -> ExitCode {
     }
 }
 
+/// The window icon, shown when switching windows on X11, Windows and macOS. Wayland takes it from
+/// the `Icon` of `yavcpdf.desktop` instead. A PNG that won't decode leaves the default icon.
+fn icon() -> egui::IconData {
+    eframe::icon_data::from_png_bytes(include_bytes!("../assets/yavcpdf.png")).unwrap_or_default()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_icon_decodes() {
+        let icon = icon();
+        assert_eq!((icon.width, icon.height), (256, 256));
+        assert_eq!(icon.rgba.len(), 256 * 256 * 4);
+    }
 
     #[test]
     fn title_is_the_file_name() {

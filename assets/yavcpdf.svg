@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <!-- yavcpdf: a page with a word hinted, in the default dark theme's colours. -->
+  <rect x="8" y="8" width="240" height="240" rx="48" fill="#1d1d1d"/>
+  <rect x="52" y="28" width="152" height="200" fill="#ebdbb2"/>
+  <g stroke="#7c6f64" stroke-width="10" stroke-linecap="round">
+    <line x1="72" y1="56" x2="140" y2="56"/>
+    <line x1="72" y1="96" x2="184" y2="96"/>
+    <line x1="72" y1="124" x2="184" y2="124"/>
+    <line x1="72" y1="152" x2="184" y2="152"/>
+    <line x1="72" y1="180" x2="184" y2="180"/>
+    <line x1="72" y1="208" x2="184" y2="208"/>
+  </g>
+  <line x1="112" y1="152" x2="156" y2="152" stroke="#d65d0e" stroke-width="14" stroke-linecap="round"/>
+  <!-- The label above the word: two 56 x 64 keys drawn at three quarters, square where they meet. -->
+  <g transform="translate(105 89) scale(0.75)">
+    <rect x="0" y="0" width="56" height="64" rx="8" fill="#fabd2f"/>
+    <rect x="56" y="0" width="56" height="64" rx="8" fill="#83a598"/>
+    <rect x="48" y="0" width="8" height="64" fill="#fabd2f"/>
+    <rect x="56" y="0" width="8" height="64" fill="#83a598"/>
+    <g transform="translate(28 32)"><path fill="none" stroke="#1d1d1d" stroke-linecap="round" stroke-linejoin="round" stroke-width="10" d="M-10 -10 L2 2 M10 -10 L-3 10"/></g>
+    <g transform="translate(84 32)"><circle fill="none" stroke="#1d1d1d" stroke-linecap="round" stroke-linejoin="round" stroke-width="10" cx="0" cy="0" r="10"/><path fill="none" stroke="#1d1d1d" stroke-linecap="round" stroke-linejoin="round" stroke-width="10" d="M10 -10 V10"/></g>
+  </g>
+</svg>

@@ -58,7 +58,8 @@ check() {
 package() {
   cd "$pkgname-$pkgver"
   install -Dm755 target/release/yavcpdf "$pkgdir/usr/bin/yavcpdf"
-  install -Dm644 yavcpdf.desktop "$pkgdir/usr/share/applications/yavcpdf.desktop"
+  install -Dm644 assets/yavcpdf.desktop "$pkgdir/usr/share/applications/yavcpdf.desktop"
+  install -Dm644 assets/yavcpdf.svg "$pkgdir/usr/share/icons/hicolor/scalable/apps/yavcpdf.svg"
   install -Dm644 README.md "$pkgdir/usr/share/doc/$pkgname/README.md"
   install -Dm644 src/default_config.toml "$pkgdir/usr/share/doc/$pkgname/config.toml"
   install -Dm644 LICENSE-MIT LICENSE-APACHE NOTICE ATTRIBUTION.md -t "$pkgdir/usr/share/licenses/$pkgname/"

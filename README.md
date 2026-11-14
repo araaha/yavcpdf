@@ -261,7 +261,7 @@ Then install it by hand:
 
 ```sh
 install -Dm755 target/release/yavcpdf ~/.local/bin/yavcpdf
-install -Dm644 yavcpdf.desktop ~/.local/share/applications/yavcpdf.desktop
+install -Dm644 assets/yavcpdf.desktop ~/.local/share/applications/yavcpdf.desktop
 xdg-mime default yavcpdf.desktop application/pdf    # to make it the default
 ```
 </details>

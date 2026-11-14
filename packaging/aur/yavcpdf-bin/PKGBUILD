@@ -38,6 +38,7 @@ package() {
   cd "$_name-v$pkgver-x86_64-linux"
   install -Dm755 yavcpdf "$pkgdir/usr/bin/yavcpdf"
   install -Dm644 yavcpdf.desktop "$pkgdir/usr/share/applications/yavcpdf.desktop"
+  install -Dm644 yavcpdf.svg "$pkgdir/usr/share/icons/hicolor/scalable/apps/yavcpdf.svg"
   install -Dm644 README.md "$pkgdir/usr/share/doc/$_name/README.md"
   install -Dm644 config.toml "$pkgdir/usr/share/doc/$_name/config.toml"
   install -Dm644 LICENSE-MIT LICENSE-APACHE NOTICE ATTRIBUTION.md -t "$pkgdir/usr/share/licenses/$_name/"
