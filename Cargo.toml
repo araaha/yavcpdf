@@ -19,10 +19,10 @@ todo = "warn"
 [dependencies]
 # The four pdfcraft revs below and the pdfcraft revs under [patch.crates-io] must be the same commit.
 # Change them together, with scripts/update-pdfcraft.sh.
-pdfcraft-annot = { git = "https://github.com/storytold/pdfcraft", rev = "a1ea2d376376d7efbffd3670b6202b7ee02deac9" }
-pdfcraft-cos = { git = "https://github.com/storytold/pdfcraft", rev = "a1ea2d376376d7efbffd3670b6202b7ee02deac9" }
-pdfcraft-forms = { git = "https://github.com/storytold/pdfcraft", rev = "a1ea2d376376d7efbffd3670b6202b7ee02deac9" }
-pdfcraft-render = { git = "https://github.com/storytold/pdfcraft", rev = "a1ea2d376376d7efbffd3670b6202b7ee02deac9" }
+pdfcraft-annot = { git = "https://github.com/storytold/pdfcraft", rev = "9475e50cf111fe22a5814d1de2c1d716b049efe1" }
+pdfcraft-cos = { git = "https://github.com/storytold/pdfcraft", rev = "9475e50cf111fe22a5814d1de2c1d716b049efe1" }
+pdfcraft-forms = { git = "https://github.com/storytold/pdfcraft", rev = "9475e50cf111fe22a5814d1de2c1d716b049efe1" }
+pdfcraft-render = { git = "https://github.com/storytold/pdfcraft", rev = "9475e50cf111fe22a5814d1de2c1d716b049efe1" }
 bytemuck = { version = "1", features = ["extern_crate_alloc"] }
 chrono = { version = "0.4.45", default-features = false, features = ["std", "clock"] }
 eframe = { version = "0.37", default-features = false, features = ["default_fonts", "glow", "wayland", "x11", "clipboard"] }
@@ -49,22 +49,22 @@ codegen-units = 1
 # These must match the [patch.crates-io] list in PdfCraft's root Cargo.toml at the rev used above.
 # The pdfcraft revs here move together with the dependencies, through scripts/update-pdfcraft.sh.
 [patch.crates-io]
-hayro-interpret = { git = "https://github.com/storytold/pdfcraft", rev = "a1ea2d376376d7efbffd3670b6202b7ee02deac9" }
-hayro = { git = "https://github.com/storytold/pdfcraft", rev = "a1ea2d376376d7efbffd3670b6202b7ee02deac9" }
-hayro-syntax = { git = "https://github.com/storytold/pdfcraft", rev = "a1ea2d376376d7efbffd3670b6202b7ee02deac9" }
-hayro-cmap = { git = "https://github.com/storytold/pdfcraft", rev = "a1ea2d376376d7efbffd3670b6202b7ee02deac9" }
-hayro-postscript = { git = "https://github.com/storytold/pdfcraft", rev = "a1ea2d376376d7efbffd3670b6202b7ee02deac9" }
-hayro-jbig2 = { git = "https://github.com/storytold/pdfcraft", rev = "a1ea2d376376d7efbffd3670b6202b7ee02deac9" }
-lopdf = { git = "https://github.com/storytold/pdfcraft", rev = "a1ea2d376376d7efbffd3670b6202b7ee02deac9" }
-vello_common = { git = "https://github.com/storytold/pdfcraft", rev = "a1ea2d376376d7efbffd3670b6202b7ee02deac9" }
-vello_cpu = { git = "https://github.com/storytold/pdfcraft", rev = "a1ea2d376376d7efbffd3670b6202b7ee02deac9" }
-ecolor = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
-emath = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
-epaint = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
-epaint_default_fonts = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
-egui = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
-egui-winit = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
-egui-wgpu = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
-egui_glow = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
-eframe = { git = "https://github.com/storytold/egui.git", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
+hayro-interpret = { git = "https://github.com/storytold/pdfcraft", rev = "9475e50cf111fe22a5814d1de2c1d716b049efe1" }
+hayro = { git = "https://github.com/storytold/pdfcraft", rev = "9475e50cf111fe22a5814d1de2c1d716b049efe1" }
+hayro-syntax = { git = "https://github.com/storytold/pdfcraft", rev = "9475e50cf111fe22a5814d1de2c1d716b049efe1" }
+hayro-cmap = { git = "https://github.com/storytold/pdfcraft", rev = "9475e50cf111fe22a5814d1de2c1d716b049efe1" }
+hayro-postscript = { git = "https://github.com/storytold/pdfcraft", rev = "9475e50cf111fe22a5814d1de2c1d716b049efe1" }
+hayro-jbig2 = { git = "https://github.com/storytold/pdfcraft", rev = "9475e50cf111fe22a5814d1de2c1d716b049efe1" }
+lopdf = { git = "https://github.com/storytold/pdfcraft", rev = "9475e50cf111fe22a5814d1de2c1d716b049efe1" }
+vello_common = { git = "https://github.com/storytold/pdfcraft", rev = "9475e50cf111fe22a5814d1de2c1d716b049efe1" }
+vello_cpu = { git = "https://github.com/storytold/pdfcraft", rev = "9475e50cf111fe22a5814d1de2c1d716b049efe1" }
+ecolor = { git = "https://github.com/storytold/egui.git", rev = "725a39fca940f77149ffbb9c58eef405a16997bc" }
+emath = { git = "https://github.com/storytold/egui.git", rev = "725a39fca940f77149ffbb9c58eef405a16997bc" }
+epaint = { git = "https://github.com/storytold/egui.git", rev = "725a39fca940f77149ffbb9c58eef405a16997bc" }
+epaint_default_fonts = { git = "https://github.com/storytold/egui.git", rev = "725a39fca940f77149ffbb9c58eef405a16997bc" }
+egui = { git = "https://github.com/storytold/egui.git", rev = "725a39fca940f77149ffbb9c58eef405a16997bc" }
+egui-winit = { git = "https://github.com/storytold/egui.git", rev = "725a39fca940f77149ffbb9c58eef405a16997bc" }
+egui-wgpu = { git = "https://github.com/storytold/egui.git", rev = "725a39fca940f77149ffbb9c58eef405a16997bc" }
+egui_glow = { git = "https://github.com/storytold/egui.git", rev = "725a39fca940f77149ffbb9c58eef405a16997bc" }
+eframe = { git = "https://github.com/storytold/egui.git", rev = "725a39fca940f77149ffbb9c58eef405a16997bc" }
 winit = { git = "https://github.com/storytold/winit.git", rev = "a517b3846ee8457d84ee4975110bfda6797c44dc" }

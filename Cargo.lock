@@ -669,7 +669,7 @@ dependencies = [
 [[package]]
 name = "ecolor"
 version = "0.37.0"
-source = "git+https://github.com/storytold/egui.git?rev=6d518fc799681571963842f95b55a6b68431b15a#6d518fc799681571963842f95b55a6b68431b15a"
+source = "git+https://github.com/storytold/egui.git?rev=725a39fca940f77149ffbb9c58eef405a16997bc#725a39fca940f77149ffbb9c58eef405a16997bc"
 dependencies = [
  "bytemuck",
  "emath",
@@ -678,7 +678,7 @@ dependencies = [
 [[package]]
 name = "eframe"
 version = "0.37.0"
-source = "git+https://github.com/storytold/egui.git?rev=6d518fc799681571963842f95b55a6b68431b15a#6d518fc799681571963842f95b55a6b68431b15a"
+source = "git+https://github.com/storytold/egui.git?rev=725a39fca940f77149ffbb9c58eef405a16997bc#725a39fca940f77149ffbb9c58eef405a16997bc"
 dependencies = [
  "ahash",
  "bytemuck",
@@ -712,7 +712,7 @@ dependencies = [
 [[package]]
 name = "egui"
 version = "0.37.0"
-source = "git+https://github.com/storytold/egui.git?rev=6d518fc799681571963842f95b55a6b68431b15a#6d518fc799681571963842f95b55a6b68431b15a"
+source = "git+https://github.com/storytold/egui.git?rev=725a39fca940f77149ffbb9c58eef405a16997bc#725a39fca940f77149ffbb9c58eef405a16997bc"
 dependencies = [
  "accesskit",
  "ahash",
@@ -731,7 +731,7 @@ dependencies = [
 [[package]]
 name = "egui-wgpu"
 version = "0.37.0"
-source = "git+https://github.com/storytold/egui.git?rev=6d518fc799681571963842f95b55a6b68431b15a#6d518fc799681571963842f95b55a6b68431b15a"
+source = "git+https://github.com/storytold/egui.git?rev=725a39fca940f77149ffbb9c58eef405a16997bc#725a39fca940f77149ffbb9c58eef405a16997bc"
 dependencies = [
  "ahash",
  "bytemuck",
@@ -750,7 +750,7 @@ dependencies = [
 [[package]]
 name = "egui-winit"
 version = "0.37.0"
-source = "git+https://github.com/storytold/egui.git?rev=6d518fc799681571963842f95b55a6b68431b15a#6d518fc799681571963842f95b55a6b68431b15a"
+source = "git+https://github.com/storytold/egui.git?rev=725a39fca940f77149ffbb9c58eef405a16997bc#725a39fca940f77149ffbb9c58eef405a16997bc"
 dependencies = [
  "arboard",
  "block2 0.6.2",
@@ -774,7 +774,7 @@ dependencies = [
 [[package]]
 name = "egui_glow"
 version = "0.37.0"
-source = "git+https://github.com/storytold/egui.git?rev=6d518fc799681571963842f95b55a6b68431b15a#6d518fc799681571963842f95b55a6b68431b15a"
+source = "git+https://github.com/storytold/egui.git?rev=725a39fca940f77149ffbb9c58eef405a16997bc#725a39fca940f77149ffbb9c58eef405a16997bc"
 dependencies = [
  "bytemuck",
  "egui",
@@ -793,7 +793,7 @@ checksum = "0e9c71c2167ca323c882b99918929403426e2373ea17242ff5653e0d5e1058be"
 [[package]]
 name = "emath"
 version = "0.37.0"
-source = "git+https://github.com/storytold/egui.git?rev=6d518fc799681571963842f95b55a6b68431b15a#6d518fc799681571963842f95b55a6b68431b15a"
+source = "git+https://github.com/storytold/egui.git?rev=725a39fca940f77149ffbb9c58eef405a16997bc#725a39fca940f77149ffbb9c58eef405a16997bc"
 dependencies = [
  "bytemuck",
 ]
@@ -815,7 +815,7 @@ dependencies = [
 [[package]]
 name = "epaint"
 version = "0.37.0"
-source = "git+https://github.com/storytold/egui.git?rev=6d518fc799681571963842f95b55a6b68431b15a#6d518fc799681571963842f95b55a6b68431b15a"
+source = "git+https://github.com/storytold/egui.git?rev=725a39fca940f77149ffbb9c58eef405a16997bc#725a39fca940f77149ffbb9c58eef405a16997bc"
 dependencies = [
  "ahash",
  "bytemuck",
@@ -841,7 +841,7 @@ dependencies = [
 [[package]]
 name = "epaint_default_fonts"
 version = "0.37.0"
-source = "git+https://github.com/storytold/egui.git?rev=6d518fc799681571963842f95b55a6b68431b15a#6d518fc799681571963842f95b55a6b68431b15a"
+source = "git+https://github.com/storytold/egui.git?rev=725a39fca940f77149ffbb9c58eef405a16997bc#725a39fca940f77149ffbb9c58eef405a16997bc"
 
 [[package]]
 name = "equivalent"
@@ -1236,7 +1236,7 @@ dependencies = [
 [[package]]
 name = "hayro"
 version = "0.7.1"
-source = "git+https://github.com/storytold/pdfcraft?rev=a1ea2d376376d7efbffd3670b6202b7ee02deac9#a1ea2d376376d7efbffd3670b6202b7ee02deac9"
+source = "git+https://github.com/storytold/pdfcraft?rev=9475e50cf111fe22a5814d1de2c1d716b049efe1#9475e50cf111fe22a5814d1de2c1d716b049efe1"
 dependencies = [
  "bytemuck",
  "hayro-interpret",
@@ -1256,7 +1256,7 @@ checksum = "9f4d0e94ddd48749f06bbe4e5389fb9799a0c45bcaf00495042076ef05e3241a"
 [[package]]
 name = "hayro-cmap"
 version = "0.1.0"
-source = "git+https://github.com/storytold/pdfcraft?rev=a1ea2d376376d7efbffd3670b6202b7ee02deac9#a1ea2d376376d7efbffd3670b6202b7ee02deac9"
+source = "git+https://github.com/storytold/pdfcraft?rev=9475e50cf111fe22a5814d1de2c1d716b049efe1#9475e50cf111fe22a5814d1de2c1d716b049efe1"
 dependencies = [
  "brotli",
  "hayro-postscript",
@@ -1265,7 +1265,7 @@ dependencies = [
 [[package]]
 name = "hayro-interpret"
 version = "0.7.0"
-source = "git+https://github.com/storytold/pdfcraft?rev=a1ea2d376376d7efbffd3670b6202b7ee02deac9#a1ea2d376376d7efbffd3670b6202b7ee02deac9"
+source = "git+https://github.com/storytold/pdfcraft?rev=9475e50cf111fe22a5814d1de2c1d716b049efe1#9475e50cf111fe22a5814d1de2c1d716b049efe1"
 dependencies = [
  "bitflags 2.13.2",
  "hayro-cmap",
@@ -1283,7 +1283,7 @@ dependencies = [
 [[package]]
 name = "hayro-jbig2"
 version = "0.3.0"
-source = "git+https://github.com/storytold/pdfcraft?rev=a1ea2d376376d7efbffd3670b6202b7ee02deac9#a1ea2d376376d7efbffd3670b6202b7ee02deac9"
+source = "git+https://github.com/storytold/pdfcraft?rev=9475e50cf111fe22a5814d1de2c1d716b049efe1#9475e50cf111fe22a5814d1de2c1d716b049efe1"
 dependencies = [
  "fearless_simd",
  "hayro-ccitt",
@@ -1302,12 +1302,12 @@ dependencies = [
 [[package]]
 name = "hayro-postscript"
 version = "0.1.0"
-source = "git+https://github.com/storytold/pdfcraft?rev=a1ea2d376376d7efbffd3670b6202b7ee02deac9#a1ea2d376376d7efbffd3670b6202b7ee02deac9"
+source = "git+https://github.com/storytold/pdfcraft?rev=9475e50cf111fe22a5814d1de2c1d716b049efe1#9475e50cf111fe22a5814d1de2c1d716b049efe1"
 
 [[package]]
 name = "hayro-syntax"
 version = "0.7.2"
-source = "git+https://github.com/storytold/pdfcraft?rev=a1ea2d376376d7efbffd3670b6202b7ee02deac9#a1ea2d376376d7efbffd3670b6202b7ee02deac9"
+source = "git+https://github.com/storytold/pdfcraft?rev=9475e50cf111fe22a5814d1de2c1d716b049efe1#9475e50cf111fe22a5814d1de2c1d716b049efe1"
 dependencies = [
  "flate2",
  "hayro-ccitt",
@@ -1691,7 +1691,7 @@ checksum = "5d15f86d12da44cd8d4ec3c73984537eb7f4cadcb9776a575a0a8a05ca11005c"
 [[package]]
 name = "lopdf"
 version = "0.45.0"
-source = "git+https://github.com/storytold/pdfcraft?rev=a1ea2d376376d7efbffd3670b6202b7ee02deac9#a1ea2d376376d7efbffd3670b6202b7ee02deac9"
+source = "git+https://github.com/storytold/pdfcraft?rev=9475e50cf111fe22a5814d1de2c1d716b049efe1#9475e50cf111fe22a5814d1de2c1d716b049efe1"
 dependencies = [
  "aes",
  "bitflags 2.13.2",
@@ -2227,8 +2227,8 @@ dependencies = [
 
 [[package]]
 name = "pdfcraft-annot"
-version = "0.18.1"
-source = "git+https://github.com/storytold/pdfcraft?rev=a1ea2d376376d7efbffd3670b6202b7ee02deac9#a1ea2d376376d7efbffd3670b6202b7ee02deac9"
+version = "0.21.1"
+source = "git+https://github.com/storytold/pdfcraft?rev=9475e50cf111fe22a5814d1de2c1d716b049efe1#9475e50cf111fe22a5814d1de2c1d716b049efe1"
 dependencies = [
  "pdfcraft-cos",
  "pdfcraft-fonts",
@@ -2239,8 +2239,8 @@ dependencies = [
 
 [[package]]
 name = "pdfcraft-content"
-version = "0.18.1"
-source = "git+https://github.com/storytold/pdfcraft?rev=a1ea2d376376d7efbffd3670b6202b7ee02deac9#a1ea2d376376d7efbffd3670b6202b7ee02deac9"
+version = "0.21.1"
+source = "git+https://github.com/storytold/pdfcraft?rev=9475e50cf111fe22a5814d1de2c1d716b049efe1#9475e50cf111fe22a5814d1de2c1d716b049efe1"
 dependencies = [
  "hayro-syntax",
  "pdfcraft-cos",
@@ -2248,8 +2248,8 @@ dependencies = [
 
 [[package]]
 name = "pdfcraft-cos"
-version = "0.18.1"
-source = "git+https://github.com/storytold/pdfcraft?rev=a1ea2d376376d7efbffd3670b6202b7ee02deac9#a1ea2d376376d7efbffd3670b6202b7ee02deac9"
+version = "0.21.1"
+source = "git+https://github.com/storytold/pdfcraft?rev=9475e50cf111fe22a5814d1de2c1d716b049efe1#9475e50cf111fe22a5814d1de2c1d716b049efe1"
 dependencies = [
  "chrono",
  "js-sys",
@@ -2261,20 +2261,21 @@ dependencies = [
 
 [[package]]
 name = "pdfcraft-crypt"
-version = "0.18.1"
-source = "git+https://github.com/storytold/pdfcraft?rev=a1ea2d376376d7efbffd3670b6202b7ee02deac9#a1ea2d376376d7efbffd3670b6202b7ee02deac9"
+version = "0.21.1"
+source = "git+https://github.com/storytold/pdfcraft?rev=9475e50cf111fe22a5814d1de2c1d716b049efe1#9475e50cf111fe22a5814d1de2c1d716b049efe1"
 dependencies = [
  "aes",
  "md-5",
  "sha2 0.11.1",
  "stringprep",
  "thiserror 2.0.21",
+ "zeroize",
 ]
 
 [[package]]
 name = "pdfcraft-filters"
-version = "0.18.1"
-source = "git+https://github.com/storytold/pdfcraft?rev=a1ea2d376376d7efbffd3670b6202b7ee02deac9#a1ea2d376376d7efbffd3670b6202b7ee02deac9"
+version = "0.21.1"
+source = "git+https://github.com/storytold/pdfcraft?rev=9475e50cf111fe22a5814d1de2c1d716b049efe1#9475e50cf111fe22a5814d1de2c1d716b049efe1"
 dependencies = [
  "fax",
  "flate2",
@@ -2285,8 +2286,8 @@ dependencies = [
 
 [[package]]
 name = "pdfcraft-fonts"
-version = "0.18.1"
-source = "git+https://github.com/storytold/pdfcraft?rev=a1ea2d376376d7efbffd3670b6202b7ee02deac9#a1ea2d376376d7efbffd3670b6202b7ee02deac9"
+version = "0.21.1"
+source = "git+https://github.com/storytold/pdfcraft?rev=9475e50cf111fe22a5814d1de2c1d716b049efe1#9475e50cf111fe22a5814d1de2c1d716b049efe1"
 dependencies = [
  "harfrust",
  "pdfcraft-cos",
@@ -2296,8 +2297,8 @@ dependencies = [
 
 [[package]]
 name = "pdfcraft-forms"
-version = "0.18.1"
-source = "git+https://github.com/storytold/pdfcraft?rev=a1ea2d376376d7efbffd3670b6202b7ee02deac9#a1ea2d376376d7efbffd3670b6202b7ee02deac9"
+version = "0.21.1"
+source = "git+https://github.com/storytold/pdfcraft?rev=9475e50cf111fe22a5814d1de2c1d716b049efe1#9475e50cf111fe22a5814d1de2c1d716b049efe1"
 dependencies = [
  "pdfcraft-content",
  "pdfcraft-cos",
@@ -2308,21 +2309,21 @@ dependencies = [
 
 [[package]]
 name = "pdfcraft-geom"
-version = "0.18.1"
-source = "git+https://github.com/storytold/pdfcraft?rev=a1ea2d376376d7efbffd3670b6202b7ee02deac9#a1ea2d376376d7efbffd3670b6202b7ee02deac9"
+version = "0.21.1"
+source = "git+https://github.com/storytold/pdfcraft?rev=9475e50cf111fe22a5814d1de2c1d716b049efe1#9475e50cf111fe22a5814d1de2c1d716b049efe1"
 
 [[package]]
 name = "pdfcraft-model"
-version = "0.18.1"
-source = "git+https://github.com/storytold/pdfcraft?rev=a1ea2d376376d7efbffd3670b6202b7ee02deac9#a1ea2d376376d7efbffd3670b6202b7ee02deac9"
+version = "0.21.1"
+source = "git+https://github.com/storytold/pdfcraft?rev=9475e50cf111fe22a5814d1de2c1d716b049efe1#9475e50cf111fe22a5814d1de2c1d716b049efe1"
 dependencies = [
  "pdfcraft-cos",
 ]
 
 [[package]]
 name = "pdfcraft-render"
-version = "0.18.1"
-source = "git+https://github.com/storytold/pdfcraft?rev=a1ea2d376376d7efbffd3670b6202b7ee02deac9#a1ea2d376376d7efbffd3670b6202b7ee02deac9"
+version = "0.21.1"
+source = "git+https://github.com/storytold/pdfcraft?rev=9475e50cf111fe22a5814d1de2c1d716b049efe1#9475e50cf111fe22a5814d1de2c1d716b049efe1"
 dependencies = [
  "bytemuck",
  "getrandom 0.4.3",
@@ -3367,7 +3368,7 @@ checksum = "4a06f08a856b009bc7bbaf7d3e79808595d032dd19074c0c2ef26e49e03e6bdc"
 [[package]]
 name = "vello_common"
 version = "0.0.8"
-source = "git+https://github.com/storytold/pdfcraft?rev=a1ea2d376376d7efbffd3670b6202b7ee02deac9#a1ea2d376376d7efbffd3670b6202b7ee02deac9"
+source = "git+https://github.com/storytold/pdfcraft?rev=9475e50cf111fe22a5814d1de2c1d716b049efe1#9475e50cf111fe22a5814d1de2c1d716b049efe1"
 dependencies = [
  "bytemuck",
  "fearless_simd",
@@ -3415,7 +3416,7 @@ dependencies = [
 [[package]]
 name = "vello_cpu"
 version = "0.0.8"
-source = "git+https://github.com/storytold/pdfcraft?rev=a1ea2d376376d7efbffd3670b6202b7ee02deac9#a1ea2d376376d7efbffd3670b6202b7ee02deac9"
+source = "git+https://github.com/storytold/pdfcraft?rev=9475e50cf111fe22a5814d1de2c1d716b049efe1#9475e50cf111fe22a5814d1de2c1d716b049efe1"
 dependencies = [
  "bytemuck",
  "glifo 0.1.1",
@@ -4196,6 +4197,12 @@ dependencies = [
  "syn 3.0.9",
  "synstructure",
 ]
+
+[[package]]
+name = "zeroize"
+version = "1.9.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e13084392c5e4bc371903e2935a5eaeed24905a7511356b883835e18a78f6879"
 
 [[package]]
 name = "zerotrie"
