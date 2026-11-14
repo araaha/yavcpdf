@@ -352,8 +352,7 @@ impl App {
     /// What is written on the page: dark on the paper of a page shown as it is, or the colour the
     /// theme gives text.
     fn ink(&self) -> Color32 {
-        let theme = self.config.active_theme();
-        if theme.recolor { theme.page_text.egui() } else { Color32::BLACK }
+        if self.recolor_on() { self.config.active_theme().page_text.egui() } else { Color32::BLACK }
     }
 
     fn draw_note(&self, painter: &Painter, view: &View, page: usize, at: [f32; 2], color: [u8; 3]) {

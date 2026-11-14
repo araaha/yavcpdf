@@ -340,6 +340,7 @@ choose a colour instead, so counts such as `42G` don't work then.
 | <kbd>g</kbd> <kbd>l</kbd> / <kbd>g</kbd> <kbd>i</kbd> / <kbd>Ctrl</kbd>+<kbd>S</kbd> / <kbd>Alt</kbd>+<kbd>F</kbd> | Tint on links / form fields / status line / fullscreen |
 | <kbd>></kbd> / <kbd><</kbd> | Turn the pages a quarter turn clockwise / counter-clockwise (a count turns more); [kept for the document](#what-is-stored-where) |
 | <kbd>D</kbd> / <kbd>g</kbd> <kbd>D</kbd> | Show pages side by side in pairs / with the first page alone on the right, as in a printed book; [kept for the document](#what-is-stored-where). Page keys, `:N` and the fits then work by the row |
+| (unbound) | `toggle_recolor`: recolour the pages in the theme's colours or show them as they are, over the theme's `recolor` until the next toggle and across theme switches; not saved. Also `:recolor [on\|off]` |
 | <kbd>F5</kbd> | [Presentation mode](#presentation-mode) |
 | <kbd>Ctrl</kbd>+<kbd>T</kbd> | Open a file with the desktop's file chooser |
 | <kbd>R</kbd> / <kbd>:</kbd> / <kbd>q</kbd>, <kbd>Z</kbd> <kbd>Q</kbd>, <kbd>Z</kbd> <kbd>Z</kbd>, <kbd>Ctrl</kbd>+<kbd>W</kbd> | Reload / command line / quit |
@@ -606,6 +607,7 @@ is no way to protect it in place.
 | `:reload` | Reload the document |
 | `:rotate [90\|180\|270\|0\|cw\|ccw]` | Turn all the pages clockwise to that angle, or a quarter turn; with no argument, clockwise. Rotation is a setting of the view, kept per document: the PDF's own `/Rotate` is never changed, not even by `:export` |
 | `:twopage [on\|off]` | Show pages in pairs (the config's `two_page`), or one at a time; with no argument, switch. Kept per document |
+| `:recolor [on\|off]` | Recolour the pages in the theme's colours, or show them as they are; with no argument, switch. Overrides the theme's `recolor` until the next toggle, and is not saved |
 | `:cover [on\|off]` | With two pages, keep the first page alone on the right (`cover_alone`); with no argument, switch. Kept per document, and set even when not in two-page mode |
 | `:toc` | Open the table of contents |
 | `:hotbar` | Show or hide the hotbar |
@@ -752,6 +754,11 @@ Colours are in the themes, and one key is enough to change one. `dark` and
 through them and `:theme NAME` picks one. `background` is what shows around and
 between the pages, and `page` is the sheet itself. `recolor = false` shows the
 document's own colours.
+
+`toggle_recolor` (or `:recolor [on|off]`) overrides `recolor` at run time. It has
+no key by default: bind it under `[keys]`, e.g. `toggle_recolor = ["gR"]`. The
+choice holds across `T` and `:theme` switches and until the next toggle; it is
+not saved in the PDF or the sidecar, and a new session starts from the theme again.
 
 What is stored where
 --------------------

@@ -11,7 +11,7 @@ use crate::app::{
     App, Bar, BarKind, Edit, Entry, EntryKind, FillItem, Fit, Landing, MarkOp, Mode, PasswordState, PendingPortal, Selection, SignPad, SignPlace,
     TocState, Tool,
 };
-use crate::config::expand_home;
+use crate::config::{Theme, expand_home};
 use crate::doc::dest_spot;
 use crate::field::Field;
 use crate::form::Report;
@@ -195,6 +195,7 @@ impl App {
             Action::RotateCcw => self.rotate_by(-90 * i64::from(times)),
             Action::ToggleTwoPage => self.set_two_page(!self.two_page_on()),
             Action::ToggleCover => self.set_cover(!self.cover_on()),
+            Action::ToggleRecolor => self.set_recolor(!self.recolor_on()),
             _ => return false,
         }
         true
@@ -333,15 +334,29 @@ impl App {
 
     /// `:twopage` and `:cover`: `on`, `off`, or with no argument a switch.
     fn command_flag(&mut self, argument: &str, current: bool, name: &str) -> Option<bool> {
-        match argument {
-            "" => Some(!current),
-            "on" => Some(true),
-            "off" => Some(false),
-            _ => {
-                self.say(format!("usage: :{name} [on|off]"));
-                None
-            }
+        let flag = parse_flag(argument, current);
+        if flag.is_none() {
+            self.say(format!("usage: :{name} [on|off]"));
         }
+        flag
+    }
+
+    /// Whether pages are recoloured: the choice made with `toggle_recolor`, else the theme's.
+    pub fn recolor_on(&self) -> bool {
+        effective_recolor(self.recolor, self.config.active_theme().recolor)
+    }
+
+    /// The active theme as the pages are rendered in it.
+    pub fn render_theme(&self) -> Theme {
+        Theme { recolor: self.recolor_on(), ..self.config.active_theme().clone() }
+    }
+
+    /// Recolours the pages or not, whatever the theme says, until the next toggle.
+    fn set_recolor(&mut self, on: bool) {
+        self.recolor = Some(on);
+        self.doc.apply_theme(&self.render_theme());
+        self.reset_rendering();
+        self.say(if on { "recolor on" } else { "recolor off" });
     }
 
     fn set_fit(&mut self, fit: Fit) {
@@ -1199,7 +1214,7 @@ impl App {
 
     fn set_theme(&mut self, name: &str) {
         self.config.theme = name.to_owned();
-        self.doc.apply_theme(self.config.active_theme());
+        self.doc.apply_theme(&self.render_theme());
         self.reset_rendering();
     }
 
@@ -1453,6 +1468,11 @@ impl App {
                     self.set_two_page(on);
                 }
             }
+            "recolor" => {
+                if let Some(on) = self.command_flag(argument, self.recolor_on(), "recolor") {
+                    self.set_recolor(on);
+                }
+            }
             "cover" => {
                 if let Some(alone) = self.command_flag(argument, self.cover_on(), "cover") {
                     self.set_cover(alone);
@@ -1650,9 +1670,24 @@ fn turn_anchors(layout: &Layout, from: u16, to: u16, jumps: &mut [Anchor], side:
     }
 }
 
+/// `on`, `off`, or with no argument the opposite of `current`; anything else is `None`.
+fn parse_flag(argument: &str, current: bool) -> Option<bool> {
+    match argument {
+        "" => Some(!current),
+        "on" => Some(true),
+        "off" => Some(false),
+        _ => None,
+    }
+}
+
+/// Whether pages are recoloured: the override if there is one, else the theme's setting.
+pub fn effective_recolor(over: Option<bool>, theme: bool) -> bool {
+    over.unwrap_or(theme)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{PendingPortal, Portal, count_argument, edits_document, turn_anchors, view_top};
+    use super::{PendingPortal, Portal, count_argument, edits_document, effective_recolor, parse_flag, turn_anchors, view_top};
     use crate::keymap::Action;
     use crate::view::{Anchor, Layout, View};
     use egui::{Rect, pos2, vec2};
@@ -1761,6 +1796,50 @@ mod tests {
         }
         for view in [ZoomIn, ZoomOut, ScrollDown, NextPage, Quit, Open, Command, SearchForward, ToggleToc, ToggleFullscreen, Cancel] {
             assert!(!edits_document(view), "{}", view.name());
+        }
+    }
+
+    #[test]
+    fn the_recolor_override_beats_the_theme() {
+        assert!(effective_recolor(None, true) && !effective_recolor(None, false));
+        assert!(!effective_recolor(Some(false), true) && effective_recolor(Some(true), false));
+        // A toggle flips what is in effect, and sticks whatever the theme says afterwards.
+        let on = parse_flag("", effective_recolor(None, true)).unwrap();
+        assert!(!on);
+        assert!(!effective_recolor(Some(on), true) && !effective_recolor(Some(on), false));
+    }
+
+    #[test]
+    fn a_flag_is_on_off_or_a_switch() {
+        assert_eq!(parse_flag("on", true), Some(true));
+        assert_eq!(parse_flag("off", false), Some(false));
+        assert_eq!(parse_flag("", true), Some(false));
+        assert_eq!(parse_flag("", false), Some(true));
+        assert_eq!(parse_flag("maybe", true), None);
+    }
+
+    #[test]
+    fn a_flag_ignores_the_current_state_for_on_off_and_rejects_near_misses() {
+        assert_eq!(parse_flag("on", false), Some(true));
+        assert_eq!(parse_flag("off", true), Some(false));
+        for bad in ["ON", "Off", " on", "on ", "1", "true", "toggle"] {
+            assert_eq!(parse_flag(bad, true), None, "{bad:?}");
+            assert_eq!(parse_flag(bad, false), None, "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn repeated_recolor_toggles_alternate_and_an_explicit_override_survives_theme_changes() {
+        let mut over = None;
+        let mut seen = vec![];
+        for _ in 0..3 {
+            let on = parse_flag("", effective_recolor(over, false)).unwrap();
+            over = Some(on);
+            seen.push(effective_recolor(over, false));
+        }
+        assert_eq!(seen, [true, false, true]);
+        for theme in [true, false] {
+            assert!(effective_recolor(Some(true), theme) && !effective_recolor(Some(false), theme));
         }
     }
 

@@ -141,6 +141,7 @@ rotate_cw = [">"]            # turn the pages clockwise, kept for the document
 rotate_ccw = ["<"]
 toggle_two_page = ["D"]      # pages side by side in pairs, kept for the document
 toggle_cover = ["gD"]        # with two pages, the first one alone on the right, kept for the document
+# toggle_recolor = ["gR"]    # recolour the pages or show them as they are, over the theme until the next toggle; unbound by default
 search_forward = ["/"]
 search_backward = ["?"]
 search_next = ["n"]

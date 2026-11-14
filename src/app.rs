@@ -488,6 +488,8 @@ impl HotbarState {
 
 pub struct App {
     pub config: Config,
+    /// `toggle_recolor`'s choice, which holds across themes until the next toggle. Not saved.
+    pub recolor: Option<bool>,
     pub keymap: Keymap,
     pub pending: Pending,
     pub doc: Doc,
@@ -655,6 +657,7 @@ impl App {
             fill_size: config.hotbar.fill_size,
             links_shown: config.view.highlight_links,
             fields_shown: config.view.highlight_fields,
+            recolor: None,
             file_theme: config.theme.clone(),
             keymap,
             pending: Pending::default(),
@@ -805,7 +808,7 @@ impl App {
     pub fn open(&mut self, ctx: &egui::Context, path: &Path) -> Result<(), String> {
         let same_file = path == self.doc.path && !self.locked;
         let password = if same_file { self.doc.password().map(str::to_owned) } else { None };
-        match Doc::open(path, password.as_deref(), self.config.active_theme(), self.config.view.page_gap) {
+        match Doc::open(path, password.as_deref(), &self.render_theme(), self.config.view.page_gap) {
             Ok(doc) => self.install(ctx, doc, same_file),
             Err(OpenFailure::NeedsPassword) => self.ask_password(path, None),
             Err(OpenFailure::WrongPassword) => self.ask_password(path, Some("wrong password")),
@@ -832,7 +835,7 @@ impl App {
         }
         let (path, password) = (state.path.clone(), state.field.text.clone());
         let same_file = path == self.doc.path && !self.locked;
-        let notice = match Doc::open(&path, Some(&password), self.config.active_theme(), self.config.view.page_gap) {
+        let notice = match Doc::open(&path, Some(&password), &self.render_theme(), self.config.view.page_gap) {
             Ok(doc) => return self.install(ctx, doc, same_file),
             Err(OpenFailure::Other(e)) => e,
             Err(_) => "wrong password".to_owned(),
@@ -980,7 +983,8 @@ impl App {
         }
         let pages_changed = {
             let (old, new) = (self.config.active_theme(), config.active_theme());
-            (old.page, old.page_text, old.recolor) != (new.page, new.page_text, new.recolor)
+            let recolor = |theme: &crate::config::Theme| crate::actions::effective_recolor(self.recolor, theme.recolor);
+            (old.page, old.page_text, recolor(old)) != (new.page, new.page_text, recolor(new))
         };
         let font_changed = (&self.config.font, self.config.font_size) != (&config.font, config.font_size);
         let (keymap, errors) = Keymap::new(&config.keys, &crate::websearch::bindings(&config.web_search));
@@ -994,7 +998,7 @@ impl App {
             crate::chrome::apply_font(ctx, &self.config);
         }
         if pages_changed {
-            self.doc.apply_theme(self.config.active_theme());
+            self.doc.apply_theme(&self.render_theme());
             self.reset_rendering();
         }
         self.color = self.color.min(self.config.hotbar.colors.len() - 1);

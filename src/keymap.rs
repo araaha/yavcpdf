@@ -37,6 +37,7 @@ pub enum Action {
     RotateCcw,
     ToggleTwoPage,
     ToggleCover,
+    ToggleRecolor,
     SearchForward,
     SearchBackward,
     SearchNext,
@@ -110,7 +111,7 @@ pub enum Action {
 
 impl Action {
     /// Every action, in declaration order. `the_list_of_actions_is_complete` keeps it whole.
-    pub const ALL: [Self; 93] = [
+    pub const ALL: [Self; 94] = [
         Self::Cancel,
         Self::ScrollDown,
         Self::ScrollUp,
@@ -135,6 +136,7 @@ impl Action {
         Self::RotateCcw,
         Self::ToggleTwoPage,
         Self::ToggleCover,
+        Self::ToggleRecolor,
         Self::SearchForward,
         Self::SearchBackward,
         Self::SearchNext,
@@ -234,6 +236,7 @@ impl Action {
             Self::RotateCcw => "rotate_ccw",
             Self::ToggleTwoPage => "toggle_two_page",
             Self::ToggleCover => "toggle_cover",
+            Self::ToggleRecolor => "toggle_recolor",
             Self::SearchForward => "search_forward",
             Self::SearchBackward => "search_backward",
             Self::SearchNext => "search_next",
@@ -912,6 +915,9 @@ mod tests {
         assert_ne!(Stroke::from_key(egui::Key::I, ctrl).unwrap().key, "tab");
     }
 
+    /// The actions that ship without a key: they are there to bind, or to run from the `:` menu.
+    const UNBOUND_BY_DEFAULT: [Action; 1] = [Action::ToggleRecolor];
+
     #[test]
     fn every_action_name_reads_back_as_the_same_action() {
         use serde::de::IntoDeserializer;
@@ -931,13 +937,14 @@ mod tests {
         assert_eq!(names.len(), Action::ALL.len());
     }
 
-    /// Every action has a default binding, so a variant missing from `ALL` is missing here too.
+    /// Every action has a default binding but those in `UNBOUND_BY_DEFAULT`, so a variant missing
+    /// from `ALL` is missing here too.
     /// (The match in `name` does not compile without every variant, which names them all.)
     #[test]
     fn the_list_of_actions_is_complete() {
         let config = crate::config::Config::load_str("").unwrap();
         let bound: Vec<Action> = config.keys.keys().copied().collect();
-        let mut listed = Action::ALL.to_vec();
+        let mut listed: Vec<Action> = Action::ALL.into_iter().filter(|a| !UNBOUND_BY_DEFAULT.contains(a)).collect();
         listed.sort_unstable();
         assert_eq!(bound, listed);
     }

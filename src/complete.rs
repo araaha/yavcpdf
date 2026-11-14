@@ -60,6 +60,7 @@ pub const COMMANDS: &[Command] = &[
     plain("reload"),
     takes("rotate", Of::Name, "[90|180|270|0|cw|ccw]", false),
     takes("twopage", Of::Name, "[on|off]", false),
+    takes("recolor", Of::Name, "[on|off]", false),
     takes("cover", Of::Name, "[on|off]", false),
     plain("toc"),
     plain("recent"),

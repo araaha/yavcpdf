@@ -989,7 +989,7 @@ impl App {
             None if Arc::ptr_eq(&self.doc.render_bytes, &self.doc.bytes) => return,
             None => self.doc.bytes.clone(),
         };
-        self.doc.show(bytes, self.config.active_theme());
+        self.doc.show(bytes, &self.render_theme());
         // What shows stays until the new pages are in.
         self.cache.retire();
         self.forget_queue();
