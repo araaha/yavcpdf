@@ -11,6 +11,78 @@ pub fn label_size(zoom: f32, config: &HintConfig) -> f32 {
     if config.scale { (max * zoom).clamp(min, max) } else { max }
 }
 
+/// The padding in points on each side of a key in its cell.
+pub const PAD: f32 = 1.0;
+
+/// Where the keys of a label sit: every key is centred in a cell of the same width.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct CellLayout {
+    pub cell_width: f32,
+    pub box_width: f32,
+}
+
+impl CellLayout {
+    /// The cells of a label of `keys` characters, each `glyph_width` wide.
+    pub fn new(keys: usize, glyph_width: f32, pad: f32) -> Self {
+        let cell_width = glyph_width + 2.0 * pad;
+        CellLayout { cell_width, box_width: cell_width * keys as f32 }
+    }
+
+    /// The offset from the left of the box to the cell of key `i`.
+    pub fn cell_x(&self, i: usize) -> f32 {
+        self.cell_width * i as f32
+    }
+
+    /// The offset from the left of the box to the glyph of key `i`, centred in its cell.
+    pub fn glyph_x(&self, i: usize, pad: f32) -> f32 {
+        self.cell_x(i) + pad
+    }
+}
+
+/// The size of the label font for each point of its size: how wide a character is and how tall a row.
+#[derive(Clone, Copy, Debug)]
+pub struct Metrics {
+    pub char_width: f32,
+    pub row_height: f32,
+}
+
+/// The font size of every label, given the targets on screen (`[left, top, right, bottom]`, in reading order) and the longest
+/// label. It starts from `label_size` and shrinks it where the words are too close for it, but not below `min_font_size` (or
+/// `font_size` if that is smaller). The result is multiplied by `scale_factor`, then floored at `min_font_size`, which is the
+/// smallest size ever shown. Before the factor, a label should be no taller than its word and no wider than the room to the
+/// next word on the line. The few tightest words, like "a" or "I", would make every label tiny, so the fit is the size that
+/// suits all but the tightest tenth.
+pub fn fitted_size(zoom: f32, config: &HintConfig, rects: &[[f32; 4]], label_len: usize, metrics: Metrics) -> f32 {
+    (fit_size(zoom, config, rects, label_len, metrics) * config.scale_factor).max(config.min_font_size)
+}
+
+fn fit_size(zoom: f32, config: &HintConfig, rects: &[[f32; 4]], label_len: usize, metrics: Metrics) -> f32 {
+    let size = label_size(zoom, config);
+    if !config.scale || rects.is_empty() || label_len == 0 {
+        return size;
+    }
+    let min = config.min_font_size.min(config.font_size);
+    // A label box is `label_len` cells, each a character plus 2 * PAD, and stays 1 clear of the next one.
+    let widths = rects
+        .windows(2)
+        .filter(|w| same_line(w[0], w[1]) && w[1][0] > w[0][0])
+        .map(|w| ((w[1][0] - w[0][0] - 1.0) / label_len as f32 - 2.0 * PAD) / metrics.char_width);
+    let heights = rects.iter().map(|r| (r[3] - r[1]) / metrics.row_height);
+    [low_tenth(widths.collect()), low_tenth(heights.collect())].into_iter().flatten().fold(size, f32::min).max(min)
+}
+
+fn same_line(a: [f32; 4], b: [f32; 4]) -> bool {
+    let centre = (b[1] + b[3]) / 2.0;
+    a[1] < centre && centre < a[3]
+}
+
+/// The value a tenth of the way up `values`, if there are any.
+fn low_tenth(mut values: Vec<f32>) -> Option<f32> {
+    values.retain(|v| v.is_finite());
+    values.sort_by(f32::total_cmp);
+    values.get((values.len().saturating_sub(1)) / 10).copied()
+}
+
 /// Equal-length labels from `alphabet`, so no label is the start of another. The first labels use
 /// the first letters, which the default alphabet puts on the home row.
 pub fn labels(n: usize, alphabet: &[char]) -> Vec<String> {
@@ -140,10 +212,17 @@ impl HintState {
 pub fn word_targets(text: &PageText, page: usize, area: [f32; 4]) -> Vec<Target> {
     let mut out = Vec::new();
     let mut i = 0;
+    let blank = |g: &pdfcraft_render::TextGlyph| g.text.trim().is_empty();
     while i < text.glyphs.len() {
+        // `word_at` on a blank glyph spans the words on both sides of it, so start on a letter.
+        if blank(&text.glyphs[i]) {
+            i += 1;
+            continue;
+        }
         let Some((first, last)) = text.word_at(i) else { break };
         i = last.max(i) + 1;
-        if text.glyphs[first..=last].iter().all(|g| g.text.trim().is_empty()) {
+        // Separators such as "·" or "|" are not words.
+        if !text.glyphs[first..=last].iter().any(|g| g.text.chars().any(char::is_alphanumeric)) {
             continue;
         }
         let rect = text.glyphs[first..=last].iter().map(|g| g.rect).reduce(union).unwrap_or(text.glyphs[first].rect);
@@ -168,7 +247,143 @@ mod tests {
     use pdfcraft_render::TextGlyph;
 
     fn hint_config(scale: bool) -> HintConfig {
-        HintConfig { alphabet: "ab".to_owned(), font_size: 10.0, scale, min_font_size: 6.0 }
+        HintConfig { alphabet: "ab".to_owned(), font_size: 10.0, scale, min_font_size: 6.0, scale_factor: 1.0 }
+    }
+
+    const METRICS: Metrics = Metrics { char_width: 0.5, row_height: 1.0 };
+
+    /// `n` words on a line from `x`, each `step` apart and `height` tall.
+    fn row(n: usize, x: f32, y: f32, step: f32, height: f32) -> Vec<[f32; 4]> {
+        (0..n).map(|i| x + i as f32 * step).map(|l| [l, y, l + step - 2.0, y + height]).collect()
+    }
+
+    #[test]
+    fn labels_shrink_to_fit_between_words() {
+        // 2-letter labels are 1 point wide per point of size, plus 4 of padding and 1 of gap (a 12 step leaves 11 for 2 cells).
+        let rects = row(20, 0.0, 0.0, 12.0, 100.0);
+        assert_eq!(fitted_size(1.0, &hint_config(true), &rects, 2, METRICS), 7.0);
+        // With room to spare the zoom decides.
+        let rects = row(20, 0.0, 0.0, 100.0, 100.0);
+        assert_eq!(fitted_size(0.8, &hint_config(true), &rects, 2, METRICS), 8.0);
+    }
+
+    #[test]
+    fn the_scale_factor_multiplies_the_final_size() {
+        let tight = row(20, 0.0, 0.0, 12.0, 100.0);
+        for scale in [true, false] {
+            for (factor, rects) in [(1.0, &tight[..]), (2.0, &tight[..]), (0.5, &tight[..]), (2.0, &[][..])] {
+                let base = fitted_size(1.0, &hint_config(scale), rects, 2, METRICS);
+                let config = HintConfig { scale_factor: factor, ..hint_config(scale) };
+                assert_eq!(fitted_size(1.0, &config, rects, 2, METRICS), (base * factor).max(6.0));
+            }
+        }
+        let config = HintConfig { scale_factor: 2.0, ..hint_config(true) };
+        assert_eq!(fitted_size(1.0, &config, &tight, 2, METRICS), 14.0);
+        let config = HintConfig { scale_factor: 0.5, ..hint_config(false) };
+        assert_eq!(fitted_size(1.0, &config, &tight, 2, METRICS), 6.0);
+    }
+
+    #[test]
+    fn labels_are_no_taller_than_their_words() {
+        let rects: Vec<_> = row(5, 0.0, 0.0, 100.0, 7.5).into_iter().chain(row(5, 0.0, 10.0, 100.0, 7.5)).collect();
+        assert_eq!(fitted_size(1.0, &hint_config(true), &rects, 2, METRICS), 7.5);
+    }
+
+    #[test]
+    fn fitting_stops_at_the_minimum_and_is_off_without_scaling() {
+        let rects = row(20, 0.0, 0.0, 4.0, 2.0);
+        assert_eq!(fitted_size(1.0, &hint_config(true), &rects, 2, METRICS), 6.0);
+        assert_eq!(fitted_size(1.0, &hint_config(false), &rects, 2, METRICS), 10.0);
+        assert_eq!(fitted_size(1.0, &hint_config(true), &[], 2, METRICS), 10.0);
+    }
+
+    #[test]
+    fn a_few_tight_words_do_not_shrink_every_label() {
+        let mut rects = row(30, 0.0, 0.0, 100.0, 100.0);
+        // One word right up against the next.
+        rects[3][0] = rects[4][0] - 1.0;
+        assert_eq!(fitted_size(1.0, &hint_config(true), &rects, 2, METRICS), 10.0);
+    }
+
+    #[test]
+    fn the_gap_to_the_next_line_does_not_count_as_room() {
+        // The last word of a line is followed by the first of the next, far below it.
+        let rects: Vec<_> = row(3, 0.0, 0.0, 12.0, 100.0).into_iter().chain(row(3, 0.0, 200.0, 12.0, 100.0)).collect();
+        assert_eq!(fitted_size(1.0, &hint_config(true), &rects, 2, METRICS), 7.0);
+    }
+
+    #[test]
+    fn every_key_is_centred_in_a_cell_of_equal_width() {
+        let l = CellLayout::new(3, 6.0, 1.0);
+        assert_eq!(l, CellLayout { cell_width: 8.0, box_width: 24.0 });
+        assert_eq!([0, 1, 2].map(|i| l.cell_x(i)), [0.0, 8.0, 16.0]);
+        assert_eq!([0, 1, 2].map(|i| l.glyph_x(i, 1.0)), [1.0, 9.0, 17.0]);
+        // Equal space left and right of each glyph.
+        assert_eq!(l.cell_x(1) + l.cell_width - (l.glyph_x(1, 1.0) + 6.0), 1.0);
+        assert_eq!(CellLayout::new(0, 6.0, 1.0).box_width, 0.0);
+    }
+
+    #[test]
+    fn cell_layout_edge_cases() {
+        // One key: the box is one cell and the glyph sits one pad in.
+        let one = CellLayout::new(1, 6.0, 1.0);
+        assert_eq!(one, CellLayout { cell_width: 8.0, box_width: 8.0 });
+        assert_eq!((one.cell_x(0), one.glyph_x(0, 1.0)), (0.0, 1.0));
+        // No padding: cells are exactly the glyph width and glyphs sit at the cell edge.
+        let bare = CellLayout::new(3, 6.0, 0.0);
+        assert_eq!(bare, CellLayout { cell_width: 6.0, box_width: 18.0 });
+        assert_eq!([0, 1, 2].map(|i| bare.glyph_x(i, 0.0)), [0.0, 6.0, 12.0]);
+        // No keys: an empty box, but the cell width is still defined.
+        assert_eq!(CellLayout::new(0, 6.0, 1.0), CellLayout { cell_width: 8.0, box_width: 0.0 });
+        // The last cell ends at the box edge, for any number of keys.
+        for keys in 1..6 {
+            let l = CellLayout::new(keys, 5.5, PAD);
+            assert_eq!(l.cell_x(keys - 1) + l.cell_width, l.box_width);
+        }
+    }
+
+    #[test]
+    fn fitted_size_label_length_edge_cases() {
+        // One key per label has plenty of room in a 12 step: the zoom decides.
+        let tight = row(20, 0.0, 0.0, 12.0, 100.0);
+        assert_eq!(fitted_size(1.0, &hint_config(true), &tight, 1, METRICS), 10.0);
+        // Three keys: (18 / 3 - 2 * PAD) / 0.5 = 8 in a 19 step.
+        let rects = row(20, 0.0, 0.0, 19.0, 100.0);
+        assert_eq!(fitted_size(1.0, &hint_config(true), &rects, 3, METRICS), 8.0);
+        // Longer labels never get a larger size than shorter ones.
+        assert!(fitted_size(1.0, &hint_config(true), &tight, 3, METRICS) <= fitted_size(1.0, &hint_config(true), &tight, 2, METRICS));
+        // Too tight for the minimum: clamped to it, not below.
+        assert_eq!(fitted_size(1.0, &hint_config(true), &tight, 3, METRICS), 6.0);
+        // No keys: no fitting, and no division by zero.
+        assert_eq!(fitted_size(1.0, &hint_config(true), &tight, 0, METRICS), 10.0);
+    }
+
+    #[test]
+    fn a_minimum_above_the_font_size_is_the_floor_with_or_without_fitting() {
+        let roomy = row(20, 0.0, 0.0, 100.0, 100.0);
+        for scale in [true, false] {
+            for rects in [&roomy[..], &[][..]] {
+                let config = HintConfig { min_font_size: 14.0, ..hint_config(scale) };
+                assert_eq!(fitted_size(1.0, &config, rects, 2, METRICS), 14.0);
+                let config = HintConfig { min_font_size: 14.0, scale_factor: 2.0, ..hint_config(scale) };
+                assert_eq!(fitted_size(1.0, &config, rects, 2, METRICS), 20.0);
+            }
+        }
+    }
+
+    #[test]
+    fn the_minimum_is_a_floor_after_the_scale_factor() {
+        // Fitting clamps to the minimum of 6; the factor then enlarges, but never goes below 6.
+        let rects = row(20, 0.0, 0.0, 4.0, 2.0);
+        for (factor, want) in [(0.5, 6.0), (1.0, 6.0), (2.0, 12.0)] {
+            let config = HintConfig { scale_factor: factor, ..hint_config(true) };
+            assert_eq!(fitted_size(1.0, &config, &rects, 2, METRICS), want);
+        }
+        // Zoom below one, scaling on, with the factor on top.
+        let config = HintConfig { scale_factor: 2.0, ..hint_config(true) };
+        assert_eq!(fitted_size(0.8, &config, &[], 2, METRICS), 16.0);
+        let config = HintConfig { scale_factor: 0.5, ..hint_config(true) };
+        assert_eq!(fitted_size(0.8, &config, &[], 2, METRICS), 6.0);
     }
 
     #[test]
@@ -286,5 +501,30 @@ mod tests {
         state.typed = "bb".to_owned();
         assert!(state.chosen().is_none());
         assert!(!state.matches());
+    }
+
+    fn line_page(s: &str) -> PageText {
+        let glyphs: Vec<_> = s.chars().enumerate().map(|(i, c)| glyph(c, i as f32 * 5.0, 0.0)).collect();
+        let n = glyphs.len();
+        PageText { glyphs, line_of: vec![0; n], space_before: vec![false; n], truncated: false }
+    }
+
+    const ALL: [f32; 4] = [-100.0, -100.0, 1000.0, 1000.0];
+
+    #[test]
+    fn a_blank_glyph_does_not_join_the_words_around_it() {
+        let targets = word_targets(&line_page("AB CD"), 0, ALL);
+        let ranges: Vec<_> = targets.iter().map(|t| t.kind).collect();
+        assert_eq!(ranges, vec![TargetKind::Word(0, 1), TargetKind::Word(3, 4)]);
+        assert_eq!(targets[1].rect, [15.0, 0.0, 25.0, 10.0]);
+    }
+
+    #[test]
+    fn separators_and_blanks_are_not_targets() {
+        let targets = word_targets(&line_page("10 \u{b7} AB"), 0, ALL);
+        let ranges: Vec<_> = targets.iter().map(|t| t.kind).collect();
+        assert_eq!(ranges, vec![TargetKind::Word(0, 1), TargetKind::Word(5, 6)]);
+        let targets = word_targets(&line_page("(a) | - b"), 0, ALL);
+        assert_eq!(targets.len(), 2);
     }
 }

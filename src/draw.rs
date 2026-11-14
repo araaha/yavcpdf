@@ -6,7 +6,7 @@ use pdfcraft_render::{RenderRequest, Tile, device_pixels, effective_scale};
 use crate::app::{App, Mode, Tool, ZOOM_SETTLE};
 use crate::cache::TileKey;
 use crate::config::Color;
-use crate::hint::{HintState, Purpose, Target, label_size, next_and_later};
+use crate::hint::{CellLayout, HintState, Metrics, PAD, Purpose, Target, fitted_size, next_and_later};
 use crate::present::{PREFETCH_AHEAD, PREFETCH_BEHIND};
 use crate::store::{Annotation, MarkKind, NOTE_SIDE, Portal, mark_rect};
 use crate::view::{View, rotate_point, tile_side, tile_uv, tiles_crossing, visible_pixels};
@@ -38,14 +38,22 @@ fn translucent(color: [u8; 3], alpha: u8) -> Color32 {
 }
 
 /// Moves a label right, out of the one before it on the same line: a label is often wider than
-/// the short word it stands for.
-fn clear_of(previous: Option<Rect>, label: Rect) -> Rect {
+/// the short word it stands for. It moves no further than keeps it clear of `next`, where the next
+/// word on the line starts, so a line of crowded labels does not drift off its words: there the
+/// labels overlap instead.
+fn clear_of(previous: Option<Rect>, label: Rect, next: Option<f32>) -> Rect {
     match previous {
         Some(p) if p.right() >= label.left() && p.bottom() > label.center().y && p.top() < label.center().y => {
-            label.translate(vec2(p.right() + 1.0 - label.left(), 0.0))
+            let furthest = next.map_or(f32::INFINITY, |n| (n - 1.0 - label.width()).max(label.left()));
+            label.translate(vec2((p.right() + 1.0).min(furthest) - label.left(), 0.0))
         }
         _ => label,
     }
+}
+
+/// Where the word after `rect` starts, if it is on the same line.
+fn next_on_line(rect: Rect, next: Option<&Rect>) -> Option<f32> {
+    next.filter(|n| n.left() > rect.left() && rect.top() < n.center().y && n.center().y < rect.bottom()).map(|n| n.left())
 }
 
 /// Where the pixel box `[x, y, width, height]` of an unrotated raster of `pixels` lands on screen,
@@ -445,23 +453,35 @@ impl App {
         }
     }
 
+    /// The size of every label, fitted to how close together the targets are on screen.
+    fn label_font_size(&self, painter: &Painter, view: &View, shown: &[&Target], rects: &[Rect]) -> f32 {
+        // Measured large, as the size of a character for each point of the font.
+        let probe = painter.layout_no_wrap("m".to_owned(), FontId::monospace(100.0), Color32::WHITE).size() / 100.0;
+        let metrics = Metrics { char_width: probe.x, row_height: probe.y };
+        let longest = shown.iter().map(|t| t.label.chars().count()).max().unwrap_or(0);
+        let rects: Vec<[f32; 4]> = rects.iter().map(|r| [r.left(), r.top(), r.right(), r.bottom()]).collect();
+        fitted_size(view.zoom, &self.config.hints, &rects, longest, metrics)
+    }
+
     fn draw_hints(&self, painter: &Painter, view: &View, state: &HintState) {
         let theme = self.config.active_theme();
-        let font = FontId::monospace(label_size(view.zoom, &self.config.hints));
+        let left = |target: &&Target| target.label.starts_with(state.typed.as_str());
+        let shown: Vec<&Target> = state.targets.iter().filter(left).collect();
+        let rects: Vec<Rect> = shown.iter().map(|t| view.transform(&self.doc.layout, t.page).rect(t.rect)).collect();
+        let font = FontId::monospace(self.label_font_size(painter, view, &shown, &rects));
         if let Some((page, first, last)) = state.start
             && let Some(text) = self.doc.text.get(page).and_then(|t| t.as_ref())
         {
             self.fill_rects(painter, view, page, &text.line_rects(first..last + 1), theme.selection);
         }
-        let left = |target: &&Target| target.label.starts_with(state.typed.as_str());
         // The links still in the running are covered whole, under every label.
         if state.purpose == Purpose::Link {
-            for target in state.targets.iter().filter(left) {
+            for target in &shown {
                 self.fill_rects(painter, view, target.page, &[target.rect], theme.hint_link);
             }
         }
         let mut previous = None;
-        for target in state.targets.iter().filter(left) {
+        for (i, target) in shown.iter().enumerate() {
             // A number typed in full that waits for Enter has nothing left to show but its link.
             let (next, later) = next_and_later(&target.label[state.typed.len()..]);
             if next.is_empty() {
@@ -469,23 +489,23 @@ impl App {
             }
             let (back1, text1) = (theme.hint_key1_background, theme.hint_key1_text);
             let (back2, text2) = (theme.hint_key2_background, theme.hint_key2_text);
-            // Asked of the text: a galley laid out from no text does not count as empty.
-            let last = later.is_empty();
-            let next = painter.layout_no_wrap(next.to_owned(), font.clone(), text1.egui());
-            let later = painter.layout_no_wrap(later.to_owned(), font.clone(), text2.egui());
+            let keys = next.chars().count() + later.chars().count();
+            let glyph_width = painter.layout_no_wrap("m".to_owned(), font.clone(), text1.egui()).size().x;
+            let cells = CellLayout::new(keys, glyph_width, PAD);
+            let height = painter.layout_no_wrap("m".to_owned(), font.clone(), text1.egui()).size().y;
             // The label stays upright at the corner of the target that is top left on screen.
-            let at = view.transform(&self.doc.layout, target.page).rect(target.rect).min;
-            let size = vec2(next.size().x + if last { 0.0 } else { later.size().x } + 2.0, next.size().y);
-            let box_rect = clear_of(previous, Rect::from_min_size(at, size));
-            // Each key sits on its own background, which meet where the next key ends.
-            let meet = if last { box_rect.right() } else { box_rect.left() + 1.0 + next.size().x };
+            let box_rect =
+                clear_of(previous, Rect::from_min_size(rects[i].min, vec2(cells.box_width, height)), next_on_line(rects[i], rects.get(i + 1)));
+            // The next key is the first cell; the keys after it share the second background.
+            let meet = box_rect.left() + cells.cell_x(next.chars().count());
             let (first, rest) = box_rect.split_left_right_at_x(meet);
             painter.rect_filled(first, 0.0, back1.egui());
-            if !last {
-                painter.rect_filled(rest, 0.0, back2.egui());
-                painter.galley(pos2(meet, box_rect.top()), later, text2.egui());
+            painter.rect_filled(rest, 0.0, back2.egui());
+            let keys = next.chars().map(|c| (c, text1)).chain(later.chars().map(|c| (c, text2)));
+            for (k, (key, color)) in keys.enumerate() {
+                let galley = painter.layout_no_wrap(key.to_string(), font.clone(), color.egui());
+                painter.galley(box_rect.min + vec2(cells.glyph_x(k, PAD), 0.0), galley, color.egui());
             }
-            painter.galley(box_rect.min + vec2(1.0, 0.0), next, text1.egui());
             previous = Some(box_rect);
         }
     }
@@ -566,7 +586,7 @@ impl App {
 
 #[cfg(test)]
 mod tests {
-    use super::{clamp_into, clear_of};
+    use super::{clamp_into, clear_of, next_on_line};
     use egui::{Rect, pos2, vec2};
 
     #[test]
@@ -592,20 +612,39 @@ mod tests {
 
     #[test]
     fn a_label_moves_out_of_the_one_before_it() {
-        let moved = clear_of(Some(label(100.0, 50.0)), label(105.0, 50.0));
+        let moved = clear_of(Some(label(100.0, 50.0)), label(105.0, 50.0), None);
         assert_eq!(moved.left(), 115.0);
         assert_eq!(moved.width(), 14.0);
     }
 
     #[test]
     fn labels_with_room_stay_where_they_are() {
-        assert_eq!(clear_of(None, label(5.0, 5.0)), label(5.0, 5.0));
-        assert_eq!(clear_of(Some(label(0.0, 50.0)), label(40.0, 50.0)), label(40.0, 50.0));
+        assert_eq!(clear_of(None, label(5.0, 5.0), None), label(5.0, 5.0));
+        assert_eq!(clear_of(Some(label(0.0, 50.0)), label(40.0, 50.0), None), label(40.0, 50.0));
+    }
+
+    #[test]
+    fn a_crowded_label_moves_no_further_than_the_next_word() {
+        // The previous label ends at 114 and this word starts at 105, but the next word is at 120.
+        let moved = clear_of(Some(label(100.0, 50.0)), label(105.0, 50.0), Some(120.0));
+        assert_eq!(moved.left(), 105.0);
+        let moved = clear_of(Some(label(100.0, 50.0)), label(105.0, 50.0), Some(140.0));
+        assert_eq!(moved.left(), 115.0);
+        let moved = clear_of(Some(label(100.0, 50.0)), label(105.0, 50.0), Some(125.0));
+        assert_eq!(moved.left(), 110.0);
+    }
+
+    #[test]
+    fn only_a_word_further_along_the_same_line_is_next() {
+        let word = |x: f32, y: f32| Rect::from_min_size(pos2(x, y), vec2(10.0, 10.0));
+        assert_eq!(next_on_line(word(0.0, 0.0), Some(&word(20.0, 1.0))), Some(20.0));
+        assert_eq!(next_on_line(word(50.0, 0.0), Some(&word(0.0, 12.0))), None);
+        assert_eq!(next_on_line(word(0.0, 0.0), None), None);
     }
 
     #[test]
     fn the_next_line_starts_again_at_its_word() {
-        assert_eq!(clear_of(Some(label(300.0, 50.0)), label(20.0, 70.0)), label(20.0, 70.0));
+        assert_eq!(clear_of(Some(label(300.0, 50.0)), label(20.0, 70.0), Some(60.0)), label(20.0, 70.0));
     }
     #[test]
     fn a_tile_lands_where_the_turned_page_puts_it() {

@@ -127,8 +127,10 @@ pub struct HintConfig {
     pub font_size: f32,
     /// Shrink labels as the view zooms out.
     pub scale: bool,
-    /// The smallest a label gets when scaling, or `font_size` if that is smaller.
+    /// The smallest label size shown; a hard floor applied after `scale_factor`.
     pub min_font_size: f32,
+    /// Multiplier for the label size, applied before the `min_font_size` floor.
+    pub scale_factor: f32,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
@@ -252,7 +254,7 @@ impl Config {
 
     fn validate_hint_sizes(&self) -> Result<(), String> {
         let hints = &self.hints;
-        for (name, size) in [("font_size", hints.font_size), ("min_font_size", hints.min_font_size)] {
+        for (name, size) in [("font_size", hints.font_size), ("min_font_size", hints.min_font_size), ("scale_factor", hints.scale_factor)] {
             if !size.is_finite() || size <= 0.0 {
                 return Err(format!("hints.{name} = {size} is out of range: it must be above 0"));
             }
@@ -490,7 +492,10 @@ mod tests {
     #[test]
     fn hint_sizes_have_defaults_and_must_be_positive() {
         let hints = Config::load_str("").unwrap().hints;
-        assert_eq!((hints.font_size, hints.scale, hints.min_font_size), (10.0, true, 6.0));
+        assert_eq!((hints.font_size, hints.scale, hints.min_font_size), (10.0, true, 4.0));
+        assert_eq!(hints.scale_factor, 1.0);
+        assert!(Config::load_str("[hints]\nscale_factor = 2.5").is_ok());
+        assert!(Config::load_str("[hints]\nscale_factor = 0").is_err());
         assert!(Config::load_str("[hints]\nscale = false").is_ok());
         assert!(Config::load_str("[hints]\nfont_size = 0").is_err());
         assert!(Config::load_str("[hints]\nfont_size = -3.0").is_err());
@@ -510,9 +515,15 @@ mod tests {
             "[hints]\nmin_font_size = -inf",
             "[hints]\nmin_font_size = nan",
             "[hints]\nmin_font_size = -1.0",
+            "[hints]\nscale_factor = -1.0",
+            "[hints]\nscale_factor = inf",
+            "[hints]\nscale_factor = nan",
         ] {
             let error = Config::load_str(text).expect_err(text);
             assert!(error.contains("hints."), "{text}: {error}");
+            if text.contains("scale_factor") {
+                assert!(error.contains("hints.scale_factor"), "{text}: {error}");
+            }
         }
         assert!(Config::load_str("[hints]\nfont_size = inf\nscale = false").is_err());
     }

@@ -394,12 +394,21 @@ also a 12).
 A label is drawn in two parts, each with its own colours in the theme: the key
 to press next in `hint_key1_background` and `hint_key1_text`, the keys after it
 in `hint_key2_background` and `hint_key2_text`. As you type, the next key takes
-the first pair in turn.
+the first pair in turn. Every key sits centred in a cell of the same width.
 
-Labels shrink as you zoom out. `hints.font_size` is the size in points at 100%
-zoom and the largest a label gets, `hints.scale = false` keeps every label at
-that size, and `hints.min_font_size` is the smallest a label gets when scaling
-(or `font_size`, if that is smaller).
+Labels shrink as you zoom out, and further where the words on screen are too
+close together for them: a label is kept no taller than its word and no wider
+than the room to the next word, ignoring the few tightest words. A label that
+is wider than its word moves right out of the one before it, but never onto the
+next word; at the smallest size, crowded labels overlap instead.
+`hints.font_size` is the size in points at 100% zoom and the largest a label
+gets before `hints.scale_factor` is applied, unless `hints.min_font_size` is
+larger. `hints.scale = false` keeps every label at `font_size` times
+`scale_factor`, floored at `min_font_size`. `hints.min_font_size` (4 by default)
+is the smallest size a label is ever shown at. `hints.scale_factor` (1.0 by
+default) multiplies the label size, after the fitting and before that floor is
+applied. The limits on height and width above hold before the factor is
+applied, so a factor above 1 can make labels overlap neighbouring words.
 
 ### Smart jump
 

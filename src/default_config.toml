@@ -46,9 +46,10 @@ right = "{mode} | {pending} | {selection} | {search} | {message} | {file}"
 
 [hints]
 alphabet = "asdfghjklqwertyuiopzxcvbnm"
-font_size = 10.0       # label size at 100% zoom and the largest it gets, in points
-scale = true           # shrink labels as you zoom out; false keeps them at font_size
-min_font_size = 6.0    # the smallest a label gets when scaling
+font_size = 10.0       # label size at 100% zoom, in points; the largest before scale_factor, unless min_font_size is larger
+scale = true           # shrink labels as you zoom out; false gives font_size * scale_factor, at least min_font_size
+min_font_size = 4.0    # the smallest label size shown, a hard floor
+scale_factor = 1.0     # multiplies the size before the min_font_size floor
 
 [hotbar]
 position = "bottom"       # top, bottom, left or right
