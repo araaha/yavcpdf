@@ -23,6 +23,7 @@ mod input;
 mod keymap;
 mod menu;
 mod overview;
+mod panel;
 mod present;
 mod protect;
 mod recent;

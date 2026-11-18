@@ -2,12 +2,10 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use egui::{CursorIcon, Response};
 use pdfcraft_cos::{Document, Object};
 
 use crate::app::{App, Mode};
 use crate::form;
-use crate::keymap::Stroke;
 
 /// Everything `:info` shows, as plain data.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -233,40 +231,6 @@ impl App {
             tagged: info.tagged,
         };
         self.mode = Mode::Info(InfoState { rows: rows(&facts), first: 0, wheel_rest: 0.0 });
-    }
-
-    pub fn info_key(&mut self, stroke: &Stroke) {
-        let Mode::Info(state) = &self.mode else { return };
-        let len = state.rows.len();
-        let fits = self.info_layout(len, state.first).fits;
-        let Mode::Info(state) = &mut self.mode else { return };
-        if self.keymap.cancels(stroke) || stroke.is_ctrl("c") || stroke.text() == Some('q') {
-            self.mode = Mode::Normal;
-        } else if stroke.is_ctrl("n") || stroke.is("down") || stroke.text() == Some('j') {
-            state.first = form::scrolled(state.first, 1, fits, len);
-        } else if stroke.is_ctrl("p") || stroke.is("up") || stroke.text() == Some('k') {
-            state.first = form::scrolled(state.first, -1, fits, len);
-        }
-    }
-
-    pub fn wheel_info(&mut self, pixels_y: f32) {
-        let Mode::Info(state) = &self.mode else { return };
-        let layout = self.info_layout(state.rows.len(), state.first);
-        if let Mode::Info(state) = &mut self.mode {
-            (state.first, state.wheel_rest) =
-                form::wheel_step(layout.first, state.wheel_rest, pixels_y, layout.row_height, layout.fits, state.rows.len());
-        }
-    }
-
-    /// A click outside the panel closes it. The page gets no clicks meanwhile.
-    pub fn pointer_info(&mut self, ctx: &egui::Context, response: &Response) {
-        ctx.set_cursor_icon(CursorIcon::Default);
-        let Some(at) = response.interact_pointer_pos().filter(|_| response.clicked()) else { return };
-        let Mode::Info(state) = &self.mode else { return };
-        if !self.info_layout(state.rows.len(), state.first).rect.contains(at) {
-            self.mode = Mode::Normal;
-            self.choice_closed = Some((ctx.input(|i| i.time), at));
-        }
     }
 }
 

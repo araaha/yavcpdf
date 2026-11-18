@@ -1,13 +1,8 @@
 //! The list of your annotations, a picker like the bookmarks, and their highlights and notes as Markdown.
-use egui::{CursorIcon, Pos2, Response};
-
-use crate::app::{App, Mode};
-use crate::bookmarks::{BookmarkState, Outcome, picker_step, settle};
-use crate::form::{clamp_selected, keep_visible, wheel_step};
-use crate::keymap::Stroke;
+use crate::app::App;
+use crate::panel::Picker;
 use crate::reflow::{Row, reflow};
 use crate::store::Annotation;
-use crate::view::Anchor;
 
 /// How far from a highlight a note may sit, in points, and still go under it in the Markdown.
 const NEAR: f32 = 12.0;
@@ -126,103 +121,7 @@ pub fn markdown(title: &str, items: &[Item], labels: &[String]) -> Option<String
 impl App {
     /// Opens the picker, with the highlight on the last annotation at or before the view.
     pub fn open_annotations(&mut self) {
-        let items = items(&self.side.annotations);
-        if items.is_empty() {
-            self.say("no annotations");
-            return;
-        }
-        let page = self.view.current_page(&self.doc.layout);
-        let selected = items.iter().rposition(|i| i.page <= page).unwrap_or(0);
-        let mut state = BookmarkState { selected, ..Default::default() };
-        state.first = keep_visible(0, selected, self.annotation_layout(&state).fits, items.len());
-        self.mode = Mode::Annotations(state);
-    }
-
-    fn annotation_rows(&self, state: &BookmarkState) -> Vec<usize> {
-        rows(&items(&self.side.annotations), &state.filter.text)
-    }
-
-    pub fn annotation_layout(&self, state: &BookmarkState) -> crate::chrome::ListLayout {
-        let filter = state.filtering || !state.filter.is_empty();
-        self.list_layout(false, filter, self.annotation_rows(state).len(), 0, Some(state.first))
-    }
-
-    fn annotation_go(&mut self, index: usize) {
-        self.mode = Mode::Normal;
-        if let Some(item) = items(&self.side.annotations).get(index) {
-            self.jump_to_point(Anchor { page: item.page, y: item.bounds[1], x: self.view.x });
-        }
-    }
-
-    pub fn annotation_key(&mut self, stroke: &Stroke) {
-        let Mode::Annotations(state) = &self.mode else { return };
-        let mut state = state.clone();
-        let list = items(&self.side.annotations);
-        match picker_step(&|filter| rows(&list, filter), &mut state, stroke, &self.keymap) {
-            Outcome::Close => {
-                self.mode = Mode::Normal;
-                return;
-            }
-            Outcome::Jump(row) => {
-                self.annotation_go(row);
-                return;
-            }
-            Outcome::Delete(row) => {
-                if let Some(item) = list.get(row) {
-                    self.remove_annotation(item.id);
-                    self.say(format!("{} deleted", item.kind));
-                    if self.side.annotations.is_empty() {
-                        self.mode = Mode::Normal;
-                        return;
-                    }
-                }
-                settle(&self.annotation_rows(&state), &mut state);
-            }
-            Outcome::None => {}
-        }
-        let rows = self.annotation_rows(&state);
-        let at = rows.iter().position(|r| *r == state.selected).unwrap_or(0);
-        state.first = keep_visible(state.first, at, self.annotation_layout(&state).fits, rows.len());
-        self.mode = Mode::Annotations(state);
-    }
-
-    /// The wheel over the open panel scrolls its list; elsewhere it does nothing.
-    pub fn wheel_annotations(&mut self, pixels_y: f32, at: Option<Pos2>) {
-        let Mode::Annotations(state) = &self.mode else { return };
-        let layout = self.annotation_layout(state);
-        if !at.is_some_and(|p| layout.rect.contains(p)) {
-            return;
-        }
-        let rows = self.annotation_rows(state);
-        if let Mode::Annotations(state) = &mut self.mode {
-            let before = layout.first;
-            (state.first, state.wheel_rest) = wheel_step(before, state.wheel_rest, pixels_y, layout.row_height, layout.fits, rows.len());
-            if state.first != before {
-                let at = rows.iter().position(|r| *r >= state.selected).unwrap_or(0);
-                let at = clamp_selected(at, state.first, layout.fits, rows.len());
-                state.selected = rows.get(at).copied().unwrap_or(state.selected);
-            }
-        }
-    }
-
-    /// A click on a row jumps to it; one outside the panel closes it. The page gets no clicks meanwhile.
-    pub fn pointer_annotations(&mut self, ctx: &egui::Context, response: &Response) {
-        ctx.set_cursor_icon(CursorIcon::Default);
-        let Some(at) = response.interact_pointer_pos().filter(|_| response.clicked()) else { return };
-        let Mode::Annotations(state) = &self.mode else { return };
-        let rows = self.annotation_rows(state);
-        let layout = self.annotation_layout(state);
-        if !layout.rect.contains(at) {
-            self.mode = Mode::Normal;
-            self.choice_closed = Some((ctx.input(|i| i.time), at));
-            return;
-        }
-        let hit = (layout.first..rows.len()).take(layout.fits).find(|&i| Self::list_row_rect(&layout, i).contains(at));
-        if let Some(i) = hit {
-            self.annotation_go(rows[i]);
-            // Jumped by a click: its double click must not land on the page.
-            self.choice_closed = Some((ctx.input(|i| i.time), at));
-        }
+        self.open_picker(Picker::Annotations);
     }
 
     /// Writes the highlights and notes to a Markdown file, by default beside the document.

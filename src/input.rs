@@ -7,6 +7,7 @@ use crate::field::{Edit, Field};
 use crate::form::{Move, clamp_selected, keep_visible, wheel_step};
 use crate::keymap::{Action, Stroke};
 use crate::menu::{Menu, Outcome};
+use crate::panel::Picker;
 use crate::search::Search;
 use crate::view::Anchor;
 
@@ -114,8 +115,8 @@ impl App {
             Mode::Hint(_) => self.hint_key(ctx, &stroke),
             Mode::Place(_) => self.place_key(&stroke),
             Mode::Toc(_) => self.toc_key(&stroke),
-            Mode::Bookmarks(_) => self.bookmark_key(&stroke),
-            Mode::Annotations(_) => self.annotation_key(&stroke),
+            Mode::Bookmarks(_) => self.picker_key(Picker::Bookmarks, &stroke),
+            Mode::Annotations(_) => self.picker_key(Picker::Annotations, &stroke),
             Mode::Recent(_) => self.recent_key(ctx, &stroke),
             Mode::Info(_) => self.info_key(&stroke),
             Mode::Choice(_) => self.choice_key(&stroke),
@@ -684,13 +685,13 @@ impl App {
                 continue;
             }
             if matches!(self.mode, Mode::Info(_)) {
-                self.wheel_info(pixels.y);
+                self.info_wheel(pixels.y);
             } else if matches!(self.mode, Mode::Choice(_)) {
                 self.wheel_choice(pixels.y, at);
             } else if matches!(self.mode, Mode::Bookmarks(_)) {
-                self.wheel_bookmarks(pixels.y, at);
+                self.picker_wheel(Picker::Bookmarks, pixels.y, at);
             } else if matches!(self.mode, Mode::Annotations(_)) {
-                self.wheel_annotations(pixels.y, at);
+                self.picker_wheel(Picker::Annotations, pixels.y, at);
             } else if at.is_some_and(|p| self.over_menu(p)) {
                 self.scroll_menu(-pixels.y);
             } else if modifiers.ctrl {
@@ -810,17 +811,17 @@ impl App {
         }
         if matches!(self.mode, Mode::Bookmarks(_)) {
             self.hover = None;
-            self.pointer_bookmarks(ui.ctx(), &response);
+            self.picker_pointer(Picker::Bookmarks, ui.ctx(), &response);
             return;
         }
         if matches!(self.mode, Mode::Info(_)) {
             self.hover = None;
-            self.pointer_info(ui.ctx(), &response);
+            self.info_pointer(ui.ctx(), &response);
             return;
         }
         if matches!(self.mode, Mode::Annotations(_)) {
             self.hover = None;
-            self.pointer_annotations(ui.ctx(), &response);
+            self.picker_pointer(Picker::Annotations, ui.ctx(), &response);
             return;
         }
         if matches!(self.mode, Mode::Recent(_)) {

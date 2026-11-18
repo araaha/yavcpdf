@@ -4,12 +4,12 @@ use std::sync::Arc;
 use egui::{Align, Align2, Color32, FontData, FontDefinitions, FontFamily, FontId, Painter, Pos2, Rect, Sense, Vec2, pos2, vec2};
 
 use crate::app::{App, Bar, BarKind, ChoiceState, EntryKind, FillItem, Mode, PasswordState, SignPad, TocState, Tool};
-use crate::bookmarks::BookmarkState;
 use crate::config::{Config, Side};
 use crate::field::Field;
 use crate::hint::Purpose;
 use crate::keymap::Action;
 use crate::menu::Menu;
+use crate::panel::PickerState;
 use crate::recent::RecentState;
 use crate::view::{Layout, View, unrotate_point};
 
@@ -432,23 +432,20 @@ impl App {
     }
 
     /// The bookmarks: a panel like the contents, each row a name and its page.
-    fn draw_bookmarks(&self, painter: &Painter, state: &BookmarkState) {
+    fn draw_bookmarks(&self, painter: &Painter, state: &PickerState) {
         let rows = self.bookmark_rows(state);
-        let at = rows.iter().position(|r| *r >= state.selected).unwrap_or(0);
-        let filter = (state.filtering || !state.filter.is_empty()).then_some(&state.filter);
-        self.draw_list(painter, &ListView { header: None, filter, len: rows.len(), at, first: Some(state.first) }, |i| {
+        self.draw_list(painter, &state.view(&rows), |i| {
             let bookmark = &self.side.bookmarks[rows[i]];
             ListRow { indent: 0.0, text: bookmark.name.clone(), mark: (bookmark.anchor.page + 1).to_string(), ticked: false, swatch: None }
         });
     }
 
     /// The annotations: a panel like the bookmarks, each row a swatch, the kind and the text, with the page's label.
-    fn draw_annotations(&self, painter: &Painter, state: &BookmarkState) {
+    fn draw_annotations(&self, painter: &Painter, state: &PickerState) {
+        // The rows must agree with `Picker::rows`; the items are built here because each row needs its item too.
         let items = crate::annotations::items(&self.side.annotations);
         let rows = crate::annotations::rows(&items, &state.filter.text);
-        let at = rows.iter().position(|r| *r >= state.selected).unwrap_or(0);
-        let filter = (state.filtering || !state.filter.is_empty()).then_some(&state.filter);
-        self.draw_list(painter, &ListView { header: None, filter, len: rows.len(), at, first: Some(state.first) }, |i| {
+        self.draw_list(painter, &state.view(&rows), |i| {
             let item = &items[rows[i]];
             let label = self.doc.info.pages.get(item.page).map_or_else(|| (item.page + 1).to_string(), |p| p.label.clone());
             ListRow { indent: 0.0, text: item.line(), mark: label, ticked: false, swatch: item.color }

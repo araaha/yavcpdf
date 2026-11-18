@@ -252,9 +252,9 @@ pub enum Mode {
     Hint(HintState),
     Place(PlaceState),
     Toc(TocState),
-    Bookmarks(crate::bookmarks::BookmarkState),
-    /// The list of annotations, which keeps its state in the same shape as the bookmarks.
-    Annotations(crate::bookmarks::BookmarkState),
+    Bookmarks(crate::panel::PickerState),
+    /// The list of annotations, which shares `PickerState` with the bookmarks.
+    Annotations(crate::panel::PickerState),
     Recent(crate::recent::RecentState),
     Info(crate::info::InfoState),
     Choice(ChoiceState),

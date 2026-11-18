@@ -25,6 +25,7 @@ Tests are `#[cfg(test)]` modules at the bottom of the file they test; there is n
 - `config.rs`, `default_config.toml`: built-in defaults with the user's TOML merged over them
 - `doc.rs`, `cache.rs`: an open document and its render workers; rendered pages as textures
 - `view.rs`, `draw.rs`, `chrome.rs`: page layout and the view; drawing pages; bars and panels
+- `panel.rs`: what the bookmarks, annotations and `:info` panels share: state, keys, wheel and clicks
 - `store.rs`: what is kept per document outside the PDF (position, marks, bookmarks, history, annotations)
 - `annotations.rs`: the list of annotations and the Markdown export of the highlights and notes
 - `search.rs`, `hint.rs`, `smart.rs`, `overview.rs`, `contents.rs`, `bookmarks.rs`, `recent.rs`,
