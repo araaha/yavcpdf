@@ -697,6 +697,7 @@ impl App {
     pub fn remove_annotation(&mut self, id: u64) {
         let Some(index) = self.side.annotations.iter().position(|a| a.id() == id) else { return };
         let removed = self.side.annotations.remove(index);
+        self.forget_gone_note();
         self.undo.push(Edit::Removed(vec![removed]));
         self.redo.clear();
         self.mark_dirty();
@@ -712,7 +713,15 @@ impl App {
             other => other,
         });
         self.side.annotations = annotations;
+        self.forget_gone_note();
         opposite
+    }
+
+    /// Unpins the note shown by `F` once it no longer exists.
+    fn forget_gone_note(&mut self) {
+        if self.shown_own_note.is_some_and(|id| !self.side.annotations.iter().any(|a| a.id() == id)) {
+            self.shown_own_note = None;
+        }
     }
 
     fn undo_redo(&mut self, undo: bool) {
@@ -1349,7 +1358,15 @@ impl App {
         let notes =
             self.doc.notes.iter().enumerate().filter(|(_, n)| areas.iter().any(|(page, area)| *page == n.page && hint::intersects(n.rect, *area)));
         out.extend(notes.map(|(index, n)| Target { label: String::new(), page: n.page, rect: n.rect, kind: TargetKind::PdfNote(index) }));
+        out.extend(self.annotation_targets(areas).into_iter().filter_map(|t| self.own_note_target(t)));
         out
+    }
+
+    /// The target again as a pinnable note, if the annotation it names is a sticky note.
+    fn own_note_target(&self, target: Target) -> Option<Target> {
+        let TargetKind::Annotation(id) = target.kind else { return None };
+        let is_note = self.side.annotations.iter().any(|a| a.id() == id && matches!(a, Annotation::Note { .. }));
+        is_note.then_some(Target { kind: TargetKind::Note(id), ..target })
     }
 
     fn annotation_targets(&self, areas: &[(usize, [f32; 4])]) -> Vec<Target> {
@@ -1509,6 +1526,10 @@ impl App {
             TargetKind::PdfNote(index) => {
                 self.mode = Mode::Normal;
                 self.shown_note = Some(index);
+            }
+            TargetKind::Note(id) => {
+                self.mode = Mode::Normal;
+                self.shown_own_note = Some(id);
             }
             TargetKind::Cell => self.mode = Mode::Normal,
             TargetKind::Widget(field, widget) => {

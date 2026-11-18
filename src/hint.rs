@@ -132,6 +132,8 @@ pub enum TargetKind {
     Reference(usize),
     /// A text annotation of the PDF, by its index in the document's list.
     PdfNote(usize),
+    /// One of the user's sticky notes, by id.
+    Note(u64),
     /// A form field's widget: the field's index in the form, and the widget's in the field.
     Widget(usize, usize),
     /// A cell of the grid that places an item.

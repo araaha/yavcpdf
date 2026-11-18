@@ -583,6 +583,8 @@ pub struct App {
     pub hover: Option<Pos2>,
     /// The PDF's own note (an index into `doc.notes`) picked by hint or click, shown until cancelled.
     pub shown_note: Option<usize>,
+    /// The user's own sticky note (an id) picked by hint, shown until cancelled.
+    pub shown_own_note: Option<u64>,
     /// When and where a click closed the choice panel, to swallow the second click of a double click.
     pub choice_closed: Option<(f64, Pos2)>,
     /// When and where a click opened the choice panel, to ignore the second click of a double click.
@@ -740,6 +742,7 @@ impl App {
             signature: store::load_signature(&store::data_dir()),
             hover: None,
             shown_note: None,
+            shown_own_note: None,
             choice_closed: None,
             choice_opened: None,
             recent_return: false,
@@ -982,6 +985,7 @@ impl App {
         self.selection = None;
         self.smart = None;
         self.shown_note = None;
+        self.shown_own_note = None;
         self.toc_waiting = false;
         self.overview = None;
         self.view.zoom_hold = None;

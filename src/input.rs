@@ -145,7 +145,7 @@ impl App {
     pub fn escape(&mut self) {
         if !self.pending.display().is_empty() {
             self.pending.clear();
-        } else if self.overview.take().is_some() || self.shown_note.take().is_some() {
+        } else if self.overview.take().is_some() || self.shown_note.take().is_some() || self.shown_own_note.take().is_some() {
             // That is all it takes back.
         } else if self.smart.take().is_some() {
             self.say("jump cancelled");
@@ -880,6 +880,7 @@ impl App {
             let under = response.interact_pointer_pos().and_then(|p| self.view.page_under(&self.doc.layout, p));
             let field = under.filter(|_| matches!(self.mode, Mode::Normal)).and_then(|(page, at)| self.widget_at(page, at));
             self.shown_note = None;
+            self.shown_own_note = None;
             let link = under.and_then(|(page, at)| self.link_at(page, at));
             let note = under.and_then(|(page, at)| self.pdf_note_at(page, at));
             match click_target(field, link, note) {

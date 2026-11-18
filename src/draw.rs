@@ -446,7 +446,8 @@ impl App {
         for annotation in self.side.annotations.iter().filter(|a| shown.contains(&a.page())) {
             let Annotation::Note { page, at, text, .. } = annotation else { continue };
             let icon = view.transform(&self.doc.layout, *page).rect([at[0], at[1], at[0] + NOTE_SIDE, at[1] + NOTE_SIDE]);
-            if self.tool == Some(Tool::Note) || self.hover.is_some_and(|p| icon.contains(p)) {
+            let pinned = self.shown_own_note == Some(annotation.id());
+            if pinned || self.tool == Some(Tool::Note) || self.hover.is_some_and(|p| icon.contains(p)) {
                 self.draw_note_text(painter, view, icon, text);
             }
         }

@@ -322,7 +322,7 @@ choose a colour instead, so counts such as `42G` don't work then.
 | <kbd>Alt</kbd>+<kbd>O</kbd> / <kbd>Alt</kbd>+<kbd>I</kbd> | Jump history, back / forward; the last 100 places are kept per document between sessions |
 | <kbd>f</kbd> / <kbd>y</kbd> | Select by hint / copy the selection, with its lines joined and hyphenation undone (`view.copy_reflow = false` copies the lines as they are) |
 | <kbd>s</kbd> <kbd>s</kbd> / <kbd>s</kbd> <kbd>g</kbd> / <kbd>s</kbd> <kbd>w</kbd> / <kbd>s</kbd> <kbd>a</kbd> | Search the selected text on Google Scholar / Google / Wikipedia / arXiv, in the browser; the selection stays. [Sites are configurable](#searching-the-web) |
-| <kbd>F</kbd> | Follow a link by hint; one that names a spot lands there at `view.jump_position`. The PDF's notes (sticky notes and other comments with text) appear among the link hints; picking one pins its text |
+| <kbd>F</kbd> | Follow a link by hint; one that names a spot lands there at `view.jump_position`. The PDF's notes (sticky notes and other comments with text) and your own sticky notes appear among the link hints; picking one pins its text |
 | <kbd>i</kbd> | Fill in a form field, press a form button, or sign into a signature field, by hint; a click does it too |
 | <kbd>g</kbd> <kbd>d</kbd>, <kbd>Ctrl</kbd>+<kbd>]</kbd> | Smart jump by hint; middle click does it with the mouse |
 | <kbd>g</kbd> <kbd>o</kbd>, <kbd>Alt</kbd>+<kbd>C</kbd> | Overview by hint; right click does it with the mouse |
@@ -453,7 +453,8 @@ in it; see [What is stored where](#what-is-stored-where).
 
 **Sticky notes.** With <kbd>t</kbd> <kbd>n</kbd>, click a place and type the
 note in the bar. Its text shows when the pointer is on it, and all of them show
-while the tool is in hand. Click a note to edit it.
+while the tool is in hand. They also appear among the <kbd>F</kbd> link hints; picking one pins its text
+until you press <kbd>Esc</kbd> or click elsewhere. Click a note to edit it.
 
 **Notes in the PDF.** The comments a PDF carries (sticky notes, free text and
 other markup with text) show their author and text, read-only, when the pointer
