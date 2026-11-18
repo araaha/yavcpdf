@@ -158,6 +158,8 @@ pub enum Purpose {
     Smart,
     /// A reference to show its definition in the overview.
     Overview,
+    /// A caption, heading, equation number or bibliography entry, to list what refers to it.
+    References,
     /// Where the tool in hand puts what it makes.
     Place,
     /// A form field to fill, or a button of the form to press.
@@ -169,7 +171,7 @@ pub enum Purpose {
 impl Purpose {
     /// Whether the labels are made from the text of the pages, so they wait for it.
     pub fn needs_text(self) -> bool {
-        matches!(self, Purpose::Select | Purpose::Place | Purpose::Smart | Purpose::Overview)
+        matches!(self, Purpose::Select | Purpose::Place | Purpose::Smart | Purpose::Overview | Purpose::References)
     }
 }
 

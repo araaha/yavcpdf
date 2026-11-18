@@ -1,11 +1,12 @@
 //! What bound keys and commands do.
 use std::fmt::Write;
+use std::ops::Range;
 use std::path::Path;
 use std::sync::mpsc::TryRecvError;
 use std::time::Instant;
 
 use egui::Pos2;
-use pdfcraft_render::LinkTarget;
+use pdfcraft_render::{LinkTarget, PageText};
 
 use crate::app::{
     App, Bar, BarKind, Edit, Entry, EntryKind, FieldSign, FillItem, Fit, Landing, MarkOp, Mode, PasswordState, PendingPortal, PlaceItem, PlaceState,
@@ -18,7 +19,8 @@ use crate::form::Report;
 use crate::hint::{self, HintState, Purpose, Target, TargetKind};
 use crate::keymap::{Action, Bound};
 use crate::protect::{Job, Security};
-use crate::smart::{Line, Reference, find_definitions, lines_of, references_in, touches};
+use crate::search::{Match, Search};
+use crate::smart::{Line, Reference, definitions_on, find_definitions, lines_of, mentions_of, references_in, touches};
 use crate::store::{self, Annotation, MarkKind, NOTE_SIDE, Portal, Sidecar};
 use crate::view::{Anchor, Layout, normalize_rotation};
 
@@ -155,6 +157,9 @@ fn edits_document(action: Action) -> bool {
             | Unprotect
     )
 }
+
+/// What the status bar says while `gr` waits for the text of every page.
+const READING_TEXT: &str = "reading the text of the pages…";
 
 impl App {
     pub fn run(&mut self, ctx: &egui::Context, action: Action, count: Option<u32>) {
@@ -519,6 +524,7 @@ impl App {
             Action::HintSelect if matches!(self.tool, Some(Tool::Note | Tool::Fill)) => self.mode = Mode::Hint(HintState::new(Purpose::Place)),
             Action::HintSelect => self.mode = Mode::Hint(HintState::new(Purpose::Select)),
             Action::SmartJump => self.mode = Mode::Hint(HintState::new(Purpose::Smart)),
+            Action::SmartReferences => self.mode = Mode::Hint(HintState::new(Purpose::References)),
             Action::Overview => self.mode = Mode::Hint(HintState::new(Purpose::Overview)),
             Action::HintLink => self.mode = Mode::Hint(HintState::new(Purpose::Link)),
             Action::HintForm => self.mode = Mode::Hint(HintState::new(Purpose::Form)),
@@ -1405,8 +1411,7 @@ impl App {
             let Some(text) = self.doc.text[*page].as_ref() else { continue };
             for line in lines_of(text) {
                 for found in references_in(&line.text) {
-                    let glyphs = found.range.clone().filter_map(|i| line.glyphs.get(i)).filter_map(|g| text.glyphs.get(*g));
-                    let Some(rect) = glyphs.map(|g| g.rect).reduce(hint::union) else { continue };
+                    let Some(rect) = span_rect(text, &line, found.range.clone()) else { continue };
                     if hint::intersects(rect, *area) && !links.iter().any(|l| l.page == *page && hint::intersects(l.rect, rect)) {
                         targets.push(Target { label: String::new(), page: *page, rect, kind: TargetKind::Reference(references.len()) });
                         references.push(found.reference);
@@ -1417,7 +1422,61 @@ impl App {
         (targets, references)
     }
 
-    /// Labels the targets once what they need has arrived.
+    /// The lines of every page, once its text is in.
+    fn line_pages(&self) -> Vec<Vec<Line>> {
+        self.doc.text.iter().map(|t| t.as_ref().map(|t| lines_of(t)).unwrap_or_default()).collect()
+    }
+
+    /// The captions, headings, equation numbers and bibliography entries on the current page, which
+    /// need the text of every page to be told from the bibliography's entries.
+    fn definition_targets(&self, areas: &[(usize, [f32; 4])]) -> (Vec<Target>, Vec<Reference>) {
+        let pages = self.line_pages();
+        let (mut targets, mut references) = (Vec::new(), Vec::new());
+        for (page, area) in areas {
+            let Some(text) = self.doc.text[*page].as_ref() else { continue };
+            for definition in definitions_on(&pages, *page) {
+                let Some(rect) = pages[*page].get(definition.line).and_then(|line| span_rect(text, line, definition.range.clone())) else { continue };
+                if hint::intersects(rect, *area) {
+                    targets.push(Target { label: String::new(), page: *page, rect, kind: TargetKind::Reference(references.len()) });
+                    references.push(definition.reference);
+                }
+            }
+        }
+        (targets, references)
+    }
+
+    /// Shows every place that refers to `reference` as a set to step through with `n` and `N`, and
+    /// goes to the first one after here.
+    fn list_references(&mut self, reference: &Reference) {
+        let pages = self.line_pages();
+        let matches: Vec<Match> = mentions_of(&pages, reference)
+            .into_iter()
+            .filter_map(|m| {
+                let line = pages.get(m.page)?.get(m.line)?;
+                let rect = span_rect(self.doc.text.get(m.page)?.as_ref()?, line, m.range.clone())?;
+                let start = *line.glyphs.get(m.range.start)?;
+                let end = line.glyphs.get(m.range.end.checked_sub(1)?)? + 1;
+                Some(Match { page: m.page, start, end, rects: vec![rect] })
+            })
+            .collect();
+        let here = self.view.anchor(&self.doc.layout);
+        let mut search = Search::references(reference.describe(), matches, self.doc.layout.len(), (here.page, here.y));
+        let (first, status) = {
+            let layout = &self.doc.layout;
+            let shown = crate::search::shown_top_left(layout);
+            let place = (layout.rotation != 0).then_some(&shown as _);
+            let first = search.resolve_jump(place).and_then(|m| Some((m.page, *m.rects.first()?)));
+            let first = first.map(|(page, rect)| (page, layout.shown_dest_y(page, Some(rect[0]), Some(rect[1]))));
+            (first, search.status(place))
+        };
+        self.search = Some(search);
+        self.say(status);
+        if let Some((page, y)) = first {
+            self.jump_to_point(Anchor { page, y, x: self.view.x });
+        }
+    }
+
+    /// Labels the targets once what they need has arrived. Esc ends the wait, and with it the reading of the pages.
     pub fn prepare_hints(&mut self) {
         let Mode::Hint(state) = &self.mode else { return };
         if state.ready {
@@ -1427,8 +1486,17 @@ impl App {
         let areas = self.visible_areas();
         let needs_text = purpose.needs_text();
         // The form is read in the background: the labels wait for it.
-        if (purpose == Purpose::Form && !self.doc.form.ready) || needs_text && areas.iter().any(|(page, _)| self.doc.text[*page].is_none()) {
+        if (purpose == Purpose::Form && !self.doc.form.ready) || needs_text && areas.iter().any(|(page, _)| self.doc.text[*page].is_none())
+            // Telling a bibliography's entries apart takes the text of every page.
+            || purpose == Purpose::References && self.doc.text.iter().any(Option::is_none)
+        {
+            if purpose == Purpose::References {
+                self.say(READING_TEXT);
+            }
             return;
+        }
+        if self.message() == READING_TEXT {
+            self.message = None;
         }
         let targets = match purpose {
             Purpose::Select => self.word_targets(&areas),
@@ -1437,8 +1505,8 @@ impl App {
             Purpose::Link => self.link_targets(&areas),
             Purpose::Form => self.form_targets(&areas),
             Purpose::DeleteAnnotation => self.annotation_targets(&areas),
-            Purpose::Smart | Purpose::Overview => {
-                let (targets, references) = self.smart_targets(&areas);
+            Purpose::Smart | Purpose::Overview | Purpose::References => {
+                let (targets, references) = if purpose == Purpose::References { self.definition_targets(&areas) } else { self.smart_targets(&areas) };
                 self.hint_references = references;
                 targets
             }
@@ -1451,6 +1519,7 @@ impl App {
                 Purpose::Form => "no form fields here",
                 Purpose::DeleteAnnotation => "no annotations here",
                 Purpose::Smart | Purpose::Overview => "no references here",
+                Purpose::References => "nothing here that is referred to",
                 Purpose::Grid(_) => "nothing in view",
             });
             return;
@@ -1496,6 +1565,12 @@ impl App {
             TargetKind::Annotation(id) if placing => {
                 self.mode = Mode::Normal;
                 self.edit_note(id);
+            }
+            TargetKind::Reference(index) if purpose == Purpose::References => {
+                self.mode = Mode::Normal;
+                if let Some(reference) = self.hint_references.get(index).cloned() {
+                    self.list_references(&reference);
+                }
             }
             TargetKind::Reference(index) => {
                 self.mode = Mode::Normal;
@@ -1839,6 +1914,12 @@ pub fn effective_recolor(over: Option<bool>, theme: bool) -> bool {
 fn page_with_label(labels: &[&str], wanted: &str, here: usize) -> Option<usize> {
     let wanted = wanted.trim().to_lowercase();
     (1..=labels.len()).map(|step| (here + step) % labels.len()).find(|&page| labels[page].trim().to_lowercase() == wanted)
+}
+
+/// The part of a page that the characters `range` of `line` take up.
+fn span_rect(text: &PageText, line: &Line, range: Range<usize>) -> Option<[f32; 4]> {
+    let glyphs = range.filter_map(|i| line.glyphs.get(i)).filter_map(|g| text.glyphs.get(*g));
+    glyphs.map(|g| g.rect).reduce(hint::union)
 }
 
 #[cfg(test)]

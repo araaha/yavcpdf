@@ -83,6 +83,7 @@ pub enum Action {
     ToggleLinks,
     ToggleFields,
     SmartJump,
+    SmartReferences,
     Overview,
     GotoOverview,
     OverviewNext,
@@ -126,7 +127,7 @@ pub enum Action {
 
 impl Action {
     /// Every action, in declaration order. `the_list_of_actions_is_complete` keeps it whole.
-    pub const ALL: [Self; 109] = [
+    pub const ALL: [Self; 110] = [
         Self::Cancel,
         Self::ScrollDown,
         Self::ScrollUp,
@@ -197,6 +198,7 @@ impl Action {
         Self::ToggleLinks,
         Self::ToggleFields,
         Self::SmartJump,
+        Self::SmartReferences,
         Self::Overview,
         Self::GotoOverview,
         Self::OverviewNext,
@@ -312,6 +314,7 @@ impl Action {
             Self::ToggleLinks => "toggle_links",
             Self::ToggleFields => "toggle_fields",
             Self::SmartJump => "smart_jump",
+            Self::SmartReferences => "smart_references",
             Self::Overview => "overview",
             Self::GotoOverview => "goto_overview",
             Self::OverviewNext => "overview_next",

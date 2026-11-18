@@ -317,11 +317,16 @@ fn all_lines(pages: &[Vec<Line>]) -> Vec<(usize, &Line)> {
 
 /// Where the bibliography starts: after the last heading that names one.
 fn bibliography(lines: &[(usize, &Line)]) -> usize {
+    bibliography_start(lines).unwrap_or(0)
+}
+
+/// Where the bibliography starts, if a heading names one.
+fn bibliography_start(lines: &[(usize, &Line)]) -> Option<usize> {
     let heading = |(_, line): &(usize, &Line)| {
         let title = line.text.trim().trim_start_matches(|c: char| c.is_ascii_digit() || c == '.' || c == ' ').trim_end_matches(':').to_lowercase();
         matches!(title.as_str(), "references" | "bibliography" | "works cited" | "literature cited")
     };
-    lines.iter().rposition(heading).unwrap_or(0)
+    lines.iter().rposition(heading)
 }
 
 /// Whether a line starts the entry `key`: `[12]`, `12.`, `12)` or `(12)`.
@@ -391,11 +396,21 @@ fn heading_score(text: &str, kind: Kind, number: &str) -> u8 {
     }
 }
 
+/// Whether a line ends in its own equation number `(N)`: not in a mention of one, such as "see (4)" or "by Eq. (4)".
+fn is_equation_label(text: &str, number: &str) -> bool {
+    /// Words that lead into a mention of an equation.
+    const LEAD_INS: [&str; 14] = ["eq", "eqs", "equation", "equations", "see", "in", "by", "from", "using", "to", "of", "and", "with", "at"];
+    let Some(before) = text.trim().strip_suffix(&format!("({number})")) else { return false };
+    let previous = before.split_whitespace().next_back().unwrap_or("");
+    let previous = previous.trim_matches(|c: char| !c.is_alphanumeric()).to_lowercase();
+    !LEAD_INS.contains(&previous.as_str())
+}
+
 /// How much a line looks like the thing labelled: 0 is not at all.
 fn label_score(text: &str, kind: Kind, number: &str) -> u8 {
     let text = text.trim();
     match kind {
-        Kind::Equation => u8::from(text.ends_with(&format!("({number})"))) * 2,
+        Kind::Equation => u8::from(is_equation_label(text, number)) * 2,
         Kind::Section | Kind::Chapter | Kind::Appendix => heading_score(text, kind, number),
         _ => {
             let names = NAMES.iter().filter(|(_, k)| *k == kind);
@@ -426,6 +441,132 @@ pub fn find_definitions(reference: &Reference, pages: &[Vec<Line>]) -> Vec<(usiz
     };
     found.truncate(MOST);
     found
+}
+
+/// Something on a page that other places refer to: a caption, heading, equation or bibliography entry.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Definition {
+    /// The line of the page it is on.
+    pub line: usize,
+    /// The characters of the line that name it.
+    pub range: Range<usize>,
+    /// What a reference to it reads as.
+    pub reference: Reference,
+}
+
+/// A place in the text that refers to something.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Mention {
+    pub page: usize,
+    pub line: usize,
+    pub range: Range<usize>,
+}
+
+fn leading_space(text: &str) -> usize {
+    text.chars().take_while(|c| c.is_whitespace()).count()
+}
+
+/// The entry that a bibliography line opens, by its key: `[12]`, or `12.` and `12)` in the list itself.
+fn entry_key(text: &str, listed: bool) -> Option<Definition> {
+    let lead = leading_space(text);
+    let word = words_of(text).into_iter().next()?;
+    let (key, end) = if let Some(inner) = word.text.strip_prefix('[').and_then(|w| w.split_once(']')) {
+        (citation_key(inner.0)?, word.start + inner.0.chars().count() + 2)
+    } else if listed {
+        let number = word.text.strip_suffix(['.', ')']).filter(|n| !n.is_empty() && n.chars().all(|c| c.is_ascii_digit()))?;
+        (number.to_owned(), word.end)
+    } else {
+        return None;
+    };
+    Some(Definition { line: 0, range: lead..end, reference: Reference::Citation(key) })
+}
+
+/// The entry of an author-year bibliography that a line opens: it starts with `Smith, J.` or `J. Smith`,
+/// and a year follows within the entry.
+fn author_entry(lines: &[Line]) -> Option<Definition> {
+    const ENTRY_LINES: usize = 4;
+    let line = lines.first()?;
+    let words = words_of(&line.text);
+    let first = words.first()?;
+    let initial = first.text.len() == 2 && first.text.ends_with('.') && first.text.starts_with(|c: char| c.is_uppercase());
+    let (name, word) = match (initial, words.get(1)) {
+        (true, Some(second)) => (surname(&second.text)?, second),
+        _ => (surname(&first.text).filter(|_| first.text.ends_with(','))?, first),
+    };
+    let year = lines.iter().take(ENTRY_LINES).flat_map(|l| words_of(&l.text)).find_map(|w| year_of(&w.text).map(str::to_owned))?;
+    Some(Definition { line: 0, range: first.start..word.end, reference: Reference::AuthorYear { name: name.to_owned(), year } })
+}
+
+/// What the line at `i` of `lines` is the definition of, if anything.
+fn definition_at(lines: &[Line], i: usize, listed: bool) -> Option<Definition> {
+    let line = lines.get(i)?;
+    let text = line.text.trim();
+    let lead = leading_space(&line.text);
+    let found = |range: Range<usize>, reference| Some(Definition { line: i, range, reference });
+    let caption = references_in(&line.text).into_iter().next().filter(|f| f.range.start == lead);
+    if let Some(Found { range, reference }) = caption
+        && matches!(&reference, Reference::Labelled { kind, number } if *kind != Kind::Equation && label_score(text, *kind, number) > 0)
+    {
+        return found(range, reference);
+    }
+    let words = words_of(&line.text);
+    if let Some(last) = words.len().checked_sub(1)
+        && let Some((Found { range, reference }, _)) = equation(&words, last)
+        && matches!(&reference, Reference::Labelled { kind, number } if label_score(text, *kind, number) > 0)
+    {
+        return found(range, reference);
+    }
+    let rest = lines.get(i..).unwrap_or(&[]);
+    let entry = if listed { entry_key(&line.text, true).or_else(|| author_entry(rest)) } else { entry_key(&line.text, false) };
+    if let Some(entry) = entry {
+        return found(entry.range, entry.reference);
+    }
+    let number = words.first().map(|w| w.text.trim_end_matches('.')).filter(|n| n.starts_with(|c: char| c.is_ascii_digit()) && is_number(n))?;
+    let reference = Reference::Labelled { kind: Kind::Section, number: number.to_owned() };
+    let titled = year_of(number).is_none() && heading_score(text, Kind::Section, number) == 2;
+    titled.then(|| Definition { line: i, range: lead..lead + words[0].end - words[0].start, reference })
+}
+
+/// What a page defines, in reading order: the captions, numbered headings, equation numbers and
+/// bibliography entries that a reference elsewhere can name.
+pub fn definitions_on(pages: &[Vec<Line>], page: usize) -> Vec<Definition> {
+    let Some(lines) = pages.get(page) else { return Vec::new() };
+    let before: usize = pages.iter().take(page).map(Vec::len).sum();
+    let start = bibliography_start(&all_lines(pages));
+    (0..lines.len()).filter_map(|i| definition_at(lines, i, start.is_some_and(|s| before + i > s))).collect()
+}
+
+/// Whether a reference found in a line is that thing's own label or entry, not a mention of it.
+fn is_definition(text: &str, found: &Found, listed: bool) -> bool {
+    let (lead, trimmed) = (leading_space(text), text.trim());
+    match &found.reference {
+        Reference::Labelled { kind: Kind::Equation, number } => {
+            found.range.end >= lead + trimmed.chars().count() && label_score(trimmed, Kind::Equation, number) > 0
+        }
+        Reference::Labelled { kind, number } => found.range.start == lead && label_score(trimmed, *kind, number) > 0,
+        Reference::Citation(key) => found.range.start == lead && opens_entry(text, key),
+        Reference::AuthorYear { .. } => listed,
+    }
+}
+
+/// Every place that refers to `reference`, in reading order. The label or
+/// entry itself is not one, and neither is a caption or entry of the same name elsewhere.
+pub fn mentions_of(pages: &[Vec<Line>], reference: &Reference) -> Vec<Mention> {
+    let start = bibliography_start(&all_lines(pages));
+    let mut at = 0;
+    let mut out = Vec::new();
+    for (page, lines) in pages.iter().enumerate() {
+        for (index, line) in lines.iter().enumerate() {
+            let listed = start.is_some_and(|s| at > s);
+            at += 1;
+            for found in references_in(&line.text).into_iter().filter(|f| f.reference == *reference) {
+                if !is_definition(&line.text, &found, listed) {
+                    out.push(Mention { page, line: index, range: found.range });
+                }
+            }
+        }
+    }
+    out
 }
 
 #[cfg(test)]
@@ -623,5 +764,69 @@ mod tests {
         assert_eq!(lines[0].text, "afi b");
         assert_eq!(lines[0].glyphs, [0, 1, 1, 2, 2]);
         assert_eq!((lines[1].text.as_str(), lines[1].y), ("c", 9.0));
+    }
+
+    fn defined(pages: &[Vec<Line>], page: usize) -> Vec<Reference> {
+        definitions_on(pages, page).into_iter().map(|d| d.reference).collect()
+    }
+
+    #[test]
+    fn a_page_defines_its_captions_headings_equations_and_entries() {
+        let pages = doc(&[
+            &["3.1 Methods", "some text", "Figure 3: A plot", "x = y (4)", "Table 2. Results"],
+            &["References", "[1] Knuth. The Art.", "[Lam94] Lamport."],
+        ]);
+        assert_eq!(defined(&pages, 0), [label(Kind::Section, "3.1"), label(Kind::Figure, "3"), label(Kind::Equation, "4"), label(Kind::Table, "2")]);
+        assert_eq!(defined(&pages, 1), [Reference::Citation("1".to_owned()), Reference::Citation("Lam94".to_owned())]);
+    }
+
+    #[test]
+    fn a_sentence_that_mentions_a_figure_defines_nothing() {
+        let pages = doc(&[&["Figure 3 shows the plot.", "as in Table 2 above", "from (4) we get"]]);
+        assert!(defined(&pages, 0).is_empty());
+    }
+
+    #[test]
+    fn author_year_entries_are_found_in_the_bibliography() {
+        let pages = doc(&[&["References", "Smith, J. A study of", "things. 2020.", "Deep learning for stuff"]]);
+        assert_eq!(defined(&pages, 0), [Reference::AuthorYear { name: "Smith".to_owned(), year: "2020".to_owned() }]);
+    }
+
+    #[test]
+    fn mentions_are_every_reference_but_the_caption_itself() {
+        let pages = doc(&[&["Figure 3: A plot", "text"], &["as Figure 3 shows", "and fig. 3 and Figure 4", "Figure 3: A plot"]]);
+        let target = definitions_on(&pages, 0).remove(0);
+        let found: Vec<(usize, usize)> = mentions_of(&pages, &target.reference).into_iter().map(|m| (m.page, m.line)).collect();
+        assert_eq!(found, [(1, 0), (1, 1)]);
+    }
+
+    #[test]
+    fn a_sentence_ending_in_an_equation_reference_is_a_mention() {
+        let pages = doc(&[&["x = y (4)", "the bound in Eq. (4)", "see (4)"]]);
+        let target = definitions_on(&pages, 0).remove(0);
+        assert_eq!(target.line, 0);
+        assert_eq!(definitions_on(&pages, 0).len(), 1);
+        let found: Vec<usize> = mentions_of(&pages, &target.reference).into_iter().map(|m| m.line).collect();
+        assert_eq!(found, [1, 2]);
+    }
+
+    #[test]
+    fn an_equation_number_is_not_a_mention_of_itself() {
+        let pages = doc(&[&["x = y (4)", "by Eq. (4) and (4) again"]]);
+        let target = definitions_on(&pages, 0).remove(0);
+        assert_eq!(mentions_of(&pages, &target.reference).len(), 2);
+    }
+
+    #[test]
+    fn a_citation_is_mentioned_outside_its_entry() {
+        let pages = doc(&[&["as in [1, 2]."], &["References", "[1] Knuth. 1984", "[2] Lamport 1994"]]);
+        let target = definitions_on(&pages, 1).remove(0);
+        let found: Vec<(usize, Range<usize>)> = mentions_of(&pages, &target.reference).into_iter().map(|m| (m.page, m.range)).collect();
+        assert_eq!(found, [(0, 7..8)]);
+    }
+
+    #[test]
+    fn a_page_with_no_such_number_has_no_definitions() {
+        assert!(definitions_on(&doc(&[&["x"]]), 5).is_empty());
     }
 }

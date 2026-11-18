@@ -624,9 +624,9 @@ pub struct App {
     pub return_to: Option<(Anchor, Instant)>,
     /// The theme the config file names, so a reload only changes it when the file did.
     file_theme: String,
-    message: Option<(String, Instant)>,
     /// What `:info` reads from the file itself, for the document whose bytes come with it: the dates and the signature count.
     pub info_extra: Option<(Arc<Vec<u8>>, crate::info::FileFacts)>,
+    pub message: Option<(String, Instant)>,
     watcher: Watcher,
 }
 
@@ -966,7 +966,7 @@ impl App {
                     self.store.clone()
                 }
             };
-            self.search = self.search.take().map(|s| s.restarted(doc.layout.len()));
+            self.search = self.search.take().filter(|s| s.label.is_none()).map(|s| s.restarted(doc.layout.len()));
             (self.jumps, self.jump_index) = store::restored_jumps(&self.jumps, self.jump_index, doc.layout.len());
         } else {
             self.store = self.store.rekeyed(key);
@@ -1140,7 +1140,10 @@ impl App {
     /// and is always on with `prefetch_text`, or else only while a search or smart lookup waits.
     fn wanted_text(&self) -> Vec<usize> {
         let layout = &self.doc.layout;
-        let sweep = self.config.view.prefetch_text || self.search.as_ref().is_some_and(|s| !s.is_complete()) || self.smart.is_some();
+        let sweep = self.config.view.prefetch_text
+            || self.search.as_ref().is_some_and(|s| !s.is_complete())
+            || self.smart.is_some()
+            || matches!(&self.mode, Mode::Hint(h) if h.purpose == crate::hint::Purpose::References);
         if sweep && self.doc.text.iter().all(Option::is_some) {
             return Vec::new();
         }

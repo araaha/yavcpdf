@@ -160,6 +160,7 @@ hint_form = ["i"]            # fill in a field of the form, or press its button
 yank = ["y"]
 portal = ["p"]
 smart_jump = ["gd", "<C-]>"]
+smart_references = ["gr"]    # every place that refers to a caption, heading, equation or bibliography entry on the page
 overview = ["go", "<A-c>"]
 goto_overview = ["<cr>"]
 overview_next = ["<C-A-pagedown>"]

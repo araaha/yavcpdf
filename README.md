@@ -327,6 +327,7 @@ choose a colour instead, so counts such as `42G` don't work then.
 | <kbd>i</kbd> | Fill in a form field, press a form button, or sign into a signature field, by hint; a click does it too |
 | <kbd>g</kbd> <kbd>a</kbd> | List your annotations (`:annotations`): <kbd>j</kbd> <kbd>k</kbd> move, <kbd>Enter</kbd>, <kbd>l</kbd> or a click jumps, <kbd>/</kbd> filters by text, <kbd>Esc</kbd> clears the filter and then closes, <kbd>q</kbd> closes, <kbd>d</kbd> or <kbd>Delete</kbd> deletes the highlighted one when not filtering (<kbd>u</kbd> brings it back) |
 | <kbd>g</kbd> <kbd>d</kbd>, <kbd>Ctrl</kbd>+<kbd>]</kbd> | Smart jump by hint; middle click does it with the mouse |
+| <kbd>g</kbd> <kbd>r</kbd> | [List what refers to](#smart-jump) a caption, heading, equation or bibliography entry on the page, by hint; <kbd>n</kbd> / <kbd>N</kbd> step through them |
 | <kbd>g</kbd> <kbd>o</kbd>, <kbd>Alt</kbd>+<kbd>C</kbd> | Overview by hint; right click does it with the mouse |
 | <kbd>Tab</kbd> | Table of contents (<kbd>j</kbd> <kbd>k</kbd>, <kbd>/</kbd> filters, <kbd>Enter</kbd>) |
 | <kbd>p</kbd> / <kbd>g</kbd> <kbd>p</kbd> / <kbd>d</kbd> <kbd>p</kbd> / <kbd>e</kbd> <kbd>p</kbd> / <kbd>F12</kbd> | Make, go to, delete and edit a portal; portal window |
@@ -425,6 +426,19 @@ window by default. <kbd>Alt</kbd>+<kbd>O</kbd> comes back.
 > [!NOTE]
 > It is a good guess rather than a certainty: a reference split over two lines
 > isn't seen, and a scanned document has no text to read.
+
+**Where is this referred to?** <kbd>g</kbd> <kbd>r</kbd> is smart jump the other
+way round. It labels what the current page defines: figure and table captions,
+numbered and theorem-like headings, equation numbers and bibliography entries.
+Pick one and every reference elsewhere in the document that smart jump would
+take to it is highlighted like a search match, and the view goes to the first
+one after where you are, at `view.jump_position`, so <kbd>Alt</kbd>+<kbd>O</kbd>
+comes back. <kbd>n</kbd> and <kbd>N</kbd> step through them, the status line
+says `Figure 3: 2/5 references` or `no references to Figure 3`, and
+<kbd>Esc</kbd> or `:noh` clears them, as for a search. The caption or entry
+itself is not counted. It needs the text of every page, so it waits until
+that has been read, saying `reading the text of the pages…`; <kbd>Esc</kbd> stops
+the wait. Reloading the document drops the highlighted references.
 
 ### Overview
 

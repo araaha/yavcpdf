@@ -170,7 +170,10 @@ impl App {
             "search" => self
                 .search
                 .as_ref()
-                .map(|s| format!("/{} {}", s.query, s.status((layout.rotation != 0).then_some(&crate::search::shown_top_left(layout) as _))))
+                .map(|s| {
+                    let status = s.status((layout.rotation != 0).then_some(&crate::search::shown_top_left(layout) as _));
+                    if s.label.is_some() { status } else { format!("/{} {status}", s.query) }
+                })
                 .unwrap_or_default(),
             "selection" => self.selection_status(),
             "message" => self.message().to_owned(),
@@ -192,6 +195,7 @@ impl App {
                 (Purpose::DeleteAnnotation, _) => "HINT: delete".to_owned(),
                 (Purpose::Smart, _) => "HINT: jump to".to_owned(),
                 (Purpose::Overview, _) => "HINT: overview".to_owned(),
+                (Purpose::References, _) => "HINT: what refers to".to_owned(),
                 (Purpose::Place, _) => "HINT: place".to_owned(),
                 (Purpose::Form, _) => "HINT: form field".to_owned(),
                 (Purpose::Grid(_), _) => "HINT: place at".to_owned(),

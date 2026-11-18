@@ -39,12 +39,38 @@ pub struct Search {
     scanned: Vec<bool>,
     /// A jump waiting for its first match: from this page and y as shown.
     pending_jump: Option<(usize, f32)>,
+    /// For a set of references to a thing, what that thing is called. The matches are not a query's.
+    pub label: Option<String>,
 }
 
 impl Search {
     pub fn new(query: String, forward: bool, smartcase: bool, pages: usize, from: (usize, f32)) -> Self {
         let case_sensitive = smartcase && query.chars().any(char::is_uppercase);
-        Self { query, forward, case_sensitive, matches: Vec::new(), current: None, scanned: vec![false; pages], pending_jump: Some(from) }
+        Self {
+            query,
+            forward,
+            case_sensitive,
+            matches: Vec::new(),
+            current: None,
+            scanned: vec![false; pages],
+            pending_jump: Some(from),
+            label: None,
+        }
+    }
+
+    /// The places that refer to `label`, found already, to step through like matches.
+    pub fn references(label: String, matches: Vec<Match>, pages: usize, from: (usize, f32)) -> Self {
+        let scanned = vec![true; pages];
+        Self {
+            query: label.clone(),
+            forward: true,
+            case_sensitive: false,
+            matches,
+            current: None,
+            scanned,
+            pending_jump: Some(from),
+            label: Some(label),
+        }
     }
 
     /// The same search over a reloaded document, staying where the view is.
@@ -168,14 +194,9 @@ impl Search {
         self.matches.get(next)
     }
 
-    /// `3/41`, with `+` while pages are still being searched. The place of the current match is
-    /// its rank in the order shown when `place` is given.
-    pub fn status(&self, place: Place) -> String {
-        let more = if self.is_complete() { "" } else { "+" };
-        if self.matches.is_empty() {
-            return if self.is_complete() { format!("no match for \"{}\"", self.query) } else { "searching".to_owned() };
-        }
-        let rank = self.current.map_or(0, |c| match place {
+    /// The place of the current match in the order shown, from 1; 0 with none.
+    fn rank(&self, place: Place) -> usize {
+        self.current.map_or(0, |c| match place {
             None => c + 1,
             Some(at) => {
                 let key = |m: &Match| (m.page, at(m));
@@ -186,7 +207,23 @@ impl Search {
                 };
                 self.matches.iter().filter(|m| before(m)).count() + 1
             }
-        });
+        })
+    }
+
+    /// `3/41`, with `+` while pages are still being searched. The place of the current match is
+    /// its rank in the order shown when `place` is given.
+    pub fn status(&self, place: Place) -> String {
+        if let Some(label) = &self.label {
+            return match self.matches.len() {
+                0 => format!("no references to {label}"),
+                n => format!("{label}: {}/{n} references", self.rank(place)),
+            };
+        }
+        let more = if self.is_complete() { "" } else { "+" };
+        if self.matches.is_empty() {
+            return if self.is_complete() { format!("no match for \"{}\"", self.query) } else { "searching".to_owned() };
+        }
+        let rank = self.rank(place);
         format!("{rank}/{}{more}", self.matches.len())
     }
 }
@@ -566,5 +603,16 @@ mod tests {
             assert_eq!(s.status(Some(&place)), format!("{step}/3"));
         }
         assert_eq!(s.status(None), "1/3");
+    }
+
+    #[test]
+    fn references_are_stepped_through_from_here() {
+        let hit = |page, y: f32| Match { page, start: 0, end: 1, rects: vec![[0.0, y, 5.0, y + 10.0]] };
+        let mut s = Search::references("Figure 3".to_owned(), vec![hit(0, 0.0), hit(1, 0.0), hit(1, 40.0)], 2, (1, 10.0));
+        assert_eq!(at(s.resolve_jump(None)), Some((1, 40.0)));
+        assert_eq!(s.status(None), "Figure 3: 3/3 references");
+        assert_eq!(at(s.advance(false, None)), Some((0, 0.0)));
+        let none = Search::references("Figure 3".to_owned(), Vec::new(), 2, (0, 0.0));
+        assert_eq!(none.status(None), "no references to Figure 3");
     }
 }
