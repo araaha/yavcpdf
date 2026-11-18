@@ -270,13 +270,12 @@ Usage
 -----
 
 ```sh
-yavcpdf [--page N] [--password PW] [--geometry WxH[+X+Y]]
-        [--fullscreen|--no-fullscreen] [--statusbar|--no-statusbar] [file.pdf]
+yavcpdf [OPTIONS] [FILE]
 ```
 
 With no file, yavcpdf reopens the last document. If that file is gone or won't open (the reason is in the status bar), or there is none, it opens a blank page instead, where `:open` or `:e` open a file; a file named on the command line that won't open is an error. The blank page lists the recent files that still exist: type a row's label, or move with j/k and press Enter, or click; Esc closes the list and `:recent` shows it again, over a document too. It reloads the PDF when the
 file changes. A password-protected PDF opens a [password menu](#password-protected-pdfs). On Windows, and on macOS when not started from a terminal,
-`--help` and argument errors show in a dialog, as do fatal errors.
+`--help` and argument errors show in a dialog, as do fatal errors. An argument error prints only the error and the usage line; `--help` has the full text.
 
 | Option | Effect |
 | --- | --- |
@@ -285,6 +284,8 @@ file changes. A password-protected PDF opens a [password menu](#password-protect
 | `--geometry WxH[+X+Y]` | Set the window's inner size in points, and optionally its position |
 | `--fullscreen` / `--no-fullscreen` | Override `view.fullscreen` for this launch |
 | `--statusbar` / `--no-statusbar` | Override `statusbar.visible` for this launch |
+| `-h`, `--help` | Print the options and the paths of the configuration and data |
+| `-V`, `--version` | Print the version |
 
 The last of the fullscreen or the status bar options given wins.
 `view.fullscreen` and `statusbar.visible` only take effect at startup; a

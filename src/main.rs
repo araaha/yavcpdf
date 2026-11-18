@@ -36,22 +36,48 @@ use std::process::ExitCode;
 
 use config::Config;
 
-const USAGE_HEAD: &str = "usage: yavcpdf [--page N] [--password PW] [--geometry WxH[+X+Y]]
-             [--fullscreen|--no-fullscreen] [--statusbar|--no-statusbar] [file.pdf]
+const USAGE_LINE: &str = "Usage: yavcpdf [OPTIONS] [FILE]";
 
-With no file, the document opened last is opened again, or a blank page if there is none.
---geometry sets the window size in points, and optionally its position.
-";
+/// The `--help` text, given the paths of the configuration file and the data directory.
+fn help_text(config: &str, data: &str) -> String {
+    format!(
+        "yavcpdf {version}
+A minimal, keyboard-driven PDF viewer
 
-#[cfg(windows)]
-const CONFIG_LINE: &str = r"The configuration is %APPDATA%\yavcpdf\config.toml.";
-#[cfg(target_os = "macos")]
-const CONFIG_LINE: &str = "The configuration is ~/Library/Application Support/yavcpdf/config.toml.";
-#[cfg(not(any(windows, target_os = "macos")))]
-const CONFIG_LINE: &str = "The configuration is ~/.config/yavcpdf/config.toml.";
+{USAGE_LINE}
+
+Arguments:
+  [FILE]  The PDF to open; without one, the document opened last,
+          or a blank page
+
+Options:
+      --page <N>              Open at page N
+      --password <PW>         The password of an encrypted PDF; without it,
+                              a menu asks for it
+      --geometry <WxH[+X+Y]>  Window size in points, and optionally its
+                              position
+      --fullscreen            Start fullscreen
+      --no-fullscreen         Start in a window
+      --statusbar             Show the status bar at start
+      --no-statusbar          Hide the status bar at start
+  -h, --help                  Print this help
+  -V, --version               Print the version
+
+Files:
+  Configuration  {config}
+  Data           {data}
+",
+        version = env!("CARGO_PKG_VERSION"),
+    )
+}
 
 fn usage() -> String {
-    format!("{USAGE_HEAD}{CONFIG_LINE}")
+    help_text(&Config::path().display().to_string(), &store::data_dir().display().to_string())
+}
+
+/// What an argument error prints: the error, the usage line and a pointer to `--help`.
+fn error_text(error: &str) -> String {
+    format!("yavcpdf: {error}\n\n{USAGE_LINE}\n\nTry 'yavcpdf --help'.")
 }
 
 #[derive(Debug, Default, PartialEq)]
@@ -63,6 +89,7 @@ struct Args {
     fullscreen: Option<bool>,
     statusbar: Option<bool>,
     help: bool,
+    version: bool,
 }
 
 /// Largest window width, height or offset accepted by `--geometry`, in points.
@@ -121,6 +148,7 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Args, String> {
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "-h" | "--help" => out.help = true,
+            "-V" | "--version" => out.version = true,
             "--page" => {
                 let value = args.next().ok_or("--page needs a number")?;
                 let page: usize = value.parse().map_err(|_| format!("--page: \"{value}\" is not a number"))?;
@@ -264,15 +292,19 @@ fn main() -> ExitCode {
     let args = match parse_args(std::env::args().skip(1)) {
         Ok(args) => args,
         Err(e) => {
-            let usage = usage();
-            eprintln!("yavcpdf: {e}\n{usage}");
+            let text = error_text(&e);
+            eprintln!("{text}");
             #[cfg(any(windows, target_os = "macos"))]
-            show_usage_dialog(rfd::MessageLevel::Error, &format!("{e}\n{usage}"));
+            show_usage_dialog(rfd::MessageLevel::Error, &text);
             return ExitCode::from(2);
         }
     };
+    if args.version {
+        println!("yavcpdf {}", env!("CARGO_PKG_VERSION"));
+        return ExitCode::SUCCESS;
+    }
     if args.help {
-        println!("{}", usage());
+        print!("{}", usage());
         show_help();
         return ExitCode::SUCCESS;
     }
@@ -353,6 +385,32 @@ mod tests {
         assert_eq!(args.file, Some(PathBuf::from("doc.pdf")));
         assert!(parse(&["--help"]).unwrap().help);
         assert_eq!(parse(&[]).unwrap(), Args::default());
+    }
+
+    #[test]
+    fn help_lists_every_option_within_80_columns() {
+        let help = help_text("/c/config.toml", "/d/");
+        for option in ["--page", "--password", "--geometry", "--fullscreen", "--no-fullscreen", "--statusbar", "--no-statusbar"] {
+            assert!(help.contains(option), "{option} missing");
+            assert!(parse(&[option]).is_ok() || parse(&[option, "1"]).is_ok() || parse(&[option, "1x1"]).is_ok());
+        }
+        for option in ["-h, --help", "-V, --version", "[FILE]", "/c/config.toml", "/d/"] {
+            assert!(help.contains(option), "{option} missing");
+        }
+        assert!(help.starts_with(&format!("yavcpdf {}\n", env!("CARGO_PKG_VERSION"))));
+        assert!(parse(&["-V"]).unwrap().version && parse(&["--version"]).unwrap().version);
+        for line in help.lines() {
+            assert!(line.chars().count() < 80, "too long: {line}");
+        }
+    }
+
+    #[test]
+    fn error_form_is_short() {
+        let text = error_text("unknown option --nope");
+        assert_eq!(text.lines().count(), 5);
+        assert!(text.starts_with("yavcpdf: unknown option --nope\n"));
+        assert!(text.ends_with("Try 'yavcpdf --help'."));
+        assert!(!text.contains("--fullscreen"));
     }
 
     #[test]
