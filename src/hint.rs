@@ -1,7 +1,9 @@
 //! Hint mode: labels over what can be picked, chosen by typing.
 use pdfcraft_render::PageText;
 
+use crate::app::PlaceItem;
 use crate::config::HintConfig;
+use crate::view::unrotate_point;
 
 /// The font size of every label at `zoom`: `font_size` scaled by the zoom, kept between
 /// `min_font_size` and `font_size`, whichever of the two is smaller being the minimum. Without
@@ -132,6 +134,8 @@ pub enum TargetKind {
     PdfNote(usize),
     /// A form field's widget: the field's index in the form, and the widget's in the field.
     Widget(usize, usize),
+    /// A cell of the grid that places an item.
+    Cell,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -156,6 +160,8 @@ pub enum Purpose {
     Place,
     /// A form field to fill, or a button of the form to press.
     Form,
+    /// A cell of a grid over the page, to place this item at its centre.
+    Grid(PlaceItem),
 }
 
 impl Purpose {
@@ -233,6 +239,41 @@ pub fn word_targets(text: &PageText, page: usize, area: [f32; 4]) -> Vec<Target>
     out
 }
 
+/// The cells of side `size` that cut `area` (`[x0, y0, x1, y1]` on `page`) into rows, as targets without labels yet. Cells at
+/// the right and bottom edges are clipped to the area.
+pub fn grid_targets(page: usize, area: [f32; 4], size: f32) -> Vec<Target> {
+    let mut out = Vec::new();
+    if size <= 0.0 || area[2] <= area[0] || area[3] <= area[1] {
+        return out;
+    }
+    let (cols, rows) = (((area[2] - area[0]) / size).ceil() as usize, ((area[3] - area[1]) / size).ceil() as usize);
+    for row in 0..rows {
+        for col in 0..cols {
+            let (x, y) = (area[0] + col as f32 * size, area[1] + row as f32 * size);
+            let rect = [x, y, (x + size).min(area[2]), (y + size).min(area[3])];
+            out.push(Target { label: String::new(), page, rect, kind: TargetKind::Cell });
+        }
+    }
+    out
+}
+
+/// The centre of a rectangle.
+pub fn centre(rect: [f32; 4]) -> [f32; 2] {
+    [(rect[0] + rect[2]) / 2.0, (rect[1] + rect[3]) / 2.0]
+}
+
+/// `at` moved by `step` points in each direction of `dir` (-1, 0 or 1), kept inside a page of `size`.
+pub fn moved(at: [f32; 2], dir: [f32; 2], step: f32, size: [f32; 2]) -> [f32; 2] {
+    [(at[0] + dir[0] * step).clamp(0.0, size[0]), (at[1] + dir[1] * step).clamp(0.0, size[1])]
+}
+
+/// A step `dir` on screen (x right, y down) as a direction in the points of an unrotated page of `size`
+/// shown turned by `rotation`.
+pub fn page_direction(rotation: u16, size: [f32; 2], dir: [f32; 2]) -> [f32; 2] {
+    let (to, from) = (unrotate_point(rotation, size, dir), unrotate_point(rotation, size, [0.0, 0.0]));
+    [to[0] - from[0], to[1] - from[1]]
+}
+
 pub fn union(a: [f32; 4], b: [f32; 4]) -> [f32; 4] {
     [a[0].min(b[0]), a[1].min(b[1]), a[2].max(b[2]), a[3].max(b[3])]
 }
@@ -246,8 +287,24 @@ mod tests {
     use super::*;
     use pdfcraft_render::TextGlyph;
 
+    #[test]
+    fn place_keys_move_the_preview_the_way_they_say_on_screen_at_every_rotation() {
+        use crate::view::rotate_point;
+        let size = [600.0, 800.0];
+        let start = [300.0, 400.0];
+        for rotation in [0, 90, 180, 270] {
+            let before = rotate_point(rotation, size, start);
+            for (dir, name) in [([-1.0, 0.0], "left"), ([1.0, 0.0], "right"), ([0.0, -1.0], "up"), ([0.0, 1.0], "down")] {
+                let at = moved(start, page_direction(rotation, size, dir), 2.0, size);
+                let after = rotate_point(rotation, size, at);
+                let shift = [after[0] - before[0], after[1] - before[1]];
+                assert_eq!(shift, [dir[0] * 2.0, dir[1] * 2.0], "{name} at {rotation}");
+            }
+        }
+    }
+
     fn hint_config(scale: bool) -> HintConfig {
-        HintConfig { alphabet: "ab".to_owned(), font_size: 10.0, scale, min_font_size: 6.0, scale_factor: 1.0 }
+        HintConfig { alphabet: "ab".to_owned(), font_size: 10.0, scale, min_font_size: 6.0, scale_factor: 1.0, grid_size: 50.0, place_step: 4.0 }
     }
 
     const METRICS: Metrics = Metrics { char_width: 0.5, row_height: 1.0 };
@@ -255,6 +312,106 @@ mod tests {
     /// `n` words on a line from `x`, each `step` apart and `height` tall.
     fn row(n: usize, x: f32, y: f32, step: f32, height: f32) -> Vec<[f32; 4]> {
         (0..n).map(|i| x + i as f32 * step).map(|l| [l, y, l + step - 2.0, y + height]).collect()
+    }
+
+    #[test]
+    fn the_grid_covers_the_area_with_clipped_edge_cells() {
+        let cells = grid_targets(3, [10.0, 20.0, 125.0, 90.0], 50.0);
+        assert_eq!(cells.len(), 3 * 2);
+        assert!(cells.iter().all(|c| c.page == 3 && c.kind == TargetKind::Cell));
+        assert_eq!(cells[0].rect, [10.0, 20.0, 60.0, 70.0]);
+        assert_eq!(cells[2].rect, [110.0, 20.0, 125.0, 70.0]);
+        assert_eq!(cells[5].rect, [110.0, 70.0, 125.0, 90.0]);
+        let covered: f32 = cells.iter().map(|c| (c.rect[2] - c.rect[0]) * (c.rect[3] - c.rect[1])).sum();
+        assert_eq!(covered, 115.0 * 70.0);
+        assert!(grid_targets(0, [0.0, 0.0, 0.0, 10.0], 50.0).is_empty());
+        assert!(grid_targets(0, [0.0, 0.0, 10.0, 10.0], 0.0).is_empty());
+        assert_eq!(grid_targets(0, [0.0, 0.0, 100.0, 100.0], 50.0).len(), 4);
+    }
+
+    #[test]
+    fn a_moved_position_stays_on_the_page() {
+        let size = [100.0, 50.0];
+        assert_eq!(moved([10.0, 10.0], [1.0, 0.0], 2.0, size), [12.0, 10.0]);
+        assert_eq!(moved([10.0, 10.0], [0.0, -1.0], 2.0, size), [10.0, 8.0]);
+        assert_eq!(moved([1.0, 49.0], [-1.0, 1.0], 2.0, size), [0.0, 50.0]);
+        assert_eq!(moved([99.0, 0.5], [1.0, -1.0], 2.0, size), [100.0, 0.0]);
+        assert_eq!(centre([0.0, 0.0, 10.0, 20.0]), [5.0, 10.0]);
+    }
+
+    #[test]
+    fn a_grid_area_smaller_than_a_cell_is_one_clipped_cell() {
+        let cells = grid_targets(1, [5.0, 5.0, 15.0, 8.0], 50.0);
+        assert_eq!(cells.len(), 1);
+        assert_eq!(cells[0].rect, [5.0, 5.0, 15.0, 8.0]);
+        assert_eq!(cells[0].page, 1);
+    }
+
+    #[test]
+    fn an_empty_inverted_or_negative_grid_has_no_cells() {
+        assert!(grid_targets(0, [10.0, 10.0, 10.0, 10.0], 5.0).is_empty());
+        assert!(grid_targets(0, [10.0, 0.0, 5.0, 10.0], 5.0).is_empty());
+        assert!(grid_targets(0, [0.0, 10.0, 10.0, 5.0], 5.0).is_empty());
+        assert!(grid_targets(0, [0.0, 0.0, 10.0, 10.0], -5.0).is_empty());
+        assert!(grid_targets(0, [-10.0, -10.0, -20.0, -20.0], 5.0).is_empty());
+        // A negative origin is a fine area when it has extent.
+        let cells = grid_targets(0, [-10.0, -10.0, 0.0, 0.0], 5.0);
+        assert_eq!(cells.len(), 4);
+        assert_eq!(cells[0].rect, [-10.0, -10.0, -5.0, -5.0]);
+        assert_eq!(cells[3].rect, [-5.0, -5.0, 0.0, 0.0]);
+    }
+
+    #[test]
+    fn grid_cells_run_along_rows_without_overlap_and_stay_in_the_area() {
+        let area = [3.0, 4.0, 98.0, 77.0];
+        let cells = grid_targets(2, area, 20.0);
+        assert_eq!(cells.len(), 5 * 4);
+        for c in &cells {
+            assert!(c.rect[0] >= area[0] && c.rect[1] >= area[1] && c.rect[2] <= area[2] && c.rect[3] <= area[3]);
+            assert!(c.rect[2] > c.rect[0] && c.rect[3] > c.rect[1]);
+            assert_eq!(c.page, 2);
+        }
+        // Row-major: x grows within a row, y only between rows.
+        assert!(cells[0].rect[0] < cells[1].rect[0] && cells[0].rect[1] == cells[1].rect[1]);
+        assert!(cells[5].rect[1] > cells[0].rect[1] && cells[5].rect[0] == cells[0].rect[0]);
+        let covered: f32 = cells.iter().map(|c| (c.rect[2] - c.rect[0]) * (c.rect[3] - c.rect[1])).sum();
+        assert!((covered - 95.0 * 73.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn grid_cells_get_distinct_labels_when_assigned() {
+        let cells = grid_targets(0, [0.0, 0.0, 300.0, 300.0], 20.0);
+        let n = cells.len();
+        let mut state = HintState::new(Purpose::Grid(PlaceItem::Note));
+        state.assign(cells, &['a', 'b', 'c']);
+        let mut names: Vec<_> = state.targets.iter().map(|t| t.label.clone()).collect();
+        assert!(names.iter().all(|l| !l.is_empty()));
+        names.sort();
+        names.dedup();
+        assert_eq!(names.len(), n);
+    }
+
+    #[test]
+    fn moving_clamps_at_each_edge_and_goes_the_way_asked() {
+        let size = [100.0, 50.0];
+        assert_eq!(moved([1.0, 20.0], [-1.0, 0.0], 5.0, size), [0.0, 20.0]);
+        assert_eq!(moved([98.0, 20.0], [1.0, 0.0], 5.0, size), [100.0, 20.0]);
+        assert_eq!(moved([20.0, 1.0], [0.0, -1.0], 5.0, size), [20.0, 0.0]);
+        assert_eq!(moved([20.0, 48.0], [0.0, 1.0], 5.0, size), [20.0, 50.0]);
+        assert_eq!(moved([0.0, 0.0], [-1.0, -1.0], 5.0, size), [0.0, 0.0]);
+        assert_eq!(moved([100.0, 50.0], [1.0, 1.0], 5.0, size), [100.0, 50.0]);
+        assert_eq!(moved([20.0, 20.0], [0.0, 0.0], 5.0, size), [20.0, 20.0]);
+        assert_eq!(moved([20.0, 20.0], [1.0, 1.0], 5.0, size), [25.0, 25.0]);
+        assert_eq!(moved([20.0, 20.0], [-1.0, -1.0], 5.0, size), [15.0, 15.0]);
+    }
+
+    #[test]
+    fn the_centre_of_a_clipped_cell_is_the_middle_of_what_is_left() {
+        assert_eq!(centre([110.0, 70.0, 125.0, 90.0]), [117.5, 80.0]);
+        assert_eq!(centre([-10.0, -10.0, 0.0, 0.0]), [-5.0, -5.0]);
+        let cells = grid_targets(0, [0.0, 0.0, 30.0, 10.0], 20.0);
+        assert_eq!(centre(cells[0].rect), [10.0, 5.0]);
+        assert_eq!(centre(cells[1].rect), [25.0, 5.0]);
     }
 
     #[test]

@@ -8,8 +8,8 @@ use egui::Pos2;
 use pdfcraft_render::LinkTarget;
 
 use crate::app::{
-    App, Bar, BarKind, Edit, Entry, EntryKind, FillItem, Fit, Landing, MarkOp, Mode, PasswordState, PendingPortal, Selection, SignPad, SignPlace,
-    TocState, Tool,
+    App, Bar, BarKind, Edit, Entry, EntryKind, FillItem, Fit, Landing, MarkOp, Mode, PasswordState, PendingPortal, PlaceItem, PlaceState, Selection,
+    SignPad, SignPlace, TocState, Tool,
 };
 use crate::config::{Theme, expand_home};
 use crate::doc::dest_spot;
@@ -78,6 +78,9 @@ fn signing(
 
 /// Applies a change to `annotations`, returning its opposite. A change to something else is
 /// given to `other`.
+/// Points of page kept visible around the placement preview.
+const PREVIEW_MARGIN: f32 = 24.0;
+
 fn apply_annotation_edit(annotations: &mut Vec<Annotation>, edit: Edit, other: &mut dyn FnMut(Edit) -> Edit) -> Edit {
     match edit {
         Edit::Added(items) => {
@@ -129,6 +132,14 @@ fn edits_document(action: Action) -> bool {
             | FillDot
             | FillLine
             | FillSign
+            | PlaceNote
+            | PlaceText
+            | PlaceDate
+            | PlaceCheck
+            | PlaceCross
+            | PlaceDot
+            | PlaceLine
+            | PlaceSign
             | DeleteAnnotation
             | Undo
             | Redo
@@ -758,11 +769,16 @@ impl App {
         }
     }
 
+    /// Makes what fill & sign writes, and so the preview of what is being placed, smaller or larger.
+    pub fn resize_fill(&mut self, larger: bool) {
+        self.fill_size = (self.fill_size + if larger { 1.0 } else { -1.0 }).clamp(4.0, 72.0);
+        self.say(format!("size {}", self.fill_size));
+    }
+
     /// Makes the tool's line, or what fill & sign writes, thinner or thicker.
     fn change_width(&mut self, thicker: bool) {
         if self.tool == Some(Tool::Fill) {
-            self.fill_size = (self.fill_size + if thicker { 1.0 } else { -1.0 }).clamp(4.0, 72.0);
-            self.say(format!("size {}", self.fill_size));
+            self.resize_fill(thicker);
         } else {
             self.stroke_width = (self.stroke_width + if thicker { 0.5 } else { -0.5 }).clamp(0.5, 20.0);
         }
@@ -782,6 +798,14 @@ impl App {
             Action::FillDot => self.pick_fill(FillItem::Dot),
             Action::FillLine => self.pick_fill(FillItem::Line),
             Action::FillSign => self.pick_fill(FillItem::Sign),
+            Action::PlaceNote
+            | Action::PlaceText
+            | Action::PlaceDate
+            | Action::PlaceCheck
+            | Action::PlaceCross
+            | Action::PlaceDot
+            | Action::PlaceLine
+            | Action::PlaceSign => self.start_grid(action),
             Action::ToolWidthDown => self.change_width(false),
             Action::ToolWidthUp => self.change_width(true),
             Action::Undo => self.undo_redo(true),
@@ -807,7 +831,7 @@ impl App {
         }
     }
 
-    fn date_text(&self) -> String {
+    pub fn date_text(&self) -> String {
         let mut text = String::new();
         // `format` fails on a bad pattern, and `to_string` would panic on that.
         if write!(text, "{}", chrono::Local::now().format(&self.config.hotbar.date_format)).is_err() {
@@ -856,7 +880,7 @@ impl App {
     }
 
     /// Text starts level with the place it was put at, rather than below it.
-    fn text_top(&self, at: [f32; 2]) -> [f32; 2] {
+    pub fn text_top(&self, at: [f32; 2]) -> [f32; 2] {
         [at[0], at[1] - self.fill_size * 0.6]
     }
 
@@ -868,25 +892,79 @@ impl App {
     /// What the tool in hand does at a place on a page.
     pub fn place_at(&mut self, page: usize, at: [f32; 2]) {
         match (self.tool, self.fill) {
-            (Some(Tool::Note), _) => match self.note_at(page, at) {
+            (Some(Tool::Note), _) => self.place_item(page, at, PlaceItem::Note),
+            (Some(Tool::Fill), item) => self.place_item(page, at, PlaceItem::Fill(item)),
+            _ => {}
+        }
+    }
+
+    /// Puts an item at a place on a page, as a click with its tool would.
+    pub fn place_item(&mut self, page: usize, at: [f32; 2], item: PlaceItem) {
+        if self.locked {
+            return;
+        }
+        if let Some(mark) = item.mark() {
+            return self.add_mark(page, at, mark);
+        }
+        match item {
+            PlaceItem::Note => match self.note_at(page, at) {
                 Some(id) => self.edit_note(id),
                 None => {
                     let corner = [at[0] - NOTE_SIDE / 2.0, at[1] - NOTE_SIDE / 2.0];
                     self.open_entry(Entry { kind: EntryKind::Note, page, at: corner, editing: None }, String::new());
                 }
             },
-            (Some(Tool::Fill), FillItem::Text) => {
+            PlaceItem::Fill(FillItem::Text) => {
                 let top = self.text_top(at);
                 self.open_entry(Entry { kind: EntryKind::Text, page, at: top, editing: None }, String::new());
             }
-            (Some(Tool::Fill), FillItem::Date) => self.add_text(page, self.text_top(at), self.date_text()),
-            (Some(Tool::Fill), FillItem::Check) => self.add_mark(page, at, MarkKind::Check),
-            (Some(Tool::Fill), FillItem::Cross) => self.add_mark(page, at, MarkKind::Cross),
-            (Some(Tool::Fill), FillItem::Dot) => self.add_mark(page, at, MarkKind::Dot),
-            (Some(Tool::Fill), FillItem::Line) => self.add_mark(page, at, MarkKind::Line),
-            (Some(Tool::Fill), FillItem::Sign) => self.add_signature(SignPlace::At(page, at), false),
-            _ => {}
+            PlaceItem::Fill(FillItem::Date) => self.add_text(page, self.text_top(at), self.date_text()),
+            PlaceItem::Fill(FillItem::Sign) => self.add_signature(SignPlace::At(page, at), false),
+            PlaceItem::Fill(_) => {}
         }
+    }
+
+    /// Starts the hints of a grid over the page, for the item `action` places.
+    fn start_grid(&mut self, action: Action) {
+        if self.locked {
+            return;
+        }
+        let fill = |item| Some(PlaceItem::Fill(item));
+        let item = match action {
+            Action::PlaceNote => Some(PlaceItem::Note),
+            Action::PlaceText => fill(FillItem::Text),
+            Action::PlaceDate => fill(FillItem::Date),
+            Action::PlaceCheck => fill(FillItem::Check),
+            Action::PlaceCross => fill(FillItem::Cross),
+            Action::PlaceDot => fill(FillItem::Dot),
+            Action::PlaceLine => fill(FillItem::Line),
+            Action::PlaceSign => fill(FillItem::Sign),
+            _ => None,
+        };
+        if let Some(item) = item {
+            self.mode = Mode::Hint(HintState::new(Purpose::Grid(item)));
+        }
+    }
+
+    /// Moves the preview of the item being placed one step in a direction.
+    pub fn move_preview(&mut self, dir: [f32; 2]) {
+        let Mode::Place(state) = &mut self.mode else { return };
+        let Some(size) = self.doc.layout.page_sizes.get(state.page) else { return };
+        let dir = hint::page_direction(self.doc.layout.rotation, *size, dir);
+        state.at = hint::moved(state.at, dir, self.config.hints.place_step, *size);
+        let (page, at) = (state.page, state.at);
+        let before = (self.view.x, self.view.y);
+        self.view.keep_in_view(&self.doc.layout, page, at, PREVIEW_MARGIN);
+        if before != (self.view.x, self.view.y) {
+            self.mark_dirty();
+        }
+    }
+
+    /// Places the item being placed, where its preview is.
+    pub fn finish_placing(&mut self) {
+        let Mode::Place(PlaceState { page, at, item }) = self.mode else { return };
+        self.mode = Mode::Normal;
+        self.place_item(page, at, item);
     }
 
     /// Makes what was typed in the bar.
@@ -1234,6 +1312,11 @@ impl App {
         if area[2] <= area[0] || area[3] <= area[1] { Vec::new() } else { vec![(page, area)] }
     }
 
+    fn grid_targets(&self, areas: &[(usize, [f32; 4])]) -> Vec<Target> {
+        let size = self.config.hints.grid_size;
+        areas.iter().flat_map(|(page, area)| hint::grid_targets(*page, *area, size)).collect()
+    }
+
     fn link_targets(&self, areas: &[(usize, [f32; 4])]) -> Vec<Target> {
         let info = &self.doc.info;
         let mut out = Vec::new();
@@ -1314,6 +1397,7 @@ impl App {
         let targets = match purpose {
             Purpose::Select => self.word_targets(&areas),
             Purpose::Place => self.place_targets(&areas),
+            Purpose::Grid(_) => self.grid_targets(&areas),
             Purpose::Link => self.link_targets(&areas),
             Purpose::Form => self.form_targets(&areas),
             Purpose::DeleteAnnotation => self.annotation_targets(&areas),
@@ -1331,6 +1415,7 @@ impl App {
                 Purpose::Form => "no form fields here",
                 Purpose::DeleteAnnotation => "no annotations here",
                 Purpose::Smart | Purpose::Overview => "no references here",
+                Purpose::Grid(_) => "nothing in view",
             });
             return;
         }
@@ -1356,6 +1441,10 @@ impl App {
     pub fn hint_chosen(&mut self, ctx: &egui::Context, target: &Target) {
         let purpose = if let Mode::Hint(state) = &self.mode { state.purpose } else { Purpose::Select };
         let placing = purpose == Purpose::Place;
+        if let (Purpose::Grid(item), TargetKind::Cell) = (purpose, target.kind) {
+            self.mode = Mode::Place(PlaceState { page: target.page, at: hint::centre(target.rect), item });
+            return;
+        }
         let landing = if purpose == Purpose::Overview { Landing::Overview } else { Landing::Jump };
         match target.kind {
             TargetKind::Link(index) if landing == Landing::Overview => {
@@ -1404,6 +1493,7 @@ impl App {
                 self.mode = Mode::Normal;
                 self.shown_note = Some(index);
             }
+            TargetKind::Cell => self.mode = Mode::Normal,
             TargetKind::Widget(field, widget) => {
                 self.mode = Mode::Normal;
                 self.form_activate(field, widget);
@@ -1777,6 +1867,14 @@ mod tests {
             FillDot,
             FillLine,
             FillSign,
+            PlaceNote,
+            PlaceText,
+            PlaceDate,
+            PlaceCheck,
+            PlaceCross,
+            PlaceDot,
+            PlaceLine,
+            PlaceSign,
             DeleteAnnotation,
             Undo,
             Redo,

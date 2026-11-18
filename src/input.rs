@@ -106,6 +106,7 @@ impl App {
             Mode::Normal => self.normal_key(ctx, stroke),
             Mode::Bar(_) => self.bar_key(ctx, &stroke),
             Mode::Hint(_) => self.hint_key(ctx, &stroke),
+            Mode::Place(_) => self.place_key(&stroke),
             Mode::Toc(_) => self.toc_key(&stroke),
             Mode::Bookmarks(_) => self.bookmark_key(&stroke),
             Mode::Recent(_) => self.recent_key(ctx, &stroke),
@@ -351,6 +352,30 @@ impl App {
         } else if self.keymap.is(stroke, Action::Undo) {
             pad.undo_stroke();
         }
+    }
+
+    // Placing an item with the keys.
+
+    fn place_key(&mut self, stroke: &Stroke) {
+        if self.keymap.cancels(stroke) {
+            self.mode = Mode::Normal;
+        } else if stroke.is("cr") {
+            self.finish_placing();
+        } else if let Some(dir) = self.place_direction(stroke) {
+            self.move_preview(dir);
+        } else if self.keymap.is(stroke, Action::ToolWidthDown) {
+            self.resize_fill(false);
+        } else if self.keymap.is(stroke, Action::ToolWidthUp) {
+            self.resize_fill(true);
+        }
+    }
+
+    /// The way the preview moves for a key, as (x, y) in page points, y growing downwards.
+    fn place_direction(&self, stroke: &Stroke) -> Option<[f32; 2]> {
+        [(Action::PlaceLeft, [-1.0, 0.0]), (Action::PlaceRight, [1.0, 0.0]), (Action::PlaceUp, [0.0, -1.0]), (Action::PlaceDown, [0.0, 1.0])]
+            .into_iter()
+            .find(|(action, _)| self.keymap.is(stroke, *action))
+            .map(|(_, dir)| dir)
     }
 
     // Hints.
@@ -746,6 +771,11 @@ impl App {
             // The page underneath gets nothing while the password is asked for.
             self.hover = None;
             ui.ctx().set_cursor_icon(CursorIcon::Default);
+            return;
+        }
+        if matches!(self.mode, Mode::Place(_)) {
+            // The keys place the item; the pointer does nothing meanwhile.
+            self.hover = None;
             return;
         }
         if matches!(self.mode, Mode::Sign(_)) {

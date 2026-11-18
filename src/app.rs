@@ -70,6 +70,35 @@ pub enum FillItem {
     Sign,
 }
 
+/// What the grid placement puts on the page.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PlaceItem {
+    Note,
+    Fill(FillItem),
+}
+
+impl PlaceItem {
+    /// The mark that is drawn and added for this item, if it is one.
+    pub fn mark(self) -> Option<crate::store::MarkKind> {
+        use crate::store::MarkKind;
+        match self {
+            Self::Fill(FillItem::Check) => Some(MarkKind::Check),
+            Self::Fill(FillItem::Cross) => Some(MarkKind::Cross),
+            Self::Fill(FillItem::Dot) => Some(MarkKind::Dot),
+            Self::Fill(FillItem::Line) => Some(MarkKind::Line),
+            _ => None,
+        }
+    }
+}
+
+/// An item being placed with the keys: where its preview is, in page points.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PlaceState {
+    pub page: usize,
+    pub at: [f32; 2],
+    pub item: PlaceItem,
+}
+
 impl FillItem {
     pub const ALL: [Self; 7] = [Self::Text, Self::Date, Self::Check, Self::Cross, Self::Dot, Self::Line, Self::Sign];
 
@@ -202,6 +231,7 @@ pub enum Mode {
     Normal,
     Bar(Bar),
     Hint(HintState),
+    Place(PlaceState),
     Toc(TocState),
     Bookmarks(crate::bookmarks::BookmarkState),
     Recent(crate::recent::RecentState),
@@ -1243,7 +1273,19 @@ impl eframe::App for App {
 
 #[cfg(test)]
 mod hotbar_tests {
-    use super::HotbarState;
+    use super::{FillItem, HotbarState, PlaceItem};
+    use crate::store::MarkKind;
+
+    #[test]
+    fn only_the_mark_items_are_placed_as_marks() {
+        assert_eq!(PlaceItem::Fill(FillItem::Check).mark(), Some(MarkKind::Check));
+        assert_eq!(PlaceItem::Fill(FillItem::Cross).mark(), Some(MarkKind::Cross));
+        assert_eq!(PlaceItem::Fill(FillItem::Dot).mark(), Some(MarkKind::Dot));
+        assert_eq!(PlaceItem::Fill(FillItem::Line).mark(), Some(MarkKind::Line));
+        for item in [PlaceItem::Note, PlaceItem::Fill(FillItem::Text), PlaceItem::Fill(FillItem::Date), PlaceItem::Fill(FillItem::Sign)] {
+            assert_eq!(item.mark(), None, "{item:?}");
+        }
+    }
 
     #[test]
     fn pad_undo_removes_one_stroke_at_a_time() {

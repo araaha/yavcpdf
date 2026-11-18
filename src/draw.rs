@@ -3,7 +3,7 @@ use egui::epaint::{TextShape, Vertex};
 use egui::{Align2, Color32, FontId, Mesh, Painter, Pos2, Rect, Shape, Stroke, TextureId, Vec2, ViewportBuilder, ViewportId, pos2, vec2};
 use pdfcraft_render::{RenderRequest, Tile, device_pixels, effective_scale};
 
-use crate::app::{App, Mode, Tool, ZOOM_SETTLE};
+use crate::app::{App, FillItem, Mode, PlaceItem, PlaceState, Tool, ZOOM_SETTLE};
 use crate::cache::TileKey;
 use crate::config::Color;
 use crate::hint::{CellLayout, HintState, Metrics, PAD, Purpose, Target, fitted_size, next_and_later};
@@ -277,7 +277,62 @@ impl App {
         if let Mode::Hint(state) = &self.mode {
             self.draw_hints(&painter, &view, state);
         }
+        if let Mode::Place(state) = &self.mode {
+            self.draw_place_preview(&painter, &view, state);
+        }
         self.draw_overview(ui);
+    }
+
+    /// Where the item being placed will go: the item itself, outlined in the accent colour.
+    fn draw_place_preview(&self, painter: &Painter, view: &View, state: &PlaceState) {
+        let (page, at) = (state.page, state.at);
+        let t = view.transform(&self.doc.layout, page);
+        let accent = self.config.active_theme().ui_accent.egui();
+        let size = self.fill_size;
+        let outline = |rect: [f32; 4]| {
+            painter.rect_stroke(t.rect(rect), 0.0, Stroke::new(1.5, accent), egui::StrokeKind::Outside);
+        };
+        match state.item {
+            PlaceItem::Note => {
+                let color = self.config.hotbar.colors[self.color.min(self.config.hotbar.colors.len() - 1)].rgb();
+                let corner = [at[0] - NOTE_SIDE / 2.0, at[1] - NOTE_SIDE / 2.0];
+                self.draw_note(painter, view, page, corner, color);
+                outline([corner[0], corner[1], corner[0] + NOTE_SIDE, corner[1] + NOTE_SIDE]);
+            }
+            PlaceItem::Fill(FillItem::Text | FillItem::Date) => {
+                let top = self.text_top(at);
+                if state.item == PlaceItem::Fill(FillItem::Date) {
+                    let galley = painter.layout_no_wrap(self.date_text(), FontId::proportional(font_pixels(size * view.zoom)), self.ink());
+                    let rect = text_preview_rect(top, [galley.size().x / view.zoom, galley.size().y / view.zoom]);
+                    let angle = f32::from(self.doc.layout.rotation).to_radians();
+                    painter.add(TextShape::new(t.point(top), galley, self.ink()).with_angle(angle));
+                    outline(rect);
+                } else {
+                    let rect = text_preview_rect(top, [size * 4.0, size]);
+                    let [from, to] = caret_segment(rect, size * 0.1);
+                    painter.line_segment([t.point(from), t.point(to)], Stroke::new(1.5, self.ink()));
+                    outline(rect);
+                }
+            }
+            PlaceItem::Fill(FillItem::Sign) => {
+                let width = size * 12.5;
+                match &self.signature {
+                    Some(saved) => {
+                        let [r, g, b, _] = accent.to_array();
+                        for stroke in crate::store::place_signature(saved, at, width) {
+                            self.draw_stroke(painter, view, page, &stroke, [r, g, b], size / 10.0);
+                        }
+                    }
+                    None => outline([at[0], at[1] - size, at[0] + width, at[1] + size]),
+                }
+            }
+            item => {
+                if let Some(mark) = item.mark() {
+                    self.draw_mark(painter, view, page, at, size, mark);
+                    outline(mark_rect(mark, at, size));
+                }
+            }
+        }
     }
 
     fn fill_rects(&self, painter: &Painter, view: &View, page: usize, rects: &[[f32; 4]], color: Color) {
@@ -584,8 +639,26 @@ impl App {
     }
 }
 
+/// The box of a text item with its top left at `top` and its size in page points.
+fn text_preview_rect(top: [f32; 2], size: [f32; 2]) -> [f32; 4] {
+    [top[0], top[1], top[0] + size[0], top[1] + size[1]]
+}
+
+/// A text caret: a vertical line along the box's height, `inset` in from its left edge.
+fn caret_segment(rect: [f32; 4], inset: f32) -> [[f32; 2]; 2] {
+    [[rect[0] + inset, rect[1]], [rect[0] + inset, rect[3]]]
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn text_preview_rect_and_caret_stay_inside() {
+        let rect = super::text_preview_rect([10.0, 20.0], [40.0, 12.0]);
+        assert_eq!(rect, [10.0, 20.0, 50.0, 32.0]);
+        let [from, to] = super::caret_segment(rect, 1.0);
+        assert_eq!([from, to], [[11.0, 20.0], [11.0, 32.0]]);
+    }
+
     use super::{clamp_into, clear_of, next_on_line};
     use egui::{Rect, pos2, vec2};
 

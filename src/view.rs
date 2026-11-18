@@ -485,6 +485,26 @@ impl View {
         }
         self.clamp(layout);
     }
+
+    /// Scrolls just enough that the point `p` (page points), with `margin` around it, shows.
+    pub fn keep_in_view(&mut self, layout: &Layout, page: usize, p: [f32; 2], margin: f32) {
+        let p = rotate_point(layout.rotation, layout.page_sizes[page], p);
+        let [w, h] = self.span();
+        let (m_x, m_y) = (margin.min(w / 2.0), margin.min(h / 2.0));
+        let y = layout.tops[page] + p[1];
+        if y - m_y < self.y {
+            self.y = y - m_y;
+        } else if y + m_y > self.y + h {
+            self.y = y + m_y - h;
+        }
+        let x = layout.lefts[page] + p[0];
+        if x - m_x < self.x - w / 2.0 {
+            self.x = x - m_x + w / 2.0;
+        } else if x + m_x > self.x + w / 2.0 {
+            self.x = x + m_x - w / 2.0;
+        }
+        self.clamp(layout);
+    }
 }
 
 /// Slack, in points, for a y that is a row's top up to rounding.
@@ -724,6 +744,79 @@ mod tests {
     }
 
     #[test]
+    fn keep_in_view_scrolls_just_enough() {
+        let l = layout();
+        let mut v = view(600.0, 400.0);
+        v.keep_in_view(&l, 0, [10.0, 100.0], 20.0);
+        assert_eq!(v.y, 0.0);
+        v.keep_in_view(&l, 0, [10.0, 390.0], 20.0);
+        assert_eq!(v.y, 10.0);
+        v.keep_in_view(&l, 0, [10.0, 20.0], 20.0);
+        assert_eq!(v.y, 0.0);
+    }
+
+    #[test]
+    fn keep_in_view_does_not_scroll_for_a_point_in_view() {
+        for rotation in [0_u16, 90, 180, 270] {
+            for zoom in [0.5, 1.0, 2.0] {
+                let mut l = layout();
+                l.set_rotation(rotation.into());
+                let mut v = view(300.0, 200.0);
+                v.zoom = zoom;
+                v.y = l.tops[1] + 50.0;
+                v.x = 0.0;
+                v.clamp(&l);
+                let h = v.rect.height() / zoom;
+                let shown = [v.x, v.y + h / 2.0 - l.tops[1]];
+                let at = unrotate_point(rotation, l.page_sizes[1], [shown[0] - l.lefts[1], shown[1]]);
+                let before = (v.x, v.y);
+                v.keep_in_view(&l, 1, at, 5.0);
+                assert_eq!((v.x, v.y), before, "rotation {rotation} zoom {zoom}");
+            }
+        }
+    }
+
+    #[test]
+    fn keep_in_view_follows_the_point_through_every_rotation_and_zoom() {
+        for rotation in [0_u16, 90, 180, 270] {
+            for zoom in [0.5, 1.0, 2.0, 4.0] {
+                let mut l = layout();
+                l.set_rotation(rotation.into());
+                let size = l.page_sizes[1];
+                for at in [[10.0, 10.0], [590.0, 790.0], [10.0, 790.0], [590.0, 10.0], [300.0, 400.0]] {
+                    let mut v = view(300.0, 200.0);
+                    v.zoom = zoom;
+                    v.y = 0.0;
+                    let margin = 20.0;
+                    v.keep_in_view(&l, 1, at, margin);
+                    let d = rotate_point(rotation, size, at);
+                    let [w, h] = [300.0 / zoom, 200.0 / zoom];
+                    let (m_x, m_y) = (margin.min(w / 2.0), margin.min(h / 2.0));
+                    let (x, y) = (l.lefts[1] + d[0], l.tops[1] + d[1]);
+                    let eps = 1e-3;
+                    let ctx = format!("rotation {rotation} zoom {zoom} at {at:?}");
+                    assert!(y - m_y >= v.y - eps && y + m_y <= v.y + h + eps, "y {ctx}");
+                    // The document is clamped about its widest page, so a point may stay off the side only there.
+                    let overflow = (l.max_width - w).max(0.0) / 2.0;
+                    let at_side = v.x.abs() >= overflow - eps;
+                    assert!(at_side || (x - m_x >= v.x - w / 2.0 - eps && x + m_x <= v.x + w / 2.0 + eps), "x {ctx}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn keep_in_view_uses_the_turned_page_when_rotated() {
+        let mut l = layout();
+        l.set_rotation(90);
+        // Page 0 is 600 x 800 and shows as 800 x 600: (10, 100) lands at (700, 10) from its corner.
+        let mut v = view(300.0, 200.0);
+        v.keep_in_view(&l, 0, [10.0, 100.0], 20.0);
+        assert_eq!(v.x, l.lefts[0] + 700.0 + 20.0 - 150.0);
+        assert_eq!(v.y, 0.0);
+    }
+
+    #[test]
     fn anchors_survive_a_zoom() {
         let l = layout();
         let mut v = view(600.0, 400.0);
@@ -804,7 +897,7 @@ mod tests {
             (180, [[600.0, 800.0], [600.0, 800.0], [300.0, 400.0]], [0.0, 810.0, 1620.0]),
             (270, [[800.0, 600.0], [800.0, 600.0], [400.0, 300.0]], [0.0, 610.0, 1220.0]),
         ] {
-            l.set_rotation(rotation);
+            l.set_rotation(rotation.into());
             assert_eq!(l.sizes, sizes, "{rotation}");
             assert_eq!(l.tops, tops, "{rotation}");
             assert_eq!(l.page_sizes, [[600.0, 800.0], [600.0, 800.0], [300.0, 400.0]]);
@@ -1753,9 +1846,9 @@ mod two_page_fuzz_tests {
             let n = rng.below(40);
             let page_sizes = sizes(&mut rng, n);
             for cover in [false, true] {
-                for rotation in [0, 90, 180, 270] {
+                for rotation in [0_u16, 90, 180, 270] {
                     let mut l = Layout::new(page_sizes.clone(), GAP);
-                    l.set_rotation(rotation);
+                    l.set_rotation(rotation.into());
                     l.set_two_page(true, cover);
                     check(&mut rng, &l, cover);
                 }
@@ -1857,9 +1950,9 @@ mod two_page_fuzz_tests {
         for _ in 0..200 {
             let n = rng.below(40);
             let ps = sizes(&mut rng, n);
-            for rotation in [0, 90, 180, 270] {
+            for rotation in [0_u16, 90, 180, 270] {
                 let mut l = Layout::new(ps.clone(), GAP);
-                l.set_rotation(rotation);
+                l.set_rotation(rotation.into());
                 let mut y = 0.0;
                 let mut widest: f32 = 0.0;
                 for p in 0..n {
@@ -2146,9 +2239,9 @@ mod two_page_round_two_tests {
         for _ in 0..rounds {
             let n = rng.below(30);
             let page_sizes = sizes(&mut rng, n);
-            for rotation in [0, 90, 180, 270] {
+            for rotation in [0_u16, 90, 180, 270] {
                 let mut l = Layout::new(page_sizes.clone(), 8.0);
-                l.set_rotation(rotation);
+                l.set_rotation(rotation.into());
                 check(&mut rng, &l);
             }
         }

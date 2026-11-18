@@ -107,11 +107,23 @@ pub enum Action {
     EditEraseToStart,
     EditEraseToEnd,
     EditUndo,
+    PlaceNote,
+    PlaceText,
+    PlaceDate,
+    PlaceCheck,
+    PlaceCross,
+    PlaceDot,
+    PlaceLine,
+    PlaceSign,
+    PlaceLeft,
+    PlaceRight,
+    PlaceUp,
+    PlaceDown,
 }
 
 impl Action {
     /// Every action, in declaration order. `the_list_of_actions_is_complete` keeps it whole.
-    pub const ALL: [Self; 94] = [
+    pub const ALL: [Self; 106] = [
         Self::Cancel,
         Self::ScrollDown,
         Self::ScrollUp,
@@ -206,6 +218,18 @@ impl Action {
         Self::EditEraseToStart,
         Self::EditEraseToEnd,
         Self::EditUndo,
+        Self::PlaceNote,
+        Self::PlaceText,
+        Self::PlaceDate,
+        Self::PlaceCheck,
+        Self::PlaceCross,
+        Self::PlaceDot,
+        Self::PlaceLine,
+        Self::PlaceSign,
+        Self::PlaceLeft,
+        Self::PlaceRight,
+        Self::PlaceUp,
+        Self::PlaceDown,
     ];
 
     /// The name under `[keys]`, which is also what `:name` runs. The match has no catch-all, so a
@@ -306,6 +330,18 @@ impl Action {
             Self::EditEraseToStart => "edit_erase_to_start",
             Self::EditEraseToEnd => "edit_erase_to_end",
             Self::EditUndo => "edit_undo",
+            Self::PlaceNote => "place_note",
+            Self::PlaceText => "place_text",
+            Self::PlaceDate => "place_date",
+            Self::PlaceCheck => "place_check",
+            Self::PlaceCross => "place_cross",
+            Self::PlaceDot => "place_dot",
+            Self::PlaceLine => "place_line",
+            Self::PlaceSign => "place_sign",
+            Self::PlaceLeft => "place_left",
+            Self::PlaceRight => "place_right",
+            Self::PlaceUp => "place_up",
+            Self::PlaceDown => "place_down",
         }
     }
 
@@ -317,7 +353,13 @@ impl Action {
     /// Whether the command menu lists this, and `:name` runs it: not `command` and `cancel`, which
     /// only make sense from a key, and not the `edit_*` actions, which work in a text field alone.
     pub fn is_listed(self) -> bool {
-        !matches!(self, Self::Command | Self::Cancel) && self.edit().is_none()
+        !matches!(self, Self::Command | Self::Cancel) && !self.scoped()
+    }
+
+    /// Whether this works in one mode alone, the text fields or the placing of an item, so it can
+    /// share keys with what the same keys do in normal mode.
+    pub fn scoped(self) -> bool {
+        self.edit().is_some() || matches!(self, Self::PlaceLeft | Self::PlaceRight | Self::PlaceUp | Self::PlaceDown)
     }
 
     /// What this does to a text field, if it is one of the `edit_*` actions. Those work in a text
@@ -552,7 +594,7 @@ impl Keymap {
                     continue;
                 }
             };
-            if self.binds.iter().any(|(s, a)| a.edit().is_none() && *s == sequence) {
+            if self.binds.iter().any(|(s, a)| !a.scoped() && *s == sequence) {
                 errors.push(format!("web_search.{name}: \"{keys}\" is already bound to an action"));
             } else if let Some((_, other)) = self.sites.iter().find(|(s, _)| *s == sequence) {
                 errors.push(format!("web_search.{name}: \"{keys}\" is already used by web_search.{other}"));
@@ -588,13 +630,13 @@ impl Keymap {
     }
 
     fn exact(&self, strokes: &[Stroke]) -> Option<Bound> {
-        let action = self.binds.iter().find(|(s, a)| s == strokes && a.edit().is_none()).map(|(_, a)| Bound::Action(*a));
+        let action = self.binds.iter().find(|(s, a)| s == strokes && !a.scoped()).map(|(_, a)| Bound::Action(*a));
         action.or_else(|| self.sites.iter().find(|(s, _)| s == strokes).map(|(_, name)| Bound::Web(name.clone())))
     }
 
     fn has_longer(&self, strokes: &[Stroke]) -> bool {
         let longer = |s: &Vec<Stroke>| s.len() > strokes.len() && s.starts_with(strokes);
-        self.binds.iter().any(|(s, _)| longer(s)) || self.sites.iter().any(|(s, _)| longer(s))
+        self.binds.iter().any(|(s, a)| !a.scoped() && longer(s)) || self.sites.iter().any(|(s, _)| longer(s))
     }
 }
 
@@ -958,7 +1000,7 @@ mod tests {
         }
         // The last variant's discriminant is the number of variants less one, and `name` has no
         // catch-all, so the compiler makes sure that the variant is named.
-        assert_eq!(Action::EditUndo as usize + 1, Action::ALL.len());
+        assert_eq!(Action::PlaceDown as usize + 1, Action::ALL.len());
         let source = include_str!("keymap.rs");
         let body = source.split_once("pub enum Action {").and_then(|(_, rest)| rest.split_once("\n}")).map_or("", |(body, _)| body);
         let declared = body.lines().map(str::trim).filter(|l| l.ends_with(',') && !l.starts_with(['#', '/'])).count();
@@ -971,7 +1013,7 @@ mod tests {
         for action in [Action::Command, Action::Cancel, Action::EditLeft, Action::EditEraseToEnd] {
             assert!(!action.is_listed(), "{}", action.name());
         }
-        assert_eq!(Action::ALL.iter().filter(|a| !a.is_listed()).count(), 2 + 14);
+        assert_eq!(Action::ALL.iter().filter(|a| !a.is_listed()).count(), 2 + 14 + 4);
     }
 
     #[test]
@@ -1047,7 +1089,7 @@ mod tests {
         assert_eq!(config.keys.get(&Action::RotateCcw), Some(&vec!["<".to_owned()]));
         let mut seen = std::collections::BTreeMap::new();
         // The `edit_*` actions share keys with the normal ones on purpose.
-        for (action, keys) in config.keys.iter().filter(|(a, _)| a.edit().is_none()) {
+        for (action, keys) in config.keys.iter().filter(|(a, _)| !a.scoped()) {
             for key in keys {
                 if let Some(other) = seen.insert(key.clone(), action.name()) {
                     panic!("{key} is bound to both {other} and {}", action.name());
@@ -1085,12 +1127,53 @@ mod tests {
         assert_eq!(map.exact(&[stroke("D")]), Some(Bound::Action(Action::ToggleTwoPage)));
         assert_eq!(map.exact(&[stroke("g"), stroke("D")]), Some(Bound::Action(Action::ToggleCover)));
         let mut seen = std::collections::BTreeMap::new();
-        for (action, keys) in config.keys.iter().filter(|(a, _)| a.edit().is_none()) {
+        for (action, keys) in config.keys.iter().filter(|(a, _)| !a.scoped()) {
             for key in keys {
                 if let Some(other) = seen.insert(key.clone(), action.name()) {
                     panic!("{key} is bound to both {other} and {}", action.name());
                 }
             }
+        }
+    }
+
+    #[test]
+    fn a_longer_scoped_bind_does_not_make_a_plain_key_wait() {
+        let m = map(&[("hx", Action::PlaceLeft), ("h", Action::ScrollLeft)]);
+        let mut p = Pending::default();
+        assert_eq!(type_keys(&mut p, &m, "h"), Some((Action::ScrollLeft, None)));
+    }
+
+    #[test]
+    fn the_placing_actions_are_listed_and_the_move_keys_are_scoped() {
+        for action in [
+            Action::PlaceNote,
+            Action::PlaceText,
+            Action::PlaceDate,
+            Action::PlaceCheck,
+            Action::PlaceCross,
+            Action::PlaceDot,
+            Action::PlaceLine,
+            Action::PlaceSign,
+        ] {
+            assert!(Action::ALL.contains(&action) && action.is_listed(), "{}", action.name());
+        }
+        for action in [Action::PlaceLeft, Action::PlaceRight, Action::PlaceUp, Action::PlaceDown] {
+            assert!(Action::ALL.contains(&action) && !action.is_listed() && action.scoped(), "{}", action.name());
+        }
+        let config = crate::config::Config::load_str("").unwrap();
+        let (map, errors) = Keymap::new(&config.keys, &Default::default());
+        assert!(errors.is_empty(), "{errors:?}");
+        assert_eq!(map.exact(&[stroke("a"), stroke("n")]), Some(Bound::Action(Action::PlaceNote)));
+        assert_eq!(map.exact(&[stroke("a")]), None);
+        assert_eq!(map.exact(&[stroke("d"), stroke("h")]), Some(Bound::Action(Action::DeleteAnnotation)));
+        for (key, place, scroll) in [
+            ("h", Action::PlaceLeft, Action::ScrollLeft),
+            ("j", Action::PlaceDown, Action::ScrollDown),
+            ("k", Action::PlaceUp, Action::ScrollUp),
+            ("l", Action::PlaceRight, Action::ScrollRight),
+        ] {
+            assert!(map.is(&stroke(key), place), "{key}");
+            assert_eq!(map.exact(&[stroke(key)]), Some(Bound::Action(scroll)), "{key}");
         }
     }
 

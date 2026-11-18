@@ -50,6 +50,8 @@ font_size = 10.0       # label size at 100% zoom, in points; the largest before 
 scale = true           # shrink labels as you zoom out; false gives font_size * scale_factor, at least min_font_size
 min_font_size = 4.0    # the smallest label size shown, a hard floor
 scale_factor = 1.0     # multiplies the size before the min_font_size floor
+grid_size = 50.0       # the side of a cell of the grid that place_note, place_text... cut the current page into, in page points; at least 5, so that the grid stays small
+place_step = 4.0       # how far place_left, place_right, place_up and place_down move the preview, in page points
 
 [hotbar]
 position = "bottom"       # top, bottom, left or right
@@ -200,6 +202,19 @@ protect = ["Pp"]          # a copy with a password
 unprotect = ["Pu"]        # a copy without one
 # Editing in the bars, the contents filter and the password field, and nowhere else: `<left>` still scrolls in the
 # document. A key that types a character can't be used here.
+# place_left, place_right, place_up and place_down likewise work only while an item is being placed.
+place_note = ["an"]
+place_text = ["aT"]
+place_date = ["aD"]
+place_check = ["aC"]
+place_cross = ["aX"]
+place_dot = ["aO"]
+place_line = ["aL"]
+place_sign = ["aS"]
+place_left = ["h"]
+place_right = ["l"]
+place_up = ["k"]
+place_down = ["j"]
 edit_left = ["<left>"]
 edit_right = ["<right>"]
 edit_word_left = ["<C-left>", "<A-b>"]

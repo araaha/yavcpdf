@@ -333,6 +333,7 @@ choose a colour instead, so counts such as `42G` don't work then.
 | <kbd>t</kbd> <kbd>h</kbd> / <kbd>t</kbd> <kbd>d</kbd> / <kbd>t</kbd> <kbd>e</kbd> / <kbd>t</kbd> <kbd>n</kbd> | Highlight, draw, erase, sticky note tool (shows the hotbar) |
 | <kbd>t</kbd> <kbd>f</kbd> | Fill & sign tool |
 | <kbd>t</kbd> <kbd>T</kbd> / <kbd>D</kbd> / <kbd>C</kbd> / <kbd>X</kbd> / <kbd>O</kbd> / <kbd>L</kbd> / <kbd>S</kbd> | Fill & sign: text, date, check, cross, dot, line, signature |
+| <kbd>a</kbd> <kbd>n</kbd> / <kbd>T</kbd> / <kbd>D</kbd> / <kbd>C</kbd> / <kbd>X</kbd> / <kbd>O</kbd> / <kbd>L</kbd> / <kbd>S</kbd> | Place a sticky note, text, date, check, cross, dot, line or signature by grid hint |
 | <kbd>1</kbd>-<kbd>5</kbd>, <kbd>[</kbd> <kbd>]</kbd> | With a tool: colour, thinner, thicker (fill & sign: smaller, larger) |
 | <kbd>d</kbd> <kbd>h</kbd> | Delete an annotation by hint |
 | <kbd>u</kbd> / <kbd>U</kbd> | Undo / redo |
@@ -470,6 +471,21 @@ Settings folders table under Installation), readable by you alone; `:sign` draws
 new one. On the pad, draw with the mouse; the undo key (<kbd>u</kbd> by default)
 removes the last stroke, <kbd>Enter</kbd> keeps the signature and <kbd>Esc</kbd>
 cancels. Move something by undoing it and placing it again.
+
+Items can also be placed with the keyboard alone, without a tool in hand:
+<kbd>a</kbd> <kbd>n</kbd> (note), <kbd>a</kbd> <kbd>T</kbd> (text), <kbd>a</kbd> <kbd>D</kbd>
+(date), <kbd>a</kbd> <kbd>C</kbd>, <kbd>a</kbd> <kbd>X</kbd>, <kbd>a</kbd> <kbd>O</kbd>,
+<kbd>a</kbd> <kbd>L</kbd> (check, cross, dot, line) and <kbd>a</kbd> <kbd>S</kbd> (signature)
+cut the visible part of the current page into a grid of cells, each with a hint label
+(`hints.grid_size`, in page points, 50 by default). Type a label to put a preview
+of the item at the centre of that cell. Then <kbd>h</kbd> / <kbd>l</kbd> /
+<kbd>k</kbd> / <kbd>j</kbd> move the preview left, right, up and down by `hints.place_step`
+page points (4 by default), never off the page, and <kbd>[</kbd> / <kbd>]</kbd> make the
+preview smaller or larger by changing the fill size (a note is a fixed size); they are the `place_left`, `place_right`,
+`place_up` and `place_down` actions, which work only while placing, so they don't clash
+with the same keys elsewhere. <kbd>Enter</kbd> places the item as a click would
+(a note or text asks for its text, a signature for the pad if none is saved yet),
+and <kbd>Esc</kbd> or <kbd>Ctrl</kbd>+<kbd>C</kbd> leaves without placing.
 
 ### Forms
 

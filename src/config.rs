@@ -7,6 +7,8 @@ use serde::Deserialize;
 use crate::keymap::Action;
 use crate::websearch::WebSite;
 
+/// The smallest `hints.grid_size`: a smaller cell would cut a page into millions.
+const MIN_GRID_SIZE: f32 = 5.0;
 const DEFAULTS: &str = include_str!("default_config.toml");
 
 /// A colour written `#rrggbb` or `#rrggbbaa`.
@@ -131,6 +133,10 @@ pub struct HintConfig {
     pub min_font_size: f32,
     /// Multiplier for the label size, applied before the `min_font_size` floor.
     pub scale_factor: f32,
+    /// The side of a cell of the grid that `place_*` cuts the page into, in page points.
+    pub grid_size: f32,
+    /// How far a press of `place_left`, `place_right`, `place_up` or `place_down` moves the preview, in page points.
+    pub place_step: f32,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
@@ -254,10 +260,18 @@ impl Config {
 
     fn validate_hint_sizes(&self) -> Result<(), String> {
         let hints = &self.hints;
-        for (name, size) in [("font_size", hints.font_size), ("min_font_size", hints.min_font_size), ("scale_factor", hints.scale_factor)] {
+        for (name, size) in [
+            ("font_size", hints.font_size),
+            ("min_font_size", hints.min_font_size),
+            ("scale_factor", hints.scale_factor),
+            ("place_step", hints.place_step),
+        ] {
             if !size.is_finite() || size <= 0.0 {
                 return Err(format!("hints.{name} = {size} is out of range: it must be above 0"));
             }
+        }
+        if !hints.grid_size.is_finite() || hints.grid_size < MIN_GRID_SIZE {
+            return Err(format!("hints.grid_size = {} is out of range: it must be at least {MIN_GRID_SIZE}", hints.grid_size));
         }
         Ok(())
     }
@@ -504,6 +518,25 @@ mod tests {
         assert!(Config::load_str("[hints]\nmin_font_size = 12.0").is_ok());
         assert!(Config::load_str("[hints]\nfont_size = 4.0").is_ok());
         assert!(Config::load_str("[hints]\nfont_size = 4.0\nmin_font_size = 2.0").is_ok());
+    }
+
+    #[test]
+    fn grid_size_and_place_step_are_checked() {
+        assert!(Config::load_str("[hints]\ngrid_size = 5.0\nplace_step = 0.5").is_ok());
+        for text in [
+            "[hints]\ngrid_size = 4.9",
+            "[hints]\ngrid_size = 0",
+            "[hints]\ngrid_size = -50.0",
+            "[hints]\ngrid_size = inf",
+            "[hints]\ngrid_size = nan",
+            "[hints]\nplace_step = 0",
+            "[hints]\nplace_step = -1.0",
+            "[hints]\nplace_step = inf",
+            "[hints]\nplace_step = nan",
+        ] {
+            let error = Config::load_str(text).expect_err(text);
+            assert!(error.contains(if text.contains("grid_size") { "hints.grid_size" } else { "hints.place_step" }), "{text}: {error}");
+        }
     }
 
     #[test]

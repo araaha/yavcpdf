@@ -192,7 +192,11 @@ impl App {
                 (Purpose::Overview, _) => "HINT: overview".to_owned(),
                 (Purpose::Place, _) => "HINT: place".to_owned(),
                 (Purpose::Form, _) => "HINT: form field".to_owned(),
+                (Purpose::Grid(_), _) => "HINT: place at".to_owned(),
             };
+        }
+        if matches!(self.mode, Mode::Place(_)) {
+            return "PLACE: move, enter places, esc cancels".to_owned();
         }
         if let Some(overview) = &self.overview {
             return format!("OVERVIEW: {} ({}/{})", overview.title, overview.index + 1, overview.places.len());
