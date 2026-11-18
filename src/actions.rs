@@ -8,8 +8,8 @@ use egui::Pos2;
 use pdfcraft_render::LinkTarget;
 
 use crate::app::{
-    App, Bar, BarKind, Edit, Entry, EntryKind, FillItem, Fit, Landing, MarkOp, Mode, PasswordState, PendingPortal, PlaceItem, PlaceState, Selection,
-    SignPad, SignPlace, TocState, Tool,
+    App, Bar, BarKind, Edit, Entry, EntryKind, FieldSign, FillItem, Fit, Landing, MarkOp, Mode, PasswordState, PendingPortal, PlaceItem, PlaceState,
+    Selection, SignPad, SignPlace, TocState, Tool,
 };
 use crate::config::{Theme, expand_home};
 use crate::doc::dest_spot;
@@ -46,25 +46,28 @@ fn sign_choice(signed: bool, saved: Option<&store::Strokes>, existing: Option<u6
     }
 }
 
-/// The annotations after signing at `place` with the annotation `id`, and the edit that makes
-/// it: one step that swaps `old` for the new signature, or a plain addition.
-fn signing(
-    annotations: &[Annotation],
-    id: u64,
-    saved: &store::Strokes,
-    place: SignPlace,
-    fill_size: f32,
-    old: Option<u64>,
-) -> (Edit, Vec<Annotation>) {
-    let (page, strokes, width) = match place {
-        // A signature runs about twelve times as wide as the text beside it is tall.
-        SignPlace::At(page, at) => (page, store::place_signature(saved, at, fill_size * 12.5), fill_size / 10.0),
+/// The page, strokes and pen width of a signature at `place`, the strokes moved by `offset`
+/// (the preview moved from where a field puts it). A signature is never wider than a free one
+/// at `fill_size`, which a field shrinks further to fit.
+pub fn sign_strokes(saved: &store::Strokes, place: SignPlace, fill_size: f32, offset: [f32; 2]) -> (usize, store::Strokes, f32) {
+    // A signature runs about twelve times as wide as the text beside it is tall.
+    let max_width = fill_size * 12.5;
+    match place {
+        SignPlace::At(page, at) => (page, store::place_signature(saved, at, max_width), fill_size / 10.0),
         SignPlace::Field(page, rect) => {
-            let strokes = store::fit_signature(saved, rect);
+            let mut strokes = store::fit_signature(saved, rect, max_width);
             let width = store::field_pen_width(&strokes);
+            for p in strokes.iter_mut().flatten() {
+                *p = [p[0] + offset[0], p[1] + offset[1]];
+            }
             (page, strokes, width)
         }
-    };
+    }
+}
+
+/// The annotations after signing at `place` with the annotation `id`, and the edit that makes
+/// it: one step that swaps `old` for the new signature, or a plain addition.
+fn signing(annotations: &[Annotation], id: u64, page: usize, strokes: store::Strokes, width: f32, old: Option<u64>) -> (Edit, Vec<Annotation>) {
     let signed = Annotation::Signature { id, page, strokes, width };
     let mut list = annotations.to_vec();
     let removed = old.and_then(|old| list.iter().position(|a| a.id() == old)).map(|index| list.remove(index));
@@ -863,20 +866,31 @@ impl App {
         match sign_choice(signed, self.signature.as_ref(), old, place) {
             SignChoice::Refuse(why) => self.say(why),
             SignChoice::OpenPad(place) => self.mode = Mode::Sign(SignPad { place: Some(place), ..Default::default() }),
-            choice @ (SignChoice::Sign(_) | SignChoice::Replace(..)) => {
-                let (place, old) = match choice {
-                    SignChoice::Replace(old, place) => (place, Some(old)),
-                    SignChoice::Sign(place) | SignChoice::OpenPad(place) => (place, None),
-                    SignChoice::Refuse(_) => return,
-                };
-                let (Some(signature), id) = (self.signature.as_ref(), self.side.take_id()) else { return };
-                let (edit, annotations) = signing(&self.side.annotations, id, signature, place, self.fill_size, old);
-                self.side.annotations = annotations;
-                self.undo.push(edit);
-                self.redo.clear();
-                self.mark_dirty();
-            }
+            SignChoice::Sign(place) => self.sign_or_preview(place, None),
+            SignChoice::Replace(old, place) => self.sign_or_preview(place, Some(old)),
         }
+    }
+
+    /// A field's signature is previewed first, to be moved and resized; a point is signed at once.
+    fn sign_or_preview(&mut self, place: SignPlace, old: Option<u64>) {
+        match place {
+            SignPlace::Field(page, rect) => {
+                let field = Some(FieldSign { rect, old });
+                self.mode = Mode::Place(PlaceState { page, at: [rect[0], rect[3]], item: PlaceItem::Fill(FillItem::Sign), field });
+            }
+            SignPlace::At(..) => self.sign_now(place, [0.0, 0.0], old),
+        }
+    }
+
+    /// Signs at the place, its strokes moved by `offset`, swapping the signature `old` if given.
+    fn sign_now(&mut self, place: SignPlace, offset: [f32; 2], old: Option<u64>) {
+        let (Some(signature), id) = (self.signature.as_ref(), self.side.take_id()) else { return };
+        let (page, strokes, width) = sign_strokes(signature, place, self.fill_size, offset);
+        let (edit, annotations) = signing(&self.side.annotations, id, page, strokes, width, old);
+        self.side.annotations = annotations;
+        self.undo.push(edit);
+        self.redo.clear();
+        self.mark_dirty();
     }
 
     /// Text starts level with the place it was put at, rather than below it.
@@ -962,9 +976,12 @@ impl App {
 
     /// Places the item being placed, where its preview is.
     pub fn finish_placing(&mut self) {
-        let Mode::Place(PlaceState { page, at, item }) = self.mode else { return };
+        let Mode::Place(PlaceState { page, at, item, field }) = self.mode else { return };
         self.mode = Mode::Normal;
-        self.place_item(page, at, item);
+        match field {
+            Some(field) => self.sign_now(SignPlace::Field(page, field.rect), field.offset(at), field.old),
+            None => self.place_item(page, at, item),
+        }
     }
 
     /// Makes what was typed in the bar.
@@ -1442,7 +1459,7 @@ impl App {
         let purpose = if let Mode::Hint(state) = &self.mode { state.purpose } else { Purpose::Select };
         let placing = purpose == Purpose::Place;
         if let (Purpose::Grid(item), TargetKind::Cell) = (purpose, target.kind) {
-            self.mode = Mode::Place(PlaceState { page: target.page, at: hint::centre(target.rect), item });
+            self.mode = Mode::Place(PlaceState { page: target.page, at: hint::centre(target.rect), item, field: None });
             return;
         }
         let landing = if purpose == Purpose::Overview { Landing::Overview } else { Landing::Jump };
@@ -2056,12 +2073,74 @@ mod turn_anchor_tests {
 
 #[cfg(test)]
 mod sign_tests {
-    use super::{SignChoice, apply_annotation_edit, sign_choice, signing};
+    use super::{SignChoice, apply_annotation_edit, sign_choice, sign_strokes};
     use crate::app::Edit;
     use crate::app::SignPlace;
     use crate::store::Annotation;
 
+    fn signing(
+        annotations: &[Annotation],
+        id: u64,
+        saved: &crate::store::Strokes,
+        place: SignPlace,
+        fill_size: f32,
+        old: Option<u64>,
+    ) -> (Edit, Vec<Annotation>) {
+        let (page, strokes, width) = sign_strokes(saved, place, fill_size, [0.0, 0.0]);
+        super::signing(annotations, id, page, strokes, width, old)
+    }
+
     const FIELD: SignPlace = SignPlace::Field(0, [0.0, 0.0, 100.0, 40.0]);
+
+    fn saved() -> crate::store::Strokes {
+        vec![vec![[0.0, 0.0], [1.0, 0.5]], vec![[0.2, 0.1]]]
+    }
+
+    #[test]
+    fn a_field_signature_with_no_offset_is_the_capped_aligned_fit() {
+        let rect = [30.0, 50.0, 530.0, 150.0];
+        let (page, strokes, _) = sign_strokes(&saved(), SignPlace::Field(2, rect), 10.0, [0.0, 0.0]);
+        assert_eq!(page, 2);
+        assert_eq!(strokes, crate::store::fit_signature(&saved(), rect, 125.0));
+        let [l, _, r, b] = crate::store::signature_extent(&strokes).unwrap();
+        assert!((r - l - 125.0).abs() < 1e-3, "capped at twelve and a half times the size");
+        assert!((l - 34.0).abs() < 1e-3 && (b - 146.0).abs() < 1e-3, "left aligned on the bottom with a margin");
+    }
+
+    #[test]
+    fn a_field_offset_shifts_every_point_by_exactly_that_offset() {
+        let rect = [30.0, 50.0, 130.0, 90.0];
+        let (_, base, _) = sign_strokes(&saved(), SignPlace::Field(0, rect), 12.0, [0.0, 0.0]);
+        let (_, moved, _) = sign_strokes(&saved(), SignPlace::Field(0, rect), 12.0, [7.0, -3.0]);
+        assert_eq!(base.len(), moved.len());
+        for (a, b) in base.iter().flatten().zip(moved.iter().flatten()) {
+            assert!((b[0] - a[0] - 7.0).abs() < 1e-3 && (b[1] - a[1] + 3.0).abs() < 1e-3);
+        }
+    }
+
+    #[test]
+    fn the_pen_width_is_the_same_for_the_preview_and_the_signing() {
+        let (_, strokes, width) = sign_strokes(&saved(), FIELD, 12.0, [0.0, 0.0]);
+        assert_eq!(width, crate::store::field_pen_width(&strokes));
+        let (_, _, moved) = sign_strokes(&saved(), FIELD, 12.0, [9.0, 9.0]);
+        assert_eq!(width, moved, "moving the preview does not change the pen");
+        let (_, _, free) = sign_strokes(&saved(), SignPlace::At(0, [5.0, 5.0]), 12.0, [0.0, 0.0]);
+        assert_eq!(free, 1.2, "a free signature's pen is a tenth of the size");
+    }
+
+    #[test]
+    fn signing_over_an_old_one_is_one_group_and_otherwise_a_plain_addition() {
+        let old = Annotation::Signature { id: 1, page: 0, strokes: vec![vec![[0.0, 0.0]]], width: 1.0 };
+        let (edit, _) = super::signing(std::slice::from_ref(&old), 2, 0, saved(), 1.0, Some(1));
+        let Edit::Group(steps) = edit else { panic!("one group") };
+        assert!(matches!(&steps[..], [Edit::Removed(r), Edit::Added(a)] if r[0].id() == 1 && a[0].id() == 2));
+        let (edit, list) = super::signing(std::slice::from_ref(&old), 2, 0, saved(), 1.0, None);
+        assert!(matches!(&edit, Edit::Added(a) if a.len() == 1 && a[0].id() == 2));
+        assert_eq!(list.len(), 2);
+        // An old id that is not in the list is also a plain addition.
+        let (edit, _) = super::signing(&[old], 3, 0, saved(), 1.0, Some(99));
+        assert!(matches!(edit, Edit::Added(_)));
+    }
 
     #[test]
     fn signing_is_decided_by_what_is_signed_saved_and_there() {
@@ -2097,6 +2176,22 @@ mod sign_tests {
         };
         assert!(width(SignPlace::Field(0, [0.0, 0.0, 400.0, 200.0])) > width(SignPlace::Field(0, [0.0, 0.0, 40.0, 20.0])));
         assert_eq!(width(SignPlace::At(0, [0.0, 0.0])), 1.2);
+    }
+
+    #[test]
+    fn a_field_signature_is_capped_by_the_fill_size_and_moves_with_the_offset() {
+        let saved = vec![vec![[0.0, 0.0], [1.0, 0.5]]];
+        let field = SignPlace::Field(0, [0.0, 0.0, 1000.0, 500.0]);
+        let width = |size: f32, offset| {
+            let (_, strokes, _) = sign_strokes(&saved, field, size, offset);
+            let xs: Vec<f32> = strokes.iter().flatten().map(|p| p[0]).collect();
+            (xs.iter().cloned().fold(f32::MAX, f32::min), xs.iter().cloned().fold(f32::MIN, f32::max))
+        };
+        let (l, r) = width(10.0, [0.0, 0.0]);
+        assert!((r - l - 125.0).abs() < 1e-3, "at most twelve and a half times the size");
+        assert!(width(20.0, [0.0, 0.0]).1 - width(20.0, [0.0, 0.0]).0 > r - l, "larger when the size grows");
+        let (l2, _) = width(10.0, [30.0, 0.0]);
+        assert!((l2 - l - 30.0).abs() < 1e-3, "the offset moves it");
     }
 
     #[test]

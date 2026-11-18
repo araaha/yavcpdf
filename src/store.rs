@@ -320,17 +320,25 @@ pub fn place_signature(strokes: &[Vec<[f32; 2]>], at: [f32; 2], width: f32) -> S
     strokes.iter().map(|s| s.iter().map(|p| [at[0] + p[0] * width, at[1] + (p[1] - middle) * width]).collect()).collect()
 }
 
-/// A saved signature scaled to fit inside `rect` (view points) with a small margin, centred, its
-/// shape kept. A dot, which has no size to scale, is put in the middle at its own size.
-pub fn fit_signature(strokes: &[Vec<[f32; 2]>], rect: [f32; 4]) -> Strokes {
+/// A saved signature scaled to fit inside `rect` (view points) with a small margin, never wider
+/// than `max_width`, its shape kept. It sits at the left of the field with its bottom just above
+/// the field's bottom edge, like a hand signature on a line. A dot, which has no size to scale,
+/// is put in the middle at its own size.
+pub fn fit_signature(strokes: &[Vec<[f32; 2]>], rect: [f32; 4], max_width: f32) -> Strokes {
     let Some([left, top, right, bottom]) = signature_extent(strokes) else { return Vec::new() };
     let (field_w, field_h) = ((rect[2] - rect[0]).max(0.0), (rect[3] - rect[1]).max(0.0));
     let margin = (field_w.min(field_h) * 0.1).min(4.0);
     let (width, height) = (right - left, bottom - top);
     let room = |field: f32, size: f32| if size > 1e-6 { (field - 2.0 * margin).max(0.0) / size } else { f32::INFINITY };
-    let scale = room(field_w, width).min(room(field_h, height));
-    let scale = if scale.is_finite() { scale } else { 1.0 };
-    let origin = [(rect[0] + rect[2]) / 2.0 - (left + right) / 2.0 * scale, (rect[1] + rect[3]) / 2.0 - (top + bottom) / 2.0 * scale];
+    let cap = if width > 1e-6 { max_width.max(0.0) / width } else { f32::INFINITY };
+    let scale = room(field_w, width).min(room(field_h, height)).min(cap);
+    let dot = !scale.is_finite();
+    let scale = if dot { 1.0 } else { scale };
+    let origin = if dot {
+        [(rect[0] + rect[2]) / 2.0 - (left + right) / 2.0, (rect[1] + rect[3]) / 2.0 - (top + bottom) / 2.0]
+    } else {
+        [rect[0] + margin - left * scale, rect[3] - margin - bottom * scale]
+    };
     strokes.iter().map(|s| s.iter().map(|p| [origin[0] + p[0] * scale, origin[1] + p[1] * scale]).collect()).collect()
 }
 
@@ -1890,31 +1898,45 @@ mod signature_tests {
     #[test]
     fn a_signature_fits_a_wide_field() {
         let normal = normalize_signature(&[vec![[0.0, 0.0], [100.0, 50.0]]]).unwrap();
-        let [l, t, r, b] = extent(&fit_signature(&normal, [100.0, 100.0, 300.0, 180.0]));
+        let [l, t, r, b] = extent(&fit_signature(&normal, [100.0, 100.0, 300.0, 180.0], f32::INFINITY));
         assert!(l >= 100.0 && r <= 300.0 && t >= 100.0 && b <= 180.0);
         assert!(((r - l) / (b - t) - 2.0).abs() < 1e-3, "aspect kept");
-        assert!(((l + r) / 2.0 - 200.0).abs() < 1e-3 && ((t + b) / 2.0 - 140.0).abs() < 1e-3, "centred");
+        assert!((l - 104.0).abs() < 1e-3 && (b - 176.0).abs() < 1e-3, "left and bottom, inside the margin");
         assert!((b - t - 72.0).abs() < 1e-3, "the height limits it");
     }
 
     #[test]
     fn a_signature_fits_a_tall_field() {
         let normal = normalize_signature(&[vec![[0.0, 0.0], [100.0, 50.0]]]).unwrap();
-        let [l, t, r, b] = extent(&fit_signature(&normal, [0.0, 0.0, 60.0, 200.0]));
+        let [l, t, r, b] = extent(&fit_signature(&normal, [0.0, 0.0, 60.0, 200.0], f32::INFINITY));
         assert!(l >= 0.0 && r <= 60.0 && t >= 0.0 && b <= 200.0);
         assert!((r - l - 52.0).abs() < 1e-3, "the width limits it");
-        assert!(((t + b) / 2.0 - 100.0).abs() < 1e-3);
+        assert!((l - 4.0).abs() < 1e-3 && (b - 196.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn a_field_signature_is_capped_in_width_and_stays_left_and_low() {
+        let normal = normalize_signature(&[vec![[0.0, 0.0], [100.0, 50.0]]]).unwrap();
+        let rect = [100.0, 100.0, 500.0, 300.0];
+        let [l, t, r, b] = extent(&fit_signature(&normal, rect, 120.0));
+        assert!((r - l - 120.0).abs() < 1e-3, "no wider than the cap");
+        assert!((b - t - 60.0).abs() < 1e-3, "shape kept");
+        assert!((l - 104.0).abs() < 1e-3 && (b - 296.0).abs() < 1e-3, "left margin, bottom margin");
+        let [l, _, r, _] = extent(&fit_signature(&normal, [0.0, 0.0, 60.0, 200.0], 120.0));
+        assert!((r - l - 52.0).abs() < 1e-3, "a small field still shrinks it");
+        let [l, _, r, _] = extent(&fit_signature(&normal, rect, 0.0));
+        assert!((r - l).abs() < 1e-3, "a zero cap leaves nothing");
     }
 
     #[test]
     fn a_dot_is_centred_without_dividing_by_zero() {
         let normal = normalize_signature(&[vec![[5.0, 5.0]]]).unwrap();
-        let fitted = fit_signature(&normal, [10.0, 20.0, 50.0, 40.0]);
+        let fitted = fit_signature(&normal, [10.0, 20.0, 50.0, 40.0], f32::INFINITY);
         assert_eq!(fitted.len(), 1);
         let p = fitted[0][0];
         assert!(p[0].is_finite() && p[1].is_finite());
         assert!((p[0] - 30.0).abs() < 1e-3 && (p[1] - 30.0).abs() < 1e-3);
-        assert!(fit_signature(&[], [0.0, 0.0, 1.0, 1.0]).is_empty());
+        assert!(fit_signature(&[], [0.0, 0.0, 1.0, 1.0], f32::INFINITY).is_empty());
     }
 
     #[test]
@@ -1930,7 +1952,7 @@ mod signature_tests {
 
     fn assert_fits(strokes: &[Vec<[f32; 2]>], rect: [f32; 4]) {
         let source = extent(strokes);
-        let [l, t, r, b] = extent(&fit_signature(strokes, rect));
+        let [l, t, r, b] = extent(&fit_signature(strokes, rect, f32::INFINITY));
         let (fw, fh) = (rect[2] - rect[0], rect[3] - rect[1]);
         let margin = (fw.min(fh) * 0.1).min(4.0);
         let eps = 1e-3;
@@ -1938,8 +1960,8 @@ mod signature_tests {
         assert!(t >= rect[1] + margin - eps && b <= rect[3] - margin + eps, "{rect:?} y: {t}..{b}");
         let (sw, sh) = (source[2] - source[0], source[3] - source[1]);
         assert!((((r - l) * sh) - ((b - t) * sw)).abs() < 1e-2 * sw.max(sh).max(1.0), "{rect:?} aspect: {}x{}", r - l, b - t);
-        assert!(((l + r) / 2.0 - (rect[0] + rect[2]) / 2.0).abs() < eps, "{rect:?} centred x");
-        assert!(((t + b) / 2.0 - (rect[1] + rect[3]) / 2.0).abs() < eps, "{rect:?} centred y");
+        assert!((l - (rect[0] + margin)).abs() < eps, "{rect:?} left");
+        assert!((b - (rect[3] - margin)).abs() < eps, "{rect:?} bottom");
         // One dimension is used up, so it is as large as can be.
         let (room_w, room_h) = (fw - 2.0 * margin, fh - 2.0 * margin);
         assert!((r - l - room_w).abs() < eps || (b - t - room_h).abs() < eps, "{rect:?} one side fills the room");
@@ -1968,7 +1990,7 @@ mod signature_tests {
     fn a_degenerate_field_gives_finite_points() {
         let normal = normalize_signature(&[vec![[0.0, 0.0], [100.0, 50.0]]]).unwrap();
         for rect in [[10.0, 10.0, 10.0, 10.0], [20.0, 20.0, 10.0, 10.0]] {
-            let fitted = fit_signature(&normal, rect);
+            let fitted = fit_signature(&normal, rect, f32::INFINITY);
             assert!(fitted.iter().flatten().all(|p| p[0].is_finite() && p[1].is_finite()), "{rect:?}");
         }
     }
@@ -1992,9 +2014,29 @@ mod signature_tests {
     }
 
     #[test]
+    fn a_degenerate_field_gives_a_finite_zero_sized_signature() {
+        let normal = normalize_signature(&[vec![[0.0, 0.0], [100.0, 50.0]]]).unwrap();
+        for rect in [[10.0, 10.0, 10.0, 90.0], [10.0, 10.0, 90.0, 10.0], [10.0, 10.0, 10.0, 10.0], [50.0, 50.0, 20.0, 20.0]] {
+            let fitted = fit_signature(&normal, rect, f32::INFINITY);
+            assert!(fitted.iter().flatten().all(|p| p[0].is_finite() && p[1].is_finite()), "{rect:?}");
+            let [l, t, r, b] = extent(&fitted);
+            assert!(r - l < 1e-3 || b - t < 1e-3, "{rect:?} leaves no room");
+        }
+    }
+
+    #[test]
+    fn a_dot_signature_is_centred_in_the_field_at_its_own_size() {
+        let dot = vec![vec![[3.0, 4.0]]];
+        assert_eq!(fit_signature(&dot, [0.0, 0.0, 100.0, 40.0], 50.0), vec![vec![[50.0, 20.0]]]);
+        let two = vec![vec![[0.0, 0.0], [0.0, 0.0]]];
+        assert_eq!(fit_signature(&two, [10.0, 10.0, 30.0, 50.0], 50.0), vec![vec![[20.0, 30.0], [20.0, 30.0]]]);
+        assert!(fit_signature(&[], [0.0, 0.0, 10.0, 10.0], 5.0).is_empty());
+    }
+
+    #[test]
     fn the_pen_scales_with_the_fit_within_a_range() {
         let normal = normalize_signature(&[vec![[0.0, 0.0], [100.0, 50.0]]]).unwrap();
-        let pen = |w: f32| field_pen_width(&fit_signature(&normal, [0.0, 0.0, w, 1000.0]));
+        let pen = |w: f32| field_pen_width(&fit_signature(&normal, [0.0, 0.0, w, 1000.0], f32::INFINITY));
         assert!(pen(400.0) > pen(200.0));
         assert_eq!(pen(10.0), 0.5, "a tiny field has a floor");
         assert_eq!(pen(5000.0), 3.0, "a huge one a ceiling");

@@ -550,10 +550,13 @@ page may take a moment to refresh after a change.
 > not supported, and nothing is ever sent. Password fields can't be filled in,
 > as what is typed would be kept as plain text in the sidecar.
 
-Picking a **signature field** (or clicking it) signs into it: your saved
-signature is scaled to fit the field, centred. The first time, with none saved,
-the signature pad opens (as for fill & sign) and the drawing is signed into the
-field when you finish it. Picking a field with a signature of
+Picking a **signature field** (or clicking it) previews your saved signature in
+it: scaled to fit the field but never larger than a signature placed by hand at
+the current fill size, left-aligned and sitting on the bottom of the field.
+<kbd>h</kbd> / <kbd>l</kbd> / <kbd>k</kbd> / <kbd>j</kbd> move the preview,
+<kbd>[</kbd> / <kbd>]</kbd> make it smaller or larger (the fill size), <kbd>Enter</kbd>
+signs exactly as shown and <kbd>Esc</kbd> cancels, adding nothing. The first time, with
+none saved, the signature pad opens (as for fill & sign) and finishing it shows the preview. Picking a field with a signature of
 yours mostly inside it, including one placed by hand with the fill tool,
 replaces that signature, and one undo brings the old one back. Read-only
 signature fields can't be picked, and one that the PDF has already signed is

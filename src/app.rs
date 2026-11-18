@@ -97,6 +97,25 @@ pub struct PlaceState {
     pub page: usize,
     pub at: [f32; 2],
     pub item: PlaceItem,
+    /// Set when the item is a signature for a form field: `at` then starts at the field's
+    /// bottom left and the preview is moved from there.
+    pub field: Option<FieldSign>,
+}
+
+/// The form signature field a signature is being placed in.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct FieldSign {
+    /// The field's rectangle, in view points.
+    pub rect: [f32; 4],
+    /// The signature of the user's already in it, to be replaced.
+    pub old: Option<u64>,
+}
+
+impl FieldSign {
+    /// Where the preview starts and how far `at` has moved from there.
+    pub fn offset(&self, at: [f32; 2]) -> [f32; 2] {
+        [at[0] - self.rect[0], at[1] - self.rect[3]]
+    }
 }
 
 impl FillItem {
@@ -1273,8 +1292,16 @@ impl eframe::App for App {
 
 #[cfg(test)]
 mod hotbar_tests {
-    use super::{FillItem, HotbarState, PlaceItem};
+    use super::{FieldSign, FillItem, HotbarState, PlaceItem};
     use crate::store::MarkKind;
+
+    #[test]
+    fn a_field_offset_is_the_move_from_its_bottom_left() {
+        let field = FieldSign { rect: [10.0, 20.0, 110.0, 60.0], old: None };
+        assert_eq!(field.offset([10.0, 60.0]), [0.0, 0.0], "the start point is no move");
+        assert_eq!(field.offset([15.5, 50.0]), [5.5, -10.0]);
+        assert_eq!(field.offset([0.0, 70.0]), [-10.0, 10.0]);
+    }
 
     #[test]
     fn only_the_mark_items_are_placed_as_marks() {

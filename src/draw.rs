@@ -3,7 +3,7 @@ use egui::epaint::{TextShape, Vertex};
 use egui::{Align2, Color32, FontId, Mesh, Painter, Pos2, Rect, Shape, Stroke, TextureId, Vec2, ViewportBuilder, ViewportId, pos2, vec2};
 use pdfcraft_render::{RenderRequest, Tile, device_pixels, effective_scale};
 
-use crate::app::{App, FillItem, Mode, PlaceItem, PlaceState, Tool, ZOOM_SETTLE};
+use crate::app::{App, FieldSign, FillItem, Mode, PlaceItem, PlaceState, SignPlace, Tool, ZOOM_SETTLE};
 use crate::cache::TileKey;
 use crate::config::Color;
 use crate::hint::{CellLayout, HintState, Metrics, PAD, Purpose, Target, fitted_size, next_and_later};
@@ -319,8 +319,13 @@ impl App {
                 match &self.signature {
                     Some(saved) => {
                         let [r, g, b, _] = accent.to_array();
-                        for stroke in crate::store::place_signature(saved, at, width) {
-                            self.draw_stroke(painter, view, page, &stroke, [r, g, b], size / 10.0);
+                        let (place, offset) = match state.field {
+                            Some(field) => (SignPlace::Field(page, field.rect), field.offset(at)),
+                            None => (SignPlace::At(page, at), [0.0, 0.0]),
+                        };
+                        let (_, strokes, pen) = crate::actions::sign_strokes(saved, place, size, offset);
+                        for stroke in strokes {
+                            self.draw_stroke(painter, view, page, &stroke, [r, g, b], pen);
                         }
                     }
                     None => outline([at[0], at[1] - size, at[0] + width, at[1] + size]),
@@ -384,6 +389,11 @@ impl App {
         }
     }
 
+    /// Whether the signature `id` is being replaced by the preview of a new one in its field.
+    fn previewed_over(&self, id: u64) -> bool {
+        matches!(&self.mode, Mode::Place(PlaceState { field: Some(FieldSign { old: Some(old), .. }), .. }) if *old == id)
+    }
+
     fn draw_annotation(&self, painter: &Painter, view: &View, annotation: &Annotation) {
         match annotation {
             Annotation::Highlight { page, rects, color, .. } => {
@@ -403,6 +413,7 @@ impl App {
                 painter.add(TextShape::new(point, galley, self.ink()).with_angle(angle));
             }
             Annotation::Mark { page, at, size, mark, .. } => self.draw_mark(painter, view, *page, *at, *size, *mark),
+            Annotation::Signature { id, .. } if self.previewed_over(*id) => {}
             Annotation::Signature { page, strokes, width, .. } => {
                 let [r, g, b, _] = self.ink().to_array();
                 for stroke in strokes {
