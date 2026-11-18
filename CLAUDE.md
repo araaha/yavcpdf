@@ -27,7 +27,7 @@ Tests are `#[cfg(test)]` modules at the bottom of the file they test; there is n
 - `view.rs`, `draw.rs`, `chrome.rs`: page layout and the view; drawing pages; bars and panels
 - `store.rs`: what is kept per document outside the PDF (position, marks, bookmarks, history, annotations)
 - `search.rs`, `hint.rs`, `smart.rs`, `overview.rs`, `contents.rs`, `bookmarks.rs`, `recent.rs`,
-  `present.rs`, `reflow.rs`: one feature each
+  `present.rs`, `reflow.rs`, `info.rs`: one feature each
 - `form.rs`, `export.rs`, `protect.rs`: forms, and writing copies of the PDF
 
 ## Rules

@@ -642,6 +642,7 @@ is no way to protect it in place.
 | `:toc` | Open the table of contents |
 | `:hotbar` | Show or hide the hotbar |
 | `:recent` | List the recent files |
+| `:info` | Show the document's properties in a panel: the file and its size, the page count, the size of the current page (in points and millimetres, with its paper name such as A4 or Letter when it is close to one), the PDF version, the title, author, subject, keywords, creator, producer and dates, and whether it is encrypted, has a form, an outline, digital signatures or tags. Rows with nothing to show are left out. <kbd>j</kbd> <kbd>k</kbd> or the wheel scroll it when it is taller than the window; <kbd>Esc</kbd>, <kbd>Ctrl+C</kbd> or <kbd>q</kbd> close it |
 | `:present` | Start or leave [presentation mode](#presentation-mode) |
 | `:marks` | List the marks, and count the bookmarks |
 | `:bookmark NAME`, `:bm NAME` | Add a named bookmark at this place; an existing name, in any case, moves to it |

@@ -1609,6 +1609,8 @@ impl App {
             }
             "toc" => self.open_toc(),
             "recent" => self.open_recent(),
+            "info" if self.blank => self.say("no document open"),
+            "info" => self.open_info(),
             "bookmark" | "bm" => self.command_bookmark(argument),
             "bookmarks" => self.open_bookmarks(),
             "hotbar" => self.hotbar.toggle(self.tool.is_some()),

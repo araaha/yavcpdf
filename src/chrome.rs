@@ -242,6 +242,7 @@ impl App {
             Mode::Toc(state) => self.draw_toc(painter, state),
             Mode::Bookmarks(state) => self.draw_bookmarks(painter, state),
             Mode::Recent(state) => self.draw_recent(painter, state),
+            Mode::Info(state) => self.draw_info(painter, state),
             Mode::Choice(state) => self.draw_choice(painter, state),
             Mode::Sign(pad) => self.draw_pad(painter, pad),
             Mode::Password(state) => self.draw_password(painter, state),
@@ -464,6 +465,32 @@ impl App {
             let label = text_line(&clipped, &self.config, at(line.left() + PADDING), Align2::LEFT_CENTER, &state.labels[i], label_color);
             let name = text_line(&clipped, &self.config, at(label.right() + PADDING * 2.0), Align2::LEFT_CENTER, name, color);
             text_line(&clipped, &self.config, at(name.right() + PADDING), Align2::LEFT_CENTER, folder, color.gamma_multiply(0.6));
+        }
+    }
+
+    /// Where the panel of `:info` and its rows go.
+    pub fn info_layout(&self, len: usize, first: usize) -> ListLayout {
+        self.list_layout(true, false, len, 0, Some(first))
+    }
+
+    /// The document's properties: a panel like the contents, each row a name and its value.
+    fn draw_info(&self, painter: &Painter, state: &crate::info::InfoState) {
+        let theme = self.config.active_theme();
+        let layout = self.info_layout(state.rows.len(), state.first);
+        let rect = layout.rect;
+        painter.rect_filled(rect, 0.0, theme.ui_background.egui());
+        painter.rect_stroke(rect, 0.0, egui::Stroke::new(self.config.view.border, theme.ui_accent.egui()), egui::StrokeKind::Inside);
+        let clipped = painter.with_clip_rect(rect.shrink(PADDING / 2.0));
+        let header = pos2(rect.left() + PADDING, rect.top() + PADDING + layout.row_height / 2.0);
+        text_line(&clipped, &self.config, header, Align2::LEFT_CENTER, "Document properties", theme.ui_accent.egui());
+        let names = state.rows.iter().map(|(name, _)| painter.layout_no_wrap(name.clone(), font(&self.config), theme.ui_text.egui()).size().x);
+        let column = rect.left() + PADDING * 2.0 + names.fold(0.0, f32::max) + PADDING * 2.0;
+        for i in (layout.first..state.rows.len()).take(layout.fits) {
+            let line = Self::list_row_rect(&layout, i);
+            let (name, value) = &state.rows[i];
+            let at = |x: f32| pos2(x, line.center().y);
+            text_line(&clipped, &self.config, at(line.left() + PADDING), Align2::LEFT_CENTER, name, theme.ui_accent.egui());
+            text_line(&clipped, &self.config, at(column), Align2::LEFT_CENTER, value, theme.ui_text.egui());
         }
     }
 

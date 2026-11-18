@@ -110,6 +110,7 @@ impl App {
             Mode::Toc(_) => self.toc_key(&stroke),
             Mode::Bookmarks(_) => self.bookmark_key(&stroke),
             Mode::Recent(_) => self.recent_key(ctx, &stroke),
+            Mode::Info(_) => self.info_key(&stroke),
             Mode::Choice(_) => self.choice_key(&stroke),
             Mode::Sign(_) => self.sign_key(&stroke),
             Mode::Password(_) => self.password_key(ctx, &stroke),
@@ -666,7 +667,9 @@ impl App {
             if matches!(self.mode, Mode::Password(_)) {
                 continue;
             }
-            if matches!(self.mode, Mode::Choice(_)) {
+            if matches!(self.mode, Mode::Info(_)) {
+                self.wheel_info(pixels.y);
+            } else if matches!(self.mode, Mode::Choice(_)) {
                 self.wheel_choice(pixels.y, at);
             } else if matches!(self.mode, Mode::Bookmarks(_)) {
                 self.wheel_bookmarks(pixels.y, at);
@@ -790,6 +793,11 @@ impl App {
         if matches!(self.mode, Mode::Bookmarks(_)) {
             self.hover = None;
             self.pointer_bookmarks(ui.ctx(), &response);
+            return;
+        }
+        if matches!(self.mode, Mode::Info(_)) {
+            self.hover = None;
+            self.pointer_info(ui.ctx(), &response);
             return;
         }
         if matches!(self.mode, Mode::Recent(_)) {

@@ -464,6 +464,17 @@ fn signed_fields(doc: &Document, all: &[Field]) -> HashSet<ObjRef> {
     all.iter().filter(|f| f.kind == FieldKind::Signature && has_value(doc, f.obj)).map(|f| f.obj).collect()
 }
 
+/// How many signature fields the PDF itself has signed, 0 when the document can't be read.
+pub fn signature_count(bytes: Arc<Vec<u8>>, password: Option<&str>) -> usize {
+    catch_unwind(AssertUnwindSafe(|| {
+        let doc = Document::open_with_password(bytes, password).ok()?;
+        Some(signed_fields(&doc, &fields(&doc)).len())
+    }))
+    .ok()
+    .flatten()
+    .unwrap_or(0)
+}
+
 /// The widgets of `all` that don't show, by field name and place in the field.
 fn hidden_widgets(all: &[Field]) -> HashSet<(String, usize)> {
     let each = |f: &Field| f.widgets.iter().enumerate().filter(|(_, w)| w.hidden).map(|(wi, _)| (f.name.clone(), wi)).collect::<Vec<_>>();

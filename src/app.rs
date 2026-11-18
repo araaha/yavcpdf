@@ -254,6 +254,7 @@ pub enum Mode {
     Toc(TocState),
     Bookmarks(crate::bookmarks::BookmarkState),
     Recent(crate::recent::RecentState),
+    Info(crate::info::InfoState),
     Choice(ChoiceState),
     AwaitMark(MarkOp),
     Sign(SignPad),
@@ -620,6 +621,8 @@ pub struct App {
     /// The theme the config file names, so a reload only changes it when the file did.
     file_theme: String,
     message: Option<(String, Instant)>,
+    /// What `:info` reads from the file itself, for the document whose bytes come with it: the dates and the signature count.
+    pub info_extra: Option<(Arc<Vec<u8>>, crate::info::FileFacts)>,
     watcher: Watcher,
 }
 
@@ -761,6 +764,7 @@ impl App {
             fullscreen: config.view.fullscreen,
             presentation: None,
             return_to: None,
+            info_extra: None,
             message: None,
             watcher,
             config,

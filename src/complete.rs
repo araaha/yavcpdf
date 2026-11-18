@@ -66,6 +66,7 @@ pub const COMMANDS: &[Command] = &[
     takes("cover", Of::Name, "[on|off]", false),
     plain("toc"),
     plain("recent"),
+    plain("info"),
     takes("bookmark", Of::Name, "{name}", true),
     takes("bm", Of::Name, "{name}", true),
     plain("bookmarks"),
