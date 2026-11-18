@@ -502,6 +502,7 @@ impl App {
     fn open_bar(&mut self, kind: BarKind) {
         let previous = if matches!(kind, BarKind::Search { .. }) { self.search.clone() } else { None };
         let origin = self.view.anchor(&self.doc.layout);
+        self.history.stop();
         self.mode = Mode::Bar(Bar { kind, field: Field::default(), origin, previous, menu: None });
         self.refresh_menu();
     }

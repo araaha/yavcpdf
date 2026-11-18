@@ -107,6 +107,8 @@ pub enum Action {
     EditEraseToStart,
     EditEraseToEnd,
     EditUndo,
+    EditHistoryPrev,
+    EditHistoryNext,
     PlaceNote,
     PlaceText,
     PlaceDate,
@@ -123,7 +125,7 @@ pub enum Action {
 
 impl Action {
     /// Every action, in declaration order. `the_list_of_actions_is_complete` keeps it whole.
-    pub const ALL: [Self; 106] = [
+    pub const ALL: [Self; 108] = [
         Self::Cancel,
         Self::ScrollDown,
         Self::ScrollUp,
@@ -218,6 +220,8 @@ impl Action {
         Self::EditEraseToStart,
         Self::EditEraseToEnd,
         Self::EditUndo,
+        Self::EditHistoryPrev,
+        Self::EditHistoryNext,
         Self::PlaceNote,
         Self::PlaceText,
         Self::PlaceDate,
@@ -330,6 +334,8 @@ impl Action {
             Self::EditEraseToStart => "edit_erase_to_start",
             Self::EditEraseToEnd => "edit_erase_to_end",
             Self::EditUndo => "edit_undo",
+            Self::EditHistoryPrev => "edit_history_prev",
+            Self::EditHistoryNext => "edit_history_next",
             Self::PlaceNote => "place_note",
             Self::PlaceText => "place_text",
             Self::PlaceDate => "place_date",
@@ -380,6 +386,8 @@ impl Action {
             Self::EditEraseToStart => Edit::EraseToStart,
             Self::EditEraseToEnd => Edit::EraseToEnd,
             Self::EditUndo => Edit::Undo,
+            Self::EditHistoryPrev => Edit::HistoryPrev,
+            Self::EditHistoryNext => Edit::HistoryNext,
             _ => return None,
         })
     }
@@ -1013,7 +1021,16 @@ mod tests {
         for action in [Action::Command, Action::Cancel, Action::EditLeft, Action::EditEraseToEnd] {
             assert!(!action.is_listed(), "{}", action.name());
         }
-        assert_eq!(Action::ALL.iter().filter(|a| !a.is_listed()).count(), 2 + 14 + 4);
+        assert_eq!(Action::ALL.iter().filter(|a| !a.is_listed()).count(), 2 + 16 + 4);
+    }
+
+    #[test]
+    fn the_history_keys_are_ctrl_p_and_ctrl_n_and_scoped_to_editing() {
+        let map = default_keymap();
+        assert_eq!(map.edit(&stroke("<C-p>")), Some(Edit::HistoryPrev));
+        assert_eq!(map.edit(&stroke("<C-n>")), Some(Edit::HistoryNext));
+        assert_eq!(map.exact(&[stroke("<C-p>")]), None, "editing alone");
+        assert_eq!(Action::from_name("edit_history_prev"), Some(Action::EditHistoryPrev));
     }
 
     #[test]

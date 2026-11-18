@@ -568,6 +568,8 @@ pub struct App {
     slow_pages: HashSet<usize>,
 
     pub mode: Mode,
+    /// The searches typed before, for the `/` and `?` bars.
+    pub history: crate::history::History,
     pub search: Option<Search>,
     pub selection: Option<Selection>,
     pub drag_anchor: Option<(usize, usize)>,
@@ -734,6 +736,7 @@ impl App {
             locked: locked.is_some() || blank,
             blank,
             mode: locked.map_or(Mode::Normal, Mode::Password),
+            history: store::load_search_history(),
             search: None,
             selection: None,
             drag_anchor: None,

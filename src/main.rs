@@ -16,6 +16,7 @@ mod export;
 mod field;
 mod form;
 mod hint;
+mod history;
 mod info;
 mod input;
 mod keymap;

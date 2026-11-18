@@ -229,3 +229,5 @@ edit_erase_blank = ["<C-w>"]          # back to the last space: all of a path at
 edit_erase_to_start = ["<C-u>"]
 edit_erase_to_end = ["<C-k>"]
 edit_undo = ["<C-z>"]                 # clears the password field; does nothing in the other fields
+edit_history_prev = ["<C-p>"]         # older search, in the / and ? bars only
+edit_history_next = ["<C-n>"]         # newer search, in the / and ? bars only

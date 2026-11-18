@@ -47,6 +47,12 @@ fn menu_page_wins(kind: BarKind, menu_shown: bool, stroke: &Stroke) -> bool {
     kind == BarKind::Command && menu_shown && menu_page(stroke).is_some()
 }
 
+/// Whether an edit works in this bar: the history keys only in the `/` and `?` bars, so that in the
+/// `:` bar Ctrl-n and Ctrl-p keep moving the menu.
+fn edit_applies(kind: BarKind, edit: Edit) -> bool {
+    !matches!(edit, Edit::HistoryPrev | Edit::HistoryNext) || matches!(kind, BarKind::Search { .. })
+}
+
 /// The stroke behind a clipboard event: the window system's layer turns control-c and control-x
 /// into these, and no key event comes with them.
 fn clipboard_stroke(event: &Event) -> Option<Stroke> {
@@ -225,6 +231,7 @@ impl App {
             BarKind::Entry(entry) => self.entry_done(entry, &bar.field.text),
             BarKind::Form => self.form_entry_done(&bar.field.text),
             BarKind::Search { forward } => {
+                self.history = crate::store::remember_search(&bar.field.text);
                 // An empty search repeats the last one, as in vim.
                 if bar.field.is_empty()
                     && let Some(mut previous) = bar.previous
@@ -262,11 +269,18 @@ impl App {
             if let Some(text) = menu.move_page(down, rows) {
                 bar.field.replace_before_cursor(&text);
             }
-        } else if let Some(edit) = self.keymap.edit(stroke) {
-            if edit == Edit::Backspace && bar.field.is_empty() {
+        } else if let Some(edit) = self.keymap.edit(stroke).filter(|e| edit_applies(kind, *e)) {
+            if matches!(edit, Edit::HistoryPrev | Edit::HistoryNext) {
+                let found = if edit == Edit::HistoryPrev { self.history.prev(&bar.field.text) } else { self.history.next() };
+                if let Some(text) = found {
+                    bar.field = Field::new(text);
+                    self.bar_changed(kind);
+                }
+            } else if edit == Edit::Backspace && bar.field.is_empty() {
                 let bar = bar.clone();
                 self.bar_cancel(bar);
             } else if bar.field.apply(edit) {
+                self.history.stop();
                 self.bar_changed(kind);
             }
         } else if let Some(menu) = bar.menu.as_mut().filter(|_| kind == BarKind::Command)
@@ -284,6 +298,7 @@ impl App {
             }
         } else if let Some(c) = stroke.text() {
             bar.field.insert(c.encode_utf8(&mut [0; 4]));
+            self.history.stop();
             self.bar_changed(kind);
         }
         self.refresh_menu();
@@ -996,8 +1011,9 @@ fn click_target(widget: Option<(usize, usize)>, link: Option<usize>, note: Optio
 
 #[cfg(test)]
 mod tests {
-    use super::{ClickTarget, click_target, clipboard_stroke, menu_page, menu_page_wins};
+    use super::{ClickTarget, click_target, clipboard_stroke, edit_applies, menu_page, menu_page_wins};
     use crate::app::BarKind;
+    use crate::field::Edit;
     use crate::keymap::parse_sequence;
     use egui::Event;
 
@@ -1014,6 +1030,18 @@ mod tests {
         assert_eq!(clipboard_stroke(&Event::Copy).as_ref(), parse_sequence("<C-c>").unwrap().first());
         assert_eq!(clipboard_stroke(&Event::Cut).as_ref(), parse_sequence("<C-x>").unwrap().first());
         assert_eq!(clipboard_stroke(&Event::Text("c".to_owned())), None);
+    }
+
+    #[test]
+    fn history_keys_apply_in_the_search_bars_only() {
+        let history = [Edit::HistoryPrev, Edit::HistoryNext];
+        for edit in history {
+            assert!(edit_applies(BarKind::Search { forward: true }, edit));
+            assert!(edit_applies(BarKind::Search { forward: false }, edit));
+            assert!(!edit_applies(BarKind::Command, edit));
+            assert!(!edit_applies(BarKind::Form, edit));
+        }
+        assert!(edit_applies(BarKind::Command, Edit::Left));
     }
 
     #[test]

@@ -20,6 +20,9 @@ pub enum Edit {
     /// Clears the password field. The other fields leave it alone: a typed line is edited, not
     /// undone, and `Ctrl+U` already clears it.
     Undo,
+    /// Recalls an earlier search in the `/` and `?` bars, which the bar does; the field itself does nothing.
+    HistoryPrev,
+    HistoryNext,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -173,7 +176,7 @@ impl Field {
             Edit::EraseBlank => return self.erase_back(self.blank_left()),
             Edit::EraseToStart => return self.erase_back(0),
             Edit::EraseToEnd => return self.erase_ahead(self.text.len()),
-            Edit::Undo => {}
+            Edit::Undo | Edit::HistoryPrev | Edit::HistoryNext => {}
         }
         false
     }
@@ -309,6 +312,8 @@ mod tests {
             Edit::EraseToStart,
             Edit::EraseToEnd,
             Edit::Undo,
+            Edit::HistoryPrev,
+            Edit::HistoryNext,
         ];
         let text = "é 日本語 🐣 naïve-x";
         for start in text.char_indices().map(|(i, _)| i).chain([text.len()]) {

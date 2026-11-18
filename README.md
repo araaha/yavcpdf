@@ -712,8 +712,17 @@ contents and choice filters, and the password field, have a cursor.
 | <kbd>Ctrl</kbd>+<kbd>W</kbd> | Erase back to the last space |
 | <kbd>Ctrl</kbd>+<kbd>U</kbd> <kbd>Ctrl</kbd>+<kbd>K</kbd> | Erase to either end |
 | <kbd>Ctrl</kbd>+<kbd>Z</kbd> | Clear the [password](#password-protected-pdfs) field; it does nothing in the other fields |
+| <kbd>Ctrl</kbd>+<kbd>P</kbd> <kbd>Ctrl</kbd>+<kbd>N</kbd> | In the <kbd>/</kbd> and <kbd>?</kbd> bars, recall the older or newer search; in the `:` bar they move the menu |
 
-The `edit_*` actions rebind them.
+The `edit_*` actions rebind them (`edit_history_prev` and `edit_history_next` for
+<kbd>Ctrl</kbd>+<kbd>P</kbd> and <kbd>Ctrl</kbd>+<kbd>N</kbd>).
+
+Every search run with <kbd>Enter</kbd> in the <kbd>/</kbd> or <kbd>?</kbd> bar is
+remembered, up to 100, without repeats. <kbd>Ctrl</kbd>+<kbd>P</kbd> puts the
+next older one in the field and <kbd>Ctrl</kbd>+<kbd>N</kbd> the next newer one;
+past the newest comes back what you had typed. As in vim, text typed before the
+first <kbd>Ctrl</kbd>+<kbd>P</kbd> limits the choice to the searches that start
+with it. Editing the field ends the browsing.
 
 Configuration
 -------------
@@ -800,6 +809,10 @@ Position, marks, bookmarks, the jump history, the rotation, the two-page layout 
 systems: see the Settings folders table under Installation).
 The PDF itself is never changed, so other viewers don't show them. A file keeps
 its data when it moves, and when it is rebuilt at the same path.
+
+The searches typed in the `/` and `?` bars are shared by all documents, in
+`search_history` in the same folder, readable by you alone; delete the file to
+forget them.
 
 Exporting annotations and forms
 -------------------------------

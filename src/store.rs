@@ -566,11 +566,7 @@ fn recent_documents_in(dir: &Path) -> Vec<PathBuf> {
 /// alone, as they name personal documents.
 fn remember_document_in(dir: &Path, path: &Path) {
     let list = pushed(load_recent(dir), path);
-    let mut builder = std::fs::DirBuilder::new();
-    builder.recursive(true);
-    #[cfg(unix)]
-    std::os::unix::fs::DirBuilderExt::mode(&mut builder, 0o700);
-    if builder.create(dir).is_err() {
+    if !create_private_dir(dir) {
         return;
     }
     // `last` first: if the second write fails, `last` is the newer, which is read as such.
@@ -579,6 +575,44 @@ fn remember_document_in(dir: &Path, path: &Path) {
         let _ = crate::export::write_atomic(&dir.join("last"), newest.as_bytes(), true, Some(0o600));
     }
     let _ = crate::export::write_atomic(&recent_file(dir), render_recent(&list).as_bytes(), true, Some(0o600));
+}
+
+/// Makes the data folder, readable by this user alone, and says whether it is there.
+fn create_private_dir(dir: &Path) -> bool {
+    let mut builder = std::fs::DirBuilder::new();
+    builder.recursive(true);
+    #[cfg(unix)]
+    std::os::unix::fs::DirBuilderExt::mode(&mut builder, 0o700);
+    builder.create(dir).is_ok()
+}
+
+/// The searches typed in the bars, from `search_history` in the data folder shared by all documents.
+/// A missing or unreadable file is an empty history.
+pub fn load_search_history() -> crate::history::History {
+    load_search_history_in(&data_dir())
+}
+
+fn load_search_history_in(dir: &Path) -> crate::history::History {
+    std::fs::read_to_string(dir.join("search_history")).map(|t| crate::history::History::parse(&t)).unwrap_or_default()
+}
+
+/// Adds a search to what the file holds now, not to what this window loaded, so that the searches
+/// of two windows are both kept, and returns the result.
+pub fn remember_search(text: &str) -> crate::history::History {
+    remember_search_in(&data_dir(), text)
+}
+
+fn remember_search_in(dir: &Path, text: &str) -> crate::history::History {
+    let mut history = load_search_history_in(dir);
+    history.push(text);
+    save_search_history_in(dir, &history);
+    history
+}
+
+fn save_search_history_in(dir: &Path, history: &crate::history::History) {
+    if create_private_dir(dir) {
+        let _ = crate::export::write_atomic(&dir.join("search_history"), history.render().as_bytes(), true, Some(0o600));
+    }
 }
 
 fn parse_recent(text: &str) -> Vec<PathBuf> {
@@ -627,6 +661,27 @@ mod tests {
         fn drop(&mut self) {
             let _ = std::fs::remove_dir_all(&self.0);
         }
+    }
+
+    #[test]
+    fn a_search_is_added_to_the_file_as_it_is_now() {
+        let scratch = Scratch::new("search-merge");
+        remember_search_in(&scratch.0, "from the first window");
+        // A second window loaded the file before that, and knows nothing of it.
+        let merged = remember_search_in(&scratch.0, "from the second");
+        assert_eq!(merged.render(), "from the first window\nfrom the second\n");
+        assert_eq!(load_search_history_in(&scratch.0), merged);
+    }
+
+    #[test]
+    fn search_history_round_trips_and_a_missing_file_is_empty() {
+        let scratch = Scratch::new("search-history");
+        assert_eq!(load_search_history_in(&scratch.0), crate::history::History::default());
+        let mut history = crate::history::History::default();
+        history.push("one");
+        history.push("two");
+        save_search_history_in(&scratch.0, &history);
+        assert_eq!(load_search_history_in(&scratch.0), history);
     }
 
     fn paths(names: &[&str]) -> Vec<PathBuf> {
