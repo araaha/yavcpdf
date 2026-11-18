@@ -627,6 +627,7 @@ is no way to protect it in place.
 | Command | Action |
 | --- | --- |
 | `:N` | Go to page N |
+| `:p LABEL`, `:page LABEL` | Go to the page printed with that label (`xii`, `A-3`), ignoring case; if several pages share it, the next one after this page, wrapping around. With no label, shows this page's label |
 | `:q`, `:quit`, `:q!`, `:wq`, `:x` | Quit |
 | `:w`, `:write` | Save the position, marks, bookmarks, jump history, portals and annotations |
 | `:e FILE`, `:edit FILE`, `:open [FILE]` | Open a file; `:open` with none shows the file chooser |

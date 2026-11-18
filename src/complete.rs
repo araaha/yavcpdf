@@ -57,6 +57,8 @@ pub const COMMANDS: &[Command] = &[
     plain("nohlsearch"),
     takes("theme", Of::Theme, "{name}", true),
     takes("zoom", Of::Number, "{percent}", true),
+    takes("p", Of::Name, "[label]", false),
+    takes("page", Of::Name, "[label]", false),
     plain("reload"),
     takes("rotate", Of::Name, "[90|180|270|0|cw|ccw]", false),
     takes("twopage", Of::Name, "[on|off]", false),

@@ -1588,6 +1588,7 @@ impl App {
             "noh" | "nohlsearch" => self.search = None,
             "theme" => self.command_theme(argument),
             "zoom" => self.command_zoom(argument),
+            "p" | "page" => self.command_page(argument),
             "reload" => self.run(ctx, Action::Reload, None),
             "rotate" => self.command_rotate(ctx, argument),
             "twopage" | "cover" if self.blank => self.say("no document open"),
@@ -1718,6 +1719,19 @@ impl App {
         }
     }
 
+    fn command_page(&mut self, argument: &str) {
+        let here = self.view.current_page(&self.doc.layout);
+        let labels: Vec<&str> = self.doc.info.pages.iter().map(|p| p.label.as_str()).collect();
+        if argument.is_empty() {
+            let label = labels.get(here).copied().unwrap_or_default();
+            self.say(format!("page {} is labelled \"{label}\"", here + 1));
+        } else if let Some(page) = page_with_label(&labels, argument, here) {
+            self.jump_to_page(page);
+        } else {
+            self.say(format!("no page labelled \"{argument}\""));
+        }
+    }
+
     fn command_zoom(&mut self, argument: &str) {
         match argument.trim_end_matches('%').parse::<f32>() {
             Ok(percent) if percent > 0.0 => self.zoom_by(percent / 100.0 / self.view.zoom),
@@ -1813,9 +1827,34 @@ pub fn effective_recolor(over: Option<bool>, theme: bool) -> bool {
     over.unwrap_or(theme)
 }
 
+/// The page whose label is `wanted`, ignoring case and surrounding whitespace: the first one
+/// after `here`, wrapping around to `here` itself last.
+fn page_with_label(labels: &[&str], wanted: &str, here: usize) -> Option<usize> {
+    let wanted = wanted.trim().to_lowercase();
+    (1..=labels.len()).map(|step| (here + step) % labels.len()).find(|&page| labels[page].trim().to_lowercase() == wanted)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{PendingPortal, Portal, count_argument, edits_document, effective_recolor, parse_flag, turn_anchors, view_top};
+    #[test]
+    fn a_label_is_found_ignoring_case_and_whitespace() {
+        let labels = ["i", "ii", "XII", "1", "2"];
+        assert_eq!(page_with_label(&labels, " xii ", 0), Some(2));
+        assert_eq!(page_with_label(&labels, "II", 4), Some(1));
+        assert_eq!(page_with_label(&labels, "iii", 0), None);
+        assert_eq!(page_with_label(&[], "1", 0), None);
+    }
+
+    #[test]
+    fn a_repeated_label_goes_to_the_next_page_and_wraps() {
+        let labels = ["a", "1", "b", "1", "c"];
+        assert_eq!(page_with_label(&labels, "1", 0), Some(1));
+        assert_eq!(page_with_label(&labels, "1", 1), Some(3));
+        assert_eq!(page_with_label(&labels, "1", 3), Some(1));
+        assert_eq!(page_with_label(&labels, "a", 0), Some(0));
+    }
+
+    use super::{PendingPortal, Portal, count_argument, edits_document, effective_recolor, page_with_label, parse_flag, turn_anchors, view_top};
     use crate::keymap::Action;
     use crate::view::{Anchor, Layout, View};
     use egui::{Rect, pos2, vec2};
