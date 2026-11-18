@@ -58,6 +58,7 @@ pub enum Action {
     TogglePortalWindow,
     ToggleToc,
     ShowBookmarks,
+    ShowAnnotations,
     AddBookmark,
     ToggleStatusbar,
     ToggleHotbar,
@@ -125,7 +126,7 @@ pub enum Action {
 
 impl Action {
     /// Every action, in declaration order. `the_list_of_actions_is_complete` keeps it whole.
-    pub const ALL: [Self; 108] = [
+    pub const ALL: [Self; 109] = [
         Self::Cancel,
         Self::ScrollDown,
         Self::ScrollUp,
@@ -171,6 +172,7 @@ impl Action {
         Self::TogglePortalWindow,
         Self::ToggleToc,
         Self::ShowBookmarks,
+        Self::ShowAnnotations,
         Self::AddBookmark,
         Self::ToggleStatusbar,
         Self::ToggleHotbar,
@@ -285,6 +287,7 @@ impl Action {
             Self::TogglePortalWindow => "toggle_portal_window",
             Self::ToggleToc => "toggle_toc",
             Self::ShowBookmarks => "show_bookmarks",
+            Self::ShowAnnotations => "show_annotations",
             Self::AddBookmark => "add_bookmark",
             Self::ToggleStatusbar => "toggle_statusbar",
             Self::ToggleHotbar => "toggle_hotbar",

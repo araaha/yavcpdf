@@ -22,6 +22,8 @@ struct ListRow {
     mark: String,
     /// A tick drawn in the mark's place.
     ticked: bool,
+    /// A square of colour before the text.
+    swatch: Option<[u8; 3]>,
 }
 
 /// What a list panel shows: the optional header and filter rows, `len` rows with the highlight
@@ -241,6 +243,7 @@ impl App {
             }
             Mode::Toc(state) => self.draw_toc(painter, state),
             Mode::Bookmarks(state) => self.draw_bookmarks(painter, state),
+            Mode::Annotations(state) => self.draw_annotations(painter, state),
             Mode::Recent(state) => self.draw_recent(painter, state),
             Mode::Info(state) => self.draw_info(painter, state),
             Mode::Choice(state) => self.draw_choice(painter, state),
@@ -420,7 +423,7 @@ impl App {
         let filter = (state.filtering || !state.filter.is_empty()).then_some(&state.filter);
         self.draw_list(painter, &ListView { header: None, filter, len: rows.len(), at, first: None }, |i| {
             let entry = &self.doc.toc[rows[i]];
-            ListRow { indent: entry.depth as f32 * 14.0, text: entry.title.clone(), mark: (entry.page + 1).to_string(), ticked: false }
+            ListRow { indent: entry.depth as f32 * 14.0, text: entry.title.clone(), mark: (entry.page + 1).to_string(), ticked: false, swatch: None }
         });
     }
 
@@ -431,7 +434,20 @@ impl App {
         let filter = (state.filtering || !state.filter.is_empty()).then_some(&state.filter);
         self.draw_list(painter, &ListView { header: None, filter, len: rows.len(), at, first: Some(state.first) }, |i| {
             let bookmark = &self.side.bookmarks[rows[i]];
-            ListRow { indent: 0.0, text: bookmark.name.clone(), mark: (bookmark.anchor.page + 1).to_string(), ticked: false }
+            ListRow { indent: 0.0, text: bookmark.name.clone(), mark: (bookmark.anchor.page + 1).to_string(), ticked: false, swatch: None }
+        });
+    }
+
+    /// The annotations: a panel like the bookmarks, each row a swatch, the kind and the text, with the page's label.
+    fn draw_annotations(&self, painter: &Painter, state: &BookmarkState) {
+        let items = crate::annotations::items(&self.side.annotations);
+        let rows = crate::annotations::rows(&items, &state.filter.text);
+        let at = rows.iter().position(|r| *r >= state.selected).unwrap_or(0);
+        let filter = (state.filtering || !state.filter.is_empty()).then_some(&state.filter);
+        self.draw_list(painter, &ListView { header: None, filter, len: rows.len(), at, first: Some(state.first) }, |i| {
+            let item = &items[rows[i]];
+            let label = self.doc.info.pages.get(item.page).map_or_else(|| (item.page + 1).to_string(), |p| p.label.clone());
+            ListRow { indent: 0.0, text: item.line(), mark: label, ticked: false, swatch: item.color }
         });
     }
 
@@ -519,7 +535,13 @@ impl App {
         let rows = state.rows();
         let filter = (state.filtering || !state.filter.is_empty()).then_some(&state.filter);
         let view = ListView { header: Some(&state.title), filter, len: rows.len(), at: state.selected, first: Some(state.first) };
-        self.draw_list(painter, &view, |i| ListRow { indent: 0.0, text: state.label(rows[i]), mark: String::new(), ticked: state.ticked(rows[i]) });
+        self.draw_list(painter, &view, |i| ListRow {
+            indent: 0.0,
+            text: state.label(rows[i]),
+            mark: String::new(),
+            ticked: state.ticked(rows[i]),
+            swatch: None,
+        });
     }
 
     /// Where a list panel (the contents, the choices) and its rows go: a centred box with the
@@ -572,7 +594,14 @@ impl App {
                 clipped.rect_filled(line, 0.0, theme.ui_accent.egui());
             }
             let color = if selected { theme.ui_background.egui() } else { text_color };
-            let indent = PADDING + row.indent;
+            let mut indent = PADDING + row.indent;
+            if let Some([r, g, b]) = row.swatch {
+                let side = row_height * 0.5;
+                let square = Rect::from_center_size(pos2(line.left() + indent + side / 2.0, line.center().y), vec2(side, side));
+                clipped.rect_filled(square, 0.0, egui::Color32::from_rgb(r, g, b));
+                clipped.rect_stroke(square, 0.0, egui::Stroke::new(1.0, color), egui::StrokeKind::Inside);
+                indent += side + PADDING;
+            }
             let mark = if row.ticked {
                 // Drawn, not typed: the fonts bundled with egui have no check mark.
                 let size = row_height * 0.4;

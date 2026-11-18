@@ -325,6 +325,7 @@ choose a colour instead, so counts such as `42G` don't work then.
 | <kbd>s</kbd> <kbd>s</kbd> / <kbd>s</kbd> <kbd>g</kbd> / <kbd>s</kbd> <kbd>w</kbd> / <kbd>s</kbd> <kbd>a</kbd> | Search the selected text on Google Scholar / Google / Wikipedia / arXiv, in the browser; the selection stays. [Sites are configurable](#searching-the-web) |
 | <kbd>F</kbd> | Follow a link by hint; one that names a spot lands there at `view.jump_position`. The PDF's notes (sticky notes and other comments with text) and your own sticky notes appear among the link hints; picking one pins its text |
 | <kbd>i</kbd> | Fill in a form field, press a form button, or sign into a signature field, by hint; a click does it too |
+| <kbd>g</kbd> <kbd>a</kbd> | List your annotations (`:annotations`): <kbd>j</kbd> <kbd>k</kbd> move, <kbd>Enter</kbd>, <kbd>l</kbd> or a click jumps, <kbd>/</kbd> filters by text, <kbd>Esc</kbd> clears the filter and then closes, <kbd>q</kbd> closes, <kbd>d</kbd> or <kbd>Delete</kbd> deletes the highlighted one when not filtering (<kbd>u</kbd> brings it back) |
 | <kbd>g</kbd> <kbd>d</kbd>, <kbd>Ctrl</kbd>+<kbd>]</kbd> | Smart jump by hint; middle click does it with the mouse |
 | <kbd>g</kbd> <kbd>o</kbd>, <kbd>Alt</kbd>+<kbd>C</kbd> | Overview by hint; right click does it with the mouse |
 | <kbd>Tab</kbd> | Table of contents (<kbd>j</kbd> <kbd>k</kbd>, <kbd>/</kbd> filters, <kbd>Enter</kbd>) |
@@ -451,6 +452,14 @@ Choose a tool from the hotbar keys: <kbd>t</kbd> <kbd>h</kbd> highlights,
 <kbd>t</kbd> <kbd>d</kbd> draws, <kbd>t</kbd> <kbd>e</kbd> erases and
 <kbd>t</kbd> <kbd>n</kbd> adds sticky notes. They are kept beside the PDF, not
 in it; see [What is stored where](#what-is-stored-where).
+
+**The list.** <kbd>g</kbd> <kbd>a</kbd> (or `:annotations`) lists every annotation in the order of
+the document, by page and then top to bottom. A row shows the page label, a swatch of the
+colour, the kind and the text: a highlight's text with its lines joined and
+its hyphenation undone, as copying does, a note's text, or the text of fill & sign text and dates;
+ink and other marks show just the kind. <kbd>/</kbd> filters by that text. Enter, <kbd>l</kbd> or a
+click jumps there, at `view.jump_position`, through the jump history. <kbd>d</kbd> or <kbd>Delete</kbd>
+deletes the highlighted one, as one step that <kbd>u</kbd> takes back.
 
 **Sticky notes.** With <kbd>t</kbd> <kbd>n</kbd>, click a place and type the
 note in the bar. Its text shows when the pointer is on it, and all of them show
@@ -649,6 +658,8 @@ is no way to protect it in place.
 | `:bookmark NAME`, `:bm NAME` | Add a named bookmark at this place; an existing name, in any case, moves to it |
 | `:bookmarks` | Pick a bookmark: type <kbd>/</kbd> to filter, <kbd>j</kbd> <kbd>k</kbd> or the arrows and the wheel move, <kbd>Enter</kbd>, <kbd>l</kbd> or a click jumps, <kbd>d</kbd> or <kbd>Delete</kbd> deletes when not filtering, <kbd>Esc</kbd> clears the filter and then closes, <kbd>q</kbd> closes. Names match without regard to case. They are listed in the order of the document, with their page |
 | `:sign` | Draw a new signature |
+| `:annotations` | The same as <kbd>g</kbd> <kbd>a</kbd>: list the annotations in the order of the document, each with its page label, kind, colour and text |
+| `:export-notes [FILE]`, `:export-notes! [FILE]` | Write the highlights and notes to a Markdown file, `{name}-notes.md` beside the document unless given a path; `!` replaces an existing file |
 | `:export [FILE]`, `:export! [FILE]` | Write a copy with the annotations and the filled-in form; `!` replaces an existing file |
 | `:protect [FILE]`, `:protect! [FILE]` | Write a copy with a password; `!` replaces an existing file |
 | `:unprotect [FILE]`, `:unprotect! [FILE]` | Write a copy without its password; `!` replaces an existing file |
@@ -816,6 +827,15 @@ forget them.
 
 Exporting annotations and forms
 -------------------------------
+
+`:export-notes` writes the highlights and notes, and only those, to a Markdown file:
+`{name}-notes.md` beside the document unless given a path, never replacing a file
+without `:export-notes!`. It has a `# ` heading with the document's title (or its file
+name), a `## Page` heading with the page's label for each page that has any, each
+highlight as a `>` quote and each note as plain text after it. A note on or right next
+to a highlight goes under that highlight. Ink and fill & sign marks are left out; with no
+highlight or note nothing is written. A highlight keeps its text with it, so no page
+has to be loaded first.
 
 `:export` is how annotations leave the viewer: it writes a copy with all of them
 in it as PDF annotations, as `{name}-annotated.pdf` beside the document unless

@@ -115,6 +115,7 @@ impl App {
             Mode::Place(_) => self.place_key(&stroke),
             Mode::Toc(_) => self.toc_key(&stroke),
             Mode::Bookmarks(_) => self.bookmark_key(&stroke),
+            Mode::Annotations(_) => self.annotation_key(&stroke),
             Mode::Recent(_) => self.recent_key(ctx, &stroke),
             Mode::Info(_) => self.info_key(&stroke),
             Mode::Choice(_) => self.choice_key(&stroke),
@@ -688,6 +689,8 @@ impl App {
                 self.wheel_choice(pixels.y, at);
             } else if matches!(self.mode, Mode::Bookmarks(_)) {
                 self.wheel_bookmarks(pixels.y, at);
+            } else if matches!(self.mode, Mode::Annotations(_)) {
+                self.wheel_annotations(pixels.y, at);
             } else if at.is_some_and(|p| self.over_menu(p)) {
                 self.scroll_menu(-pixels.y);
             } else if modifiers.ctrl {
@@ -813,6 +816,11 @@ impl App {
         if matches!(self.mode, Mode::Info(_)) {
             self.hover = None;
             self.pointer_info(ui.ctx(), &response);
+            return;
+        }
+        if matches!(self.mode, Mode::Annotations(_)) {
+            self.hover = None;
+            self.pointer_annotations(ui.ctx(), &response);
             return;
         }
         if matches!(self.mode, Mode::Recent(_)) {

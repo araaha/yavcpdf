@@ -151,7 +151,7 @@ pub enum Outcome {
 }
 
 /// Moves the highlight to the next row left at or after it, or the last one.
-fn settle(rows: &[usize], state: &mut BookmarkState) {
+pub fn settle(rows: &[usize], state: &mut BookmarkState) {
     if let Some(row) = rows.iter().find(|r| **r >= state.selected).or(rows.last()) {
         state.selected = *row;
     }
@@ -159,7 +159,12 @@ fn settle(rows: &[usize], state: &mut BookmarkState) {
 
 /// Applies a key to `state`, given the bookmarks. A deletion is left to the caller, which then settles.
 pub fn bookmark_step(list: &[Bookmark], state: &mut BookmarkState, stroke: &Stroke, keymap: &Keymap) -> Outcome {
-    let rows = store::bookmark_rows(list, &state.filter.text);
+    picker_step(&|filter| store::bookmark_rows(list, filter), state, stroke, keymap)
+}
+
+/// `bookmark_step` for any list, given the rows (as indices) that a filter lets through.
+pub fn picker_step(rows_for: &dyn Fn(&str) -> Vec<usize>, state: &mut BookmarkState, stroke: &Stroke, keymap: &Keymap) -> Outcome {
+    let rows = rows_for(&state.filter.text);
     let at = rows.iter().position(|r| *r >= state.selected).unwrap_or(0);
     let last = rows.len().saturating_sub(1);
     let here = rows.get(at).copied();
@@ -203,7 +208,7 @@ pub fn bookmark_step(list: &[Bookmark], state: &mut BookmarkState, stroke: &Stro
         }
     }
     // The rows may have changed (a filter edit): the highlight moves to the next one left.
-    let rows = store::bookmark_rows(list, &state.filter.text);
+    let rows = rows_for(&state.filter.text);
     if let Some(row) = moved.and_then(|m| rows.get(m)) {
         state.selected = *row;
     }

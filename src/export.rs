@@ -134,8 +134,18 @@ fn with_annotations(
 
 /// The copy's name when none is given: beside the document, with `-annotated` added.
 pub fn default_path(document: &Path) -> PathBuf {
+    beside(document, "-annotated.pdf")
+}
+
+/// The Markdown notes' name when none is given: beside the document, with `-notes.md` after its name.
+pub fn notes_path(document: &Path) -> PathBuf {
+    beside(document, "-notes.md")
+}
+
+/// A file next to `document`, named after it with `suffix` in place of the extension.
+fn beside(document: &Path, suffix: &str) -> PathBuf {
     let stem = document.file_stem().map_or_else(|| "document".to_owned(), |s| s.to_string_lossy().into_owned());
-    document.with_file_name(format!("{stem}-annotated.pdf"))
+    document.with_file_name(format!("{stem}{suffix}"))
 }
 
 /// Why `path` can't be written by `command` (`export`, `protect`...), if it can't.
@@ -216,6 +226,11 @@ mod tests {
     fn page(rotation: u16) -> PageInfo {
         let (width, height) = if rotation % 180 == 90 { (800.0, 600.0) } else { (600.0, 800.0) };
         PageInfo { width, height, label: "1".to_owned(), crop: [0.0, 0.0, 600.0, 800.0], rotation }
+    }
+
+    #[test]
+    fn the_notes_are_named_beside_the_document() {
+        assert_eq!(notes_path(Path::new("/a/b/paper.pdf")), Path::new("/a/b/paper-notes.md"));
     }
 
     fn sample() -> Vec<Annotation> {

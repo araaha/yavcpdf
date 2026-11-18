@@ -525,6 +525,7 @@ impl App {
             Action::DeleteAnnotation => self.mode = Mode::Hint(HintState::new(Purpose::DeleteAnnotation)),
             Action::ToggleToc => self.open_toc(),
             Action::ShowBookmarks => self.open_bookmarks(),
+            Action::ShowAnnotations => self.open_annotations(),
             Action::AddBookmark => {
                 self.open_bar(BarKind::Command);
                 if let Mode::Bar(bar) = &mut self.mode {
@@ -1614,10 +1615,13 @@ impl App {
             "info" => self.open_info(),
             "bookmark" | "bm" => self.command_bookmark(argument),
             "bookmarks" => self.open_bookmarks(),
+            "annotations" => self.open_annotations(),
             "hotbar" => self.hotbar.toggle(self.tool.is_some()),
             "present" => self.toggle_presentation(ctx),
             "export" => self.command_export(argument, false),
             "export!" => self.command_export(argument, true),
+            "export-notes" => self.command_export_notes(argument, false),
+            "export-notes!" => self.command_export_notes(argument, true),
             "protect" => self.command_protect(Job::Protect, argument, false),
             "protect!" => self.command_protect(Job::Protect, argument, true),
             "unprotect" => self.command_protect(Job::Unprotect, argument, false),

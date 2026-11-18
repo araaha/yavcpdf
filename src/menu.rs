@@ -236,8 +236,21 @@ fn names(lead: &str, query: &str, table: &BTreeMap<Action, Vec<String>>) -> Vec<
 /// Names that are not picked for the user by a part of the name: they end the program, or write
 /// or delete something that may not be undone.
 fn is_irreversible(name: &str) -> bool {
-    matches!(name, "q" | "quit" | "q!" | "wq" | "x" | "export" | "export!" | "protect" | "protect!" | "unprotect" | "unprotect!")
-        || name.starts_with("delete_")
+    matches!(
+        name,
+        "q" | "quit"
+            | "q!"
+            | "wq"
+            | "x"
+            | "export"
+            | "export!"
+            | "export-notes"
+            | "export-notes!"
+            | "protect"
+            | "protect!"
+            | "unprotect"
+            | "unprotect!"
+    ) || name.starts_with("delete_")
 }
 
 /// The entry to highlight for the query, when the user has not chosen: an exact match (the case
