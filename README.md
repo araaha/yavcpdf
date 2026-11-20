@@ -321,7 +321,7 @@ choose a colour instead, so counts such as `42G` don't work then.
 | <kbd>m</kbd> then a key / <kbd>'</kbd> or <kbd>`</kbd> then a key / <kbd>'</kbd> <kbd>'</kbd> | Set a mark / go to a mark / jump back |
 | <kbd>M</kbd> / <kbd>g</kbd> <kbd>b</kbd> | Name a bookmark here (opens `:bookmark `) / pick a bookmark: <kbd>j</kbd> <kbd>k</kbd> move, <kbd>Enter</kbd>, <kbd>l</kbd> or a click jumps (<kbd>Alt</kbd>+<kbd>O</kbd> comes back), <kbd>/</kbd> filters, <kbd>Esc</kbd> clears the filter and then closes, <kbd>q</kbd> closes, <kbd>d</kbd> or <kbd>Delete</kbd> deletes the highlighted one when not filtering |
 | <kbd>Alt</kbd>+<kbd>O</kbd> / <kbd>Alt</kbd>+<kbd>I</kbd> | Jump history, back / forward; the last 100 places are kept per document between sessions |
-| <kbd>f</kbd> / <kbd>y</kbd> | Select by hint / copy the selection, with its lines joined and hyphenation undone (`view.copy_reflow = false` copies the lines as they are) |
+| <kbd>v</kbd> / <kbd>y</kbd> | Select by hint / copy the selection, with its lines joined and hyphenation undone (`view.copy_reflow = false` copies the lines as they are) |
 | <kbd>s</kbd> <kbd>s</kbd> / <kbd>s</kbd> <kbd>g</kbd> / <kbd>s</kbd> <kbd>w</kbd> / <kbd>s</kbd> <kbd>a</kbd> | Search the selected text on Google Scholar / Google / Wikipedia / arXiv, in the browser; the selection stays. [Sites are configurable](#searching-the-web) |
 | <kbd>F</kbd> | Follow a link by hint; one that names a spot lands there at `view.jump_position`. The PDF's notes (sticky notes and other comments with text) and your own sticky notes appear among the link hints; picking one pins its text |
 | <kbd>i</kbd> | Fill in a form field, press a form button, or sign into a signature field, by hint; a click does it too |
@@ -385,7 +385,7 @@ presentation.
 ### Hints
 
 Hints cover the current page only (the one the status bar shows), the part of
-it showing, however far out you zoom. <kbd>f</kbd> labels every word there. Type a label for the first word, then
+it showing, however far out you zoom. <kbd>v</kbd> labels every word there. Type a label for the first word, then
 one for the last word, or <kbd>Enter</kbd> for just the first. With the
 highlight tool on, the selection is highlighted directly; without it,
 <kbd>y</kbd> copies it.
@@ -488,7 +488,7 @@ statuses are shown in the popup of the note they answer. They are never written 
 sidecar or exported again; the hover popups are not drawn while the draw, erase, note or
 fill tool is in hand.
 
-**Fill & sign.** Pick an item and click where it goes, or press <kbd>f</kbd>
+**Fill & sign.** Pick an item and click where it goes, or press <kbd>v</kbd>
 and pick a word to put it just after that word. The first signature asks you to
 draw one on a pad and is kept for every document in
 `signature.json` in the data folder (see the
@@ -782,7 +782,7 @@ A lone cover or a trailing page is fit with the width of a full spread, so it ke
 
 ### Searching the web
 
-Select text (for example with <kbd>f</kbd>) and press <kbd>s</kbd> <kbd>s</kbd> to
+Select text (for example with <kbd>v</kbd>) and press <kbd>s</kbd> <kbd>s</kbd> to
 search it on Google Scholar. The text is read as for copying, with its lines joined, and
 opens in your browser. A count is ignored, and the selection is kept so that
 you can search it elsewhere too. The sites are under `[web_search]`:
