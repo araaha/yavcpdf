@@ -67,6 +67,7 @@ https://github.com/user-attachments/assets/e64f41f8-5a58-4326-a49c-09cd2027165d
   [![macOS](https://img.shields.io/badge/macOS-131415?style=for-the-badge&logo=apple&logoColor=white)](#installation)
   [![Build status](https://img.shields.io/github/actions/workflow/status/araaha/yavcpdf/release.yml?style=for-the-badge&logo=github&logoColor=white&label=build)](https://github.com/araaha/yavcpdf/actions/workflows/release.yml)
   [![Latest release](https://img.shields.io/github/v/release/araaha/yavcpdf?style=for-the-badge&logo=github&logoColor=white)](https://github.com/araaha/yavcpdf/releases)
+  [![Nix flake](https://img.shields.io/badge/Nix-flake-131415?style=for-the-badge&logo=nixos&logoColor=white)](#package-managers)
   [![AUR version](https://img.shields.io/aur/version/yavcpdf?style=for-the-badge&logo=archlinux&logoColor=white)](https://aur.archlinux.org/packages/yavcpdf)
   [![License](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue?style=for-the-badge)](LICENSE-MIT)
 
@@ -152,6 +153,73 @@ paru -S yavcpdf       # or yavcpdf-bin
 > The two packages conflict with each other. Both install `/usr/bin/yavcpdf`,
 > `yavcpdf.desktop`, and the reference configuration at
 > `/usr/share/doc/yavcpdf/config.toml`.
+</details>
+
+<details>
+<summary><b>Nix</b></summary>
+<br>
+
+The repository is a flake that builds yavcpdf from source for x86_64 and
+aarch64 Linux. Try it without installing:
+
+```sh
+nix run github:araaha/yavcpdf -- file.pdf
+```
+
+Install it into your profile:
+
+```sh
+nix profile install github:araaha/yavcpdf
+```
+
+On NixOS or with Home Manager, add the flake as an input and use its package
+(or `overlays.default`, which adds `pkgs.yavcpdf`):
+
+```nix
+{
+  inputs = {
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    yavcpdf.url = "github:araaha/yavcpdf";
+    yavcpdf.inputs.nixpkgs.follows = "nixpkgs";
+  };
+
+  outputs = { nixpkgs, yavcpdf, ... }: {
+    nixosConfigurations.myhost = nixpkgs.lib.nixosSystem {
+      system = "x86_64-linux";
+      modules = [
+        ({ pkgs, ... }: {
+          environment.systemPackages = [ yavcpdf.packages.${pkgs.stdenv.hostPlatform.system}.default ];
+        })
+      ];
+    };
+  };
+}
+```
+
+For Home Manager, put the same package in `home.packages`. Releases after
+0.7.0 include the flake: append a tag, as in `github:araaha/yavcpdf/vX.Y.Z`,
+to pin one.
+
+The package installs `yavcpdf.desktop`, the icon, and the reference
+configuration at `share/doc/yavcpdf/config.toml`. The binary is wrapped so it
+finds the OpenGL, Wayland, X11, xkbcommon and dbus libraries it loads at run
+time, and `fc-match` and `xdg-open`. The file chooser still needs
+`xdg-desktop-portal` with a backend, which NixOS sets up with
+`xdg.portal.enable`.
+
+On other distributions, the OpenGL from Nix can't find your system's GPU
+drivers, which NixOS keeps in `/run/opengl-driver`, and yavcpdf stops with
+"Found no glutin configs". Start it through
+[nixGL](https://github.com/nix-community/nixGL):
+
+```sh
+nix run --impure github:nix-community/nixGL -- yavcpdf file.pdf
+```
+
+or install yavcpdf another way on those systems.
+
+`nix develop` opens a shell with Rust, clippy, rustfmt and rust-analyzer, in
+which `cargo run` works.
 </details>
 
 ### Other methods
@@ -756,8 +824,10 @@ Configuration
 see the Settings folders table under Installation),
 reloaded while the viewer runs. Put only what you want to change in it:
 [`src/default_config.toml`](src/default_config.toml) holds every setting with
-its default, and the packages install it as
-`/usr/share/doc/yavcpdf/config.toml`. A short example:
+its default. The AUR packages install it as
+`/usr/share/doc/yavcpdf/config.toml`, and the Nix package as
+`share/doc/yavcpdf/config.toml` in its output (with `nix profile`,
+`~/.nix-profile/share/doc/yavcpdf/config.toml`). A short example:
 
 ```toml
 view.border = 2.0         # width of every interface outline, 0 to 8
