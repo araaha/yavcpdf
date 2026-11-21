@@ -1880,8 +1880,8 @@ mod two_page_fuzz_tests {
             for (i, row) in l.rows.iter().enumerate() {
                 assert_eq!(row.first, next);
                 assert!(row.last >= row.first && row.last - row.first <= 1);
-                for page in row.first..=row.last {
-                    assert_eq!(l.row_of[page], i);
+                for &r in &l.row_of[row.first..=row.last] {
+                    assert_eq!(r, i);
                 }
                 next = row.last + 1;
             }
