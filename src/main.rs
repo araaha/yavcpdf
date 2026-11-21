@@ -277,7 +277,10 @@ fn run(args: Args) -> Result<(), String> {
     if let Some((x, y)) = args.geometry.and_then(|g| g.position) {
         viewport = viewport.with_position([x as f32, y as f32]);
     }
-    let options = eframe::NativeOptions { viewport, renderer: eframe::Renderer::Glow, ..Default::default() };
+    // The bars and the password field ask for a paste themselves, so Ctrl-V can be a key in the
+    // document. On macOS Cmd-V must stay the platform's paste shortcut.
+    let options =
+        eframe::NativeOptions { viewport, renderer: eframe::Renderer::Glow, clipboard_shortcuts: cfg!(target_os = "macos"), ..Default::default() };
     let page = args.page;
     let creator: eframe::AppCreator<'_> = Box::new(move |cc| {
         let opened = opening.join().map_err(|_| "couldn't open the document".to_owned())??;

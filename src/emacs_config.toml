@@ -1,0 +1,260 @@
+# yavcpdf configuration with GNU Emacs key bindings.
+#
+# This is a complete config: it has every setting of src/default_config.toml, with the vim-style
+# keys replaced by natural Emacs ones. Copy it to config.toml in the config folder
+# (~/.config/yavcpdf/ on Linux). M- is Alt, and C-c is the viewer's own prefix, as it is for a
+# major mode in Emacs. [keys] lists every action: the vim bindings are replaced, except the
+# pager's bare Space and b, which are kept.
+#
+# A list under [keys] replaces that action's whole default list. The keys of the `:` menu, the
+# panels, hints and presentation mode are fixed and are not set here.
+#
+# C-v scrolls a screen in the document and still pastes in the bars and the password field;
+# Shift-Insert pastes there too on Windows.
+#
+# Shifted punctuation is written as its physical key inside a chord: M-< is <M-S-,>, M-> is
+# <M-S-.>, and M-? is <M-S-?>. C-x U is an explicit redo; Emacs's own undo also reverses direction.
+#
+# Colours live in the themes: `background` is what shows around and between the pages, and `page`
+# is the sheet itself. To change one, set just that key, for example:
+#
+#   [themes.dark]
+#   background = "#000000"
+
+theme = "dark"            # a name under [themes]; `toggle_theme` cycles through them
+font = "MesloLGS NF"      # any fontconfig name; "" keeps the built-in interface font
+font_size = 20.0
+
+[view]
+page_gap = 6.0            # points between pages
+fit_width_ratio = 0.6     # `fit_width` fills this share of the window
+zoom_step = 1.2
+min_zoom = 0.1
+max_zoom = 16.0
+scroll_step = 60.0        # C-n/C-p, in interface pixels
+prefetch_pages = 2        # pages rendered ahead of and behind the view
+prefetch_text = true      # read every page's text in the background, for search and smart jumps
+texture_budget_mb = 256
+smartcase = true          # an upper-case letter makes a search case sensitive
+decorations = false       # window title bar
+restore_position = true   # reopen a document where you left it
+highlight_links = true    # tint links to places in the document; `toggle_links` turns it off
+highlight_fields = true   # tint the fields of a form; `toggle_fields` turns it off
+fullscreen = false        # start in fullscreen; `toggle_fullscreen` switches
+border = 1.0              # width of the outline, 0 to 8, around the menu, hotbar, contents, signature pad, notes, overview and portal window, in the theme's ui_accent; 0 for none
+jump_position = 50        # where a jump to a link, smart jump or contents entry puts its target: percent of the window height from the bottom (0) to the top (100); 50 centres it
+copy_reflow = true        # copying joins a paragraph's lines and undoes hyphenation
+two_page = false          # show pages side by side in pairs; `toggle_two_page` switches, kept per document
+cover_alone = true        # with two_page, the first page sits alone on the right, as in a printed book; `toggle_cover` switches
+
+[statusbar]
+visible = true
+# Sections are separated by " | ". A section whose fields are all empty is dropped.
+# Fields: {page} {pages} {label} {percent} {zoom} {chapter} {title} {file} {mode} {pending}
+#         {search} {selection} {message}
+left = "Page {page} / {pages} | {chapter}"
+right = "{mode} | {pending} | {selection} | {search} | {message} | {file}"
+
+[hints]
+alphabet = "asdfghjklqwertyuiopzxcvbnm"
+font_size = 10.0       # label size at 100% zoom, in points; the largest before scale_factor, unless min_font_size is larger
+scale = true           # shrink labels as you zoom out; false gives font_size * scale_factor, at least min_font_size
+min_font_size = 4.0    # the smallest label size shown, a hard floor
+scale_factor = 1.0     # multiplies the size before the min_font_size floor
+grid_size = 50.0       # the side of a cell of the grid that place_note, place_text... cut the current page into, in page points; at least 5, so that the grid stays small
+place_step = 4.0       # how far place_left, place_right, place_up and place_down move the preview, in page points
+
+[hotbar]
+position = "bottom"       # top, bottom, left or right
+colors = ["#fabd2f", "#83a598", "#b8bb26", "#fb4934", "#d3869b"]
+stroke_width = 2.0        # points
+fill_size = 12.0          # size of fill & sign text and marks, in points
+date_format = "%Y-%m-%d"  # the fill & sign date, as strftime
+
+[overview]
+width = 0.8               # share of the view, from 0 to 1
+height = 0.5
+x = 0.0                   # where its centre is, from -1 (left) to 1 (right)
+y = 0.0                   # from -1 (top) to 1 (bottom)
+
+[portal]
+width = 720.0
+height = 480.0
+
+[presentation]
+timer = false              # show the elapsed time while presenting; `t` toggles it there, `r` restarts it
+
+[themes.dark]
+background = "#1d1d1d"        # behind the pages
+page = "#242424"
+page_text = "#ebdbb2"
+recolor = true                # false shows the document's own colours
+ui_background = "#242424"
+ui_text = "#ebdbb2"
+ui_accent = "#83a598"
+hint_key1_background = "#fabd2f"   # the key of a hint to press next
+hint_key1_text = "#242424"
+hint_key2_background = "#83a598"   # the keys after it
+hint_key2_text = "#242424"
+hint_link = "#fabd2f66"        # over the links that hint_link numbers
+search = "#458588aa"
+search_current = "#fabd2faa"
+selection = "#83a59888"
+link = "#0000ff55"            # links to places in the document
+field = "#fabd2f33"           # form fields that can be picked with hint_form
+
+[themes.light]
+background = "#d5c4a1"
+page = "#ebdbb2"
+page_text = "#242424"
+recolor = true
+ui_background = "#ebdbb2"
+ui_text = "#242424"
+ui_accent = "#458588"
+hint_key1_background = "#d79921"
+hint_key1_text = "#242424"
+hint_key2_background = "#458588"
+hint_key2_text = "#ebdbb2"
+hint_link = "#d7992166"
+search = "#45858866"
+search_current = "#d79921aa"
+selection = "#45858866"
+link = "#0000ff33"
+field = "#d7992133"
+
+# Search the selected text on a website. Each site has `keys`, a key sequence (as in [keys]), and `url`, where `{}` is
+# replaced by the text. Override a site's `keys` or `url` alone, add a site, or turn a default off with `keys = ""`.
+[web_search]
+scholar = { keys = "<C-c>ss", url = "https://scholar.google.com/scholar?q={}" }
+google = { keys = "<C-c>sg", url = "https://www.google.com/search?q={}" }
+wikipedia = { keys = "<C-c>sw", url = "https://en.wikipedia.org/w/index.php?search={}" }
+arxiv = { keys = "<C-c>sa", url = "https://arxiv.org/search/?query={}&searchtype=all" }
+
+[keys]
+# Standard Emacs navigation. Counts still work: the digits are not bound.
+cancel = ["<C-g>", "<esc>"]
+scroll_down = ["<C-n>", "<down>"]
+scroll_up = ["<C-p>", "<up>"]
+scroll_left = ["<C-b>", "<left>"]
+scroll_right = ["<C-f>", "<right>"]
+half_down = ["<M-down>"]
+half_up = ["<M-up>"]
+# C-v and M-v, with PageDown/PageUp and the pager's Space, b and Backspace.
+screen_down = ["<C-v>", "<pagedown>", "<space>"]
+screen_up = ["<M-v>", "<pageup>", "b", "<backspace>"]
+next_page = ["<C-x>]"]
+prev_page = ["<C-x>["]
+goto_first = ["<M-S-,>", "<M-home>"]     # M-<
+goto_last = ["<M-S-.>", "<M-end>"]       # M->
+edge_left = ["<C-a>", "<home>"]
+edge_right = ["<C-e>", "<end>"]
+center = ["<C-l>"]
+zoom_in = ["<C-x><C-=>"]                 # C-x C-+ is the same command, but + is shifted here
+zoom_out = ["<C-x><C-->"]
+fit_width = ["<C-c>w"]
+fit_height = ["<C-c>h"]
+rotate_cw = ["<C-c><gt>"]
+rotate_ccw = ["<C-c><lt>"]
+toggle_two_page = ["<C-x>3"]             # pages side by side, kept for the document
+toggle_cover = ["<C-c>c"]                # with two pages, the first one alone on the right
+toggle_recolor = ["<C-c>R"]              # recolour the pages or show them as they are
+
+# Search, marks and jumps.
+search_forward = ["<C-s>"]
+search_backward = ["<C-r>"]
+search_next = ["<M-n>"]
+search_prev = ["<M-p>"]
+set_mark = ["<C-x>r<space>"]             # store a register, then the mark's key
+goto_mark = ["<C-x>rj"]                  # jump to a register, then the mark's key
+jump_back = ["<M-,>"]
+jump_forward = ["<C-M-,>"]
+
+# The command line, copying, files and quitting.
+command = ["<M-x>"]
+yank = ["<M-w>"]
+quit = ["<C-x><C-c>"]
+open = ["<C-x><C-f>"]
+reload = ["<C-c>r"]
+
+# Hints, portals, bookmarks and annotations. C-c is the viewer's mode prefix.
+hint_select = ["<C-c>v"]
+hint_link = ["<C-c>l"]
+hint_form = ["<C-c>f"]
+portal = ["<C-c>pn"]
+goto_portal = ["<C-c>pg"]
+delete_portal = ["<C-c>pd"]
+edit_portal = ["<C-c>pe"]
+toggle_portal_window = ["<C-c>pw"]
+add_bookmark = ["<C-x>rm"]
+show_bookmarks = ["<C-x>rl"]
+show_annotations = ["<C-c>aa"]
+delete_annotation = ["<C-c>ak"]
+toggle_toc = ["<M-g>i", "<tab>"]
+toggle_statusbar = ["<C-c>b"]
+
+# Tools, fill & sign, and placing.
+toggle_hotbar = ["<C-c>tb"]
+tool_highlight = ["<C-c>th"]
+tool_draw = ["<C-c>td"]
+tool_erase = ["<C-c>te"]
+tool_note = ["<C-c>tn"]
+tool_fill = ["<C-c>tf"]
+fill_text = ["<C-c>tT"]
+fill_date = ["<C-c>tD"]
+fill_check = ["<C-c>tC"]
+fill_cross = ["<C-c>tX"]
+fill_dot = ["<C-c>tO"]
+fill_line = ["<C-c>tL"]
+fill_sign = ["<C-c>tS"]
+tool_width_down = ["<C-c>t-"]
+tool_width_up = ["<C-c>t+"]
+place_note = ["<C-c>an"]
+place_text = ["<C-c>at"]
+place_date = ["<C-c>ad"]
+place_check = ["<C-c>ac"]
+place_cross = ["<C-c>ax"]
+place_dot = ["<C-c>ao"]
+place_line = ["<C-c>al"]
+place_sign = ["<C-c>as"]
+
+# Undo, display and the document's own settings.
+undo = ["<C-/>", "<C-x>u"]
+redo = ["<C-x>U"]                        # explicit redo; C-x u is undo
+toggle_theme = ["<C-c>T"]
+toggle_links = ["<C-c>L"]
+toggle_fields = ["<C-c>F"]
+toggle_fullscreen = ["<f11>"]
+toggle_presentation = ["<f5>"]           # one page fit to the screen, nothing else; Esc or q leaves
+smart_jump = ["<M-.>"]
+smart_references = ["<M-S-?>"]           # M-?
+overview = ["<C-x>o"]
+goto_overview = ["<cr>"]
+overview_prev = ["<C-x><left>"]
+overview_next = ["<C-x><right>"]
+protect = ["<C-c>P"]                     # a copy with a password
+unprotect = ["<C-c>U"]                   # a copy without one
+
+# Editing in the bars, the contents filter and the password field, and nowhere else: `<left>` still
+# scrolls in the document. A key that types a character can't be used here.
+edit_left = ["<left>"]
+edit_right = ["<right>"]
+edit_word_left = ["<M-b>", "<C-left>"]
+edit_word_right = ["<M-f>", "<C-right>"]
+edit_start = ["<C-a>", "<home>"]
+edit_end = ["<C-e>", "<end>"]
+edit_backspace = ["<bs>", "<S-bs>"]
+edit_delete = ["<del>"]
+edit_erase_word = ["<M-bs>", "<C-bs>"]
+edit_delete_word = ["<M-d>", "<C-del>"]
+edit_erase_blank = ["<C-w>"]             # readline: back to the last space, all of a path at once
+edit_erase_to_start = ["<C-u>"]          # readline
+edit_erase_to_end = ["<C-k>"]
+edit_undo = ["<C-/>"]                    # clears the password field; does nothing in the other fields
+edit_history_prev = ["<M-p>"]            # older search, in the / and ? bars only
+edit_history_next = ["<M-n>"]            # newer search, in the / and ? bars only
+
+# Moving the preview while an item is being placed; these share keys with the scrolling ones.
+place_left = ["<C-b>"]
+place_right = ["<C-f>"]
+place_up = ["<C-p>"]
+place_down = ["<C-n>"]

@@ -471,6 +471,7 @@ fn named_key(key: egui::Key) -> Option<&'static str> {
         Key::Escape => "esc",
         Key::Tab => "tab",
         Key::Enter => "cr",
+        Key::Insert => "insert",
         Key::Backspace => "bs",
         Key::Delete => "del",
         Key::Space => "space",
@@ -511,7 +512,7 @@ fn canonical_key(name: &str) -> Option<String> {
         "del" | "delete" => "del",
         "lt" => "<",
         "gt" => ">",
-        "tab" | "space" | "up" | "down" | "left" | "right" | "pageup" | "pagedown" | "home" | "end" => lower.as_str(),
+        "tab" | "space" | "insert" | "up" | "down" | "left" | "right" | "pageup" | "pagedown" | "home" | "end" => lower.as_str(),
         f if f.strip_prefix('f').and_then(|n| n.parse::<u8>().ok()).is_some_and(|n| (1..=12).contains(&n)) => f,
         _ => return None,
     };
@@ -907,6 +908,27 @@ mod tests {
         let config = crate::config::Config::load_str("").unwrap();
         let (_, errors) = Keymap::new(&config.keys, &Default::default());
         assert!(errors.is_empty(), "{errors:?}");
+    }
+
+    #[test]
+    fn the_emacs_config_binds_every_action_without_conflicts_and_only_pager_bare_keys() {
+        let config = crate::config::Config::load_str(include_str!("emacs_config.toml")).unwrap();
+        let (map, errors) = Keymap::new(&config.keys, &crate::websearch::bindings(&config.web_search));
+        assert!(errors.is_empty(), "{errors:?}");
+        for action in Action::ALL {
+            assert!(config.keys.get(&action).is_some_and(|keys| !keys.is_empty()), "{} is unbound", action.name());
+        }
+        // The pager's Space and b are kept on purpose; any other printable key would be taken from a bar.
+        assert_eq!(map.typed_by(&Action::ALL), vec![' ', 'b'], "a normal-mode key would be typed into a bar");
+        let mut seen = std::collections::HashMap::new();
+        for (action, keys) in config.keys.iter().filter(|(a, _)| !a.scoped()) {
+            for key in keys {
+                let sequence = parse_sequence(key).unwrap();
+                if let Some(other) = seen.insert(sequence, action.name()) {
+                    panic!("{key} is bound to both {other} and {}", action.name());
+                }
+            }
+        }
     }
 
     #[test]
