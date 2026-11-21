@@ -50,7 +50,7 @@ jobs:
           mkdir "$name"
           cp target/release/yavcpdf README.md assets/yavcpdf.desktop assets/yavcpdf.svg LICENSE-MIT LICENSE-APACHE NOTICE ATTRIBUTION.md "$name/"
           cp src/default_config.toml "$name/config.toml"
-          cp -r licenses "$name/"
+          cp -r licenses docs "$name/"
           tar czf "$name.tar.gz" "$name"
           sha256sum "$name.tar.gz" > "$name.tar.gz.sha256"
           echo "PACKAGE=$name" >> "$GITHUB_ENV"
@@ -107,7 +107,7 @@ jobs:
           mkdir "$name"
           cp target/release/yavcpdf.exe README.md LICENSE-MIT LICENSE-APACHE NOTICE ATTRIBUTION.md "$name/"
           cp src/default_config.toml "$name/config.toml"
-          cp -r licenses "$name/"
+          cp -r licenses docs "$name/"
           7z a -tzip "$name.zip" "$name"
           sha256sum "$name.zip" > "$name.zip.sha256"
           echo "PACKAGE=$name" >> "$GITHUB_ENV"
@@ -151,7 +151,7 @@ jobs:
           sed "s/@VERSION@/$version/g" packaging/macos/Info.plist > yavcpdf.app/Contents/Info.plist
           cp README.md LICENSE-MIT LICENSE-APACHE NOTICE ATTRIBUTION.md yavcpdf.app/Contents/Resources/
           cp src/default_config.toml yavcpdf.app/Contents/Resources/config.toml
-          cp -r licenses yavcpdf.app/Contents/Resources/
+          cp -r licenses docs yavcpdf.app/Contents/Resources/
           codesign --force --sign - yavcpdf.app
           codesign --verify --verbose yavcpdf.app
           ditto -c -k --keepParent yavcpdf.app "$name.zip"

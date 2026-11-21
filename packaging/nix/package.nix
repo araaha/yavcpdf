@@ -53,6 +53,7 @@ rustPlatform.buildRustPackage {
       (root + "/src")
       (root + "/assets")
       (root + "/README.md")
+      (root + "/docs")
       (root + "/LICENSE-MIT")
       (root + "/LICENSE-APACHE")
       (root + "/NOTICE")
@@ -80,6 +81,7 @@ rustPlatform.buildRustPackage {
     install -Dm644 assets/yavcpdf.desktop -t $out/share/applications
     install -Dm644 assets/yavcpdf.svg -t $out/share/icons/hicolor/scalable/apps
     install -Dm644 README.md -t $out/share/doc/yavcpdf
+    install -Dm644 docs/*.md -t $out/share/doc/yavcpdf/docs
     install -Dm644 src/default_config.toml $out/share/doc/yavcpdf/config.toml
     install -Dm644 LICENSE-MIT LICENSE-APACHE NOTICE ATTRIBUTION.md licenses/* -t $out/share/licenses/yavcpdf
   '';

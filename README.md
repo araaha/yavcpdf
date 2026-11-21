@@ -77,8 +77,9 @@ OR
 paru -S yavcpdf       # or yavcpdf-bin
 ```
 > The two packages conflict with each other. Both install `/usr/bin/yavcpdf`,
-> `yavcpdf.desktop`, and the reference configuration at
-> `/usr/share/doc/yavcpdf/config.toml`.
+> `yavcpdf.desktop`, the reference configuration at
+> `/usr/share/doc/yavcpdf/config.toml`, and this documentation in
+> `/usr/share/doc/yavcpdf/`.
 </details>
 
 <details>
@@ -126,8 +127,9 @@ For Home Manager, put the same package in `home.packages`. Releases after
 0.7.0 include the flake: append a tag, as in `github:araaha/yavcpdf/vX.Y.Z`,
 to pin one.
 
-The package installs `yavcpdf.desktop`, the icon, and the reference
-configuration at `share/doc/yavcpdf/config.toml`. The binary is wrapped so it
+The package installs `yavcpdf.desktop`, the icon, the reference
+configuration at `share/doc/yavcpdf/config.toml`, and this documentation in
+`share/doc/yavcpdf/`. The binary is wrapped so it
 finds the OpenGL, Wayland, X11, xkbcommon and dbus libraries it loads at run
 time, and `fc-match` and `xdg-open`. The file chooser still needs
 `xdg-desktop-portal` with a backend, which NixOS sets up with
@@ -157,7 +159,7 @@ which `cargo run` works.
 Download `yavcpdf-vX.Y.Z-x86_64-linux.tar.gz` from the
 [releases page](https://github.com/araaha/yavcpdf/releases), together with its
 `.sha256` file. Each archive contains the `yavcpdf` binary, `yavcpdf.desktop`,
-this `README.md`, the reference configuration `config.toml`, `LICENSE-MIT`,
+this `README.md`, the `docs/` folder, the reference configuration `config.toml`, `LICENSE-MIT`,
 `LICENSE-APACHE`, `NOTICE`, `ATTRIBUTION.md` and the `licenses/` directory.
 The binary is built on Ubuntu 22.04, so it runs on systems with that glibc
 (2.35) or newer.
