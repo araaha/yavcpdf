@@ -35,10 +35,77 @@ impl CellLayout {
         self.cell_width * i as f32
     }
 
-    /// The offset from the left of the box to the glyph of key `i`, centred in its cell.
-    pub fn glyph_x(&self, i: usize, pad: f32) -> f32 {
-        self.cell_x(i) + pad
+    /// The offset from the left of the box to draw the galley of key `i`, so that its ink, from `left` to `right` of the galley origin,
+    /// is centred in the cell of the key.
+    pub fn glyph_x(&self, i: usize, left: f32, right: f32) -> f32 {
+        self.cell_x(i) + (self.cell_width - (right - left)) / 2.0 - left
     }
+}
+
+/// How far below the top of a box `box_height` tall to draw the keys of one label, so that the ink of all of them together, from `top`
+/// to `bottom` of the galley origin, is centred in it.
+fn label_drop(box_height: f32, top: f32, bottom: f32) -> f32 {
+    (box_height - (bottom - top)) / 2.0 - top
+}
+
+/// The widest width and the top and bottom of a set of characters, from the galley origin.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct InkExtent {
+    pub width: f32,
+    pub top: f32,
+    pub bottom: f32,
+}
+
+/// The extent of `inks`, each `[left, top, right, bottom]` from the galley origin, leaving out the empty ones (right not past left).
+/// `None` without any. Galleys of one font share a baseline, so tops and bottoms compare.
+pub fn ink_extent(inks: &[[f32; 4]]) -> Option<InkExtent> {
+    let all = inks.iter().filter(|b| b[2] > b[0]).map(|b| InkExtent { width: b[2] - b[0], top: b[1], bottom: b[3] });
+    all.reduce(|a, b| InkExtent { width: a.width.max(b.width), top: a.top.min(b.top), bottom: a.bottom.max(b.bottom) })
+}
+
+/// Where one label is drawn in its box.
+#[derive(Clone, Debug, PartialEq)]
+pub struct LabelLayout {
+    pub cells: CellLayout,
+    pub height: f32,
+    /// How far below the top of the box to draw the keys; `None` if no key has ink.
+    pub drop: Option<f32>,
+    /// For each key, how far right of the box's left edge to draw its galley; `None` for a key without ink, which is not drawn.
+    pub xs: Vec<Option<f32>>,
+}
+
+/// The layout of the keys still to type of a label, with `label_inks` (`[left, top, right, bottom]` from the galley origin, empty if
+/// right is not past left). Cells fit the widest ink of `measured_inks`, every character measured (`fallback_width` if none has any),
+/// and the box is `row_height` or the height of that ink, whichever is taller. Each key is centred in its cell by its own ink. The
+/// keys share one vertical offset, centring the ink of `whole_inks`, every key of the label typed or not, so they do not move as keys
+/// are typed. Every ink in `label_inks` and `whole_inks` must be among `measured_inks`, and `label_inks` must be a suffix of
+/// `whole_inks`; the drawn keys fitting the box depends on both.
+pub fn label_layout(
+    measured_inks: &[[f32; 4]],
+    row_height: f32,
+    label_inks: &[[f32; 4]],
+    whole_inks: &[[f32; 4]],
+    pad: f32,
+    fallback_width: f32,
+) -> LabelLayout {
+    let extent = ink_extent(measured_inks);
+    let width = extent.map_or(fallback_width, |e| e.width);
+    let height = extent.map_or(row_height, |e| row_height.max(e.bottom - e.top));
+    let cells = CellLayout::new(label_inks.len(), width, pad);
+    let xs = label_inks.iter().enumerate().map(|(i, b)| (b[2] > b[0]).then(|| cells.glyph_x(i, b[0], b[2]))).collect();
+    let drop = ink_extent(label_inks).map(|drawn| {
+        let e = ink_extent(whole_inks).unwrap_or(drawn);
+        label_drop(height, e.top, e.bottom)
+    });
+    LabelLayout { cells, height, drop, xs }
+}
+
+/// Every character a label can hold: digits for links, the characters of `alphabet` otherwise, each once.
+pub fn label_chars(purpose: Purpose, alphabet: &str) -> Vec<char> {
+    let mut chars: Vec<char> = if purpose == Purpose::Link { "0123456789".chars().collect() } else { alphabet.chars().collect() };
+    chars.sort_unstable();
+    chars.dedup();
+    chars
 }
 
 /// The size of the label font for each point of its size: how wide a character is and how tall a row.
@@ -474,14 +541,88 @@ mod tests {
     }
 
     #[test]
-    fn every_key_is_centred_in_a_cell_of_equal_width() {
+    fn cells_have_equal_width() {
         let l = CellLayout::new(3, 6.0, 1.0);
         assert_eq!(l, CellLayout { cell_width: 8.0, box_width: 24.0 });
         assert_eq!([0, 1, 2].map(|i| l.cell_x(i)), [0.0, 8.0, 16.0]);
-        assert_eq!([0, 1, 2].map(|i| l.glyph_x(i, 1.0)), [1.0, 9.0, 17.0]);
-        // Equal space left and right of each glyph.
-        assert_eq!(l.cell_x(1) + l.cell_width - (l.glyph_x(1, 1.0) + 6.0), 1.0);
         assert_eq!(CellLayout::new(0, 6.0, 1.0).box_width, 0.0);
+    }
+
+    #[test]
+    fn labels_are_centred_by_their_own_ink() {
+        // Ink as [left, top, right, bottom]: "i" narrow with a left bearing, "f" with an ascender, "g" with a descender, "a" at x-height,
+        // and a space without ink.
+        let alphabet = [[2.0, 3.0, 3.5, 8.0], [0.5, 1.0, 5.0, 8.0], [0.5, 4.0, 5.0, 11.0], [0.5, 4.0, 5.0, 8.0], [0.0; 4]];
+        let (pad, row, eps) = (1.0, 12.0, 1e-4);
+        let mut labels: Vec<Vec<[f32; 4]>> = alphabet.iter().map(|k| vec![*k]).collect();
+        for a in alphabet {
+            for b in alphabet {
+                labels.push(vec![a, b]);
+                labels.extend(alphabet.iter().map(|c| vec![a, b, *c]));
+            }
+        }
+        // Every key drawn is inside the box and centred in its cell; returns the ink rows it covers.
+        let check = |l: &LabelLayout, drawn_inks: &[[f32; 4]], offset: usize| {
+            assert_eq!(l.xs.len(), drawn_inks.len());
+            let drawn: Vec<usize> = (0..drawn_inks.len()).filter(|&k| drawn_inks[k][2] > drawn_inks[k][0]).collect();
+            assert_eq!(l.drop.is_some(), !drawn.is_empty());
+            assert!(drawn.iter().all(|&k| l.xs[k].is_some()) && l.xs.iter().filter(|x| x.is_some()).count() == drawn.len());
+            let drop = l.drop?;
+            let (mut top, mut bottom) = (f32::MAX, f32::MIN);
+            for &k in &drawn {
+                let (ink, x) = (drawn_inks[k], l.xs[k].unwrap());
+                let (left, right) = (x + ink[0], x + ink[2]);
+                let (cell_left, cell_right) = (l.cells.cell_x(k), l.cells.cell_x(k) + l.cells.cell_width);
+                assert!(cell_left <= left && right <= cell_right && right <= l.cells.box_width);
+                assert!((left - cell_left - (cell_right - right)).abs() < eps);
+                assert!(0.0 <= drop + ink[1] && drop + ink[3] <= l.height, "key {} of {}", k + offset, drawn_inks.len() + offset);
+                top = top.min(drop + ink[1]);
+                bottom = bottom.max(drop + ink[3]);
+            }
+            Some((top, bottom))
+        };
+        let mut checked = 0;
+        for label in &labels {
+            let full = label_layout(&alphabet, row, label, label, pad, 6.0);
+            if let Some((top, bottom)) = check(&full, label, 0) {
+                // Equal space above and below the ink of the whole label.
+                assert!((top - (full.height - bottom)).abs() < eps);
+                checked += 1;
+            }
+            for typed in 1..label.len() {
+                let rest = &label[typed..];
+                let l = label_layout(&alphabet, row, rest, label, pad, 6.0);
+                if check(&l, rest, typed).is_some() {
+                    // The keys left keep their vertical position.
+                    assert_eq!(l.drop, full.drop);
+                }
+            }
+        }
+        assert!(checked > 0);
+        let empty = label_layout(&alphabet, row, &[[0.0; 4]; 2], &[[0.0; 4]; 2], pad, 6.0);
+        assert_eq!((empty.drop, empty.xs), (None, vec![None, None]));
+        let blank_rest = label_layout(&alphabet, row, &[[0.0; 4]], &[alphabet[1], [0.0; 4]], pad, 6.0);
+        assert_eq!((blank_rest.drop, blank_rest.xs), (None, vec![None]));
+    }
+
+    #[test]
+    fn layout_without_any_ink_falls_back_to_the_row() {
+        let l = label_layout(&[[0.0; 4]], 12.0, &[[0.0; 4]], &[[0.0; 4]], 1.0, 6.0);
+        assert!(l.cells.box_width > 0.0 && l.height == 12.0 && l.drop.is_none());
+    }
+
+    #[test]
+    fn every_assigned_label_uses_only_label_chars() {
+        let alphabet = "asdfgh";
+        for purpose in [Purpose::Link, Purpose::Select] {
+            let measured = label_chars(purpose, alphabet);
+            for count in [1, 9, 30, 120] {
+                let targets = (0..count).map(|i| Target { label: String::new(), page: 0, rect: [0.0; 4], kind: TargetKind::Link(i) }).collect();
+                let mut state = HintState::new(purpose);
+                state.assign(targets, &chars(alphabet));
+                assert!(state.targets.iter().all(|t| t.label.chars().all(|c| measured.contains(&c))));
+            }
+        }
     }
 
     #[test]
@@ -489,11 +630,11 @@ mod tests {
         // One key: the box is one cell and the glyph sits one pad in.
         let one = CellLayout::new(1, 6.0, 1.0);
         assert_eq!(one, CellLayout { cell_width: 8.0, box_width: 8.0 });
-        assert_eq!((one.cell_x(0), one.glyph_x(0, 1.0)), (0.0, 1.0));
+        assert_eq!((one.cell_x(0), one.glyph_x(0, 0.0, 6.0)), (0.0, 1.0));
         // No padding: cells are exactly the glyph width and glyphs sit at the cell edge.
         let bare = CellLayout::new(3, 6.0, 0.0);
         assert_eq!(bare, CellLayout { cell_width: 6.0, box_width: 18.0 });
-        assert_eq!([0, 1, 2].map(|i| bare.glyph_x(i, 0.0)), [0.0, 6.0, 12.0]);
+        assert_eq!([0, 1, 2].map(|i| bare.glyph_x(i, 0.0, 6.0)), [0.0, 6.0, 12.0]);
         // No keys: an empty box, but the cell width is still defined.
         assert_eq!(CellLayout::new(0, 6.0, 1.0), CellLayout { cell_width: 8.0, box_width: 0.0 });
         // The last cell ends at the box edge, for any number of keys.

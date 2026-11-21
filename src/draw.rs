@@ -1,12 +1,14 @@
 //! Drawing pages and what lies on them, and the portal window.
+use std::collections::HashMap;
+
 use egui::epaint::{TextShape, Vertex};
-use egui::{Align2, Color32, FontId, Mesh, Painter, Pos2, Rect, Shape, Stroke, TextureId, Vec2, ViewportBuilder, ViewportId, pos2, vec2};
+use egui::{Align2, Color32, FontId, Galley, Mesh, Painter, Pos2, Rect, Shape, Stroke, TextureId, Vec2, ViewportBuilder, ViewportId, pos2, vec2};
 use pdfcraft_render::{RenderRequest, Tile, device_pixels, effective_scale};
 
 use crate::app::{App, FieldSign, FillItem, Mode, PlaceItem, PlaceState, SignPlace, Tool, ZOOM_SETTLE};
 use crate::cache::TileKey;
 use crate::config::Color;
-use crate::hint::{CellLayout, HintState, Metrics, PAD, Purpose, Target, fitted_size, next_and_later};
+use crate::hint::{HintState, LabelLayout, Metrics, PAD, Purpose, Target, fitted_size, ink_extent, label_chars, label_layout, next_and_later};
 use crate::present::{PREFETCH_AHEAD, PREFETCH_BEHIND};
 use crate::store::{Annotation, MarkKind, NOTE_SIDE, Portal, mark_rect};
 use crate::view::{View, rotate_point, tile_side, tile_uv, tiles_crossing, visible_pixels};
@@ -521,10 +523,16 @@ impl App {
     }
 
     /// The size of every label, fitted to how close together the targets are on screen.
-    fn label_font_size(&self, painter: &Painter, view: &View, shown: &[&Target], rects: &[Rect]) -> f32 {
-        // Measured large, as the size of a character for each point of the font.
-        let probe = painter.layout_no_wrap("m".to_owned(), FontId::monospace(100.0), Color32::WHITE).size() / 100.0;
-        let metrics = Metrics { char_width: probe.x, row_height: probe.y };
+    fn label_font_size(&self, painter: &Painter, view: &View, shown: &[&Target], rects: &[Rect], chars: &[char]) -> f32 {
+        // Measured at the configured size, as the size of a character for each point of the font.
+        let size = self.config.hints.font_size;
+        let font = FontId::monospace(size);
+        let probe = painter.layout_no_wrap("m".to_owned(), font.clone(), Color32::WHITE).size() / size;
+        let ink = ink_extent(&char_inks(painter, &font, chars).values().copied().collect::<Vec<_>>());
+        let char_width = ink.as_ref().map_or(probe.x, |ink| ink.width / size);
+        // The box is the row or the ink of every key, whichever is taller, as `draw_hints` draws it.
+        let row_height = ink.as_ref().map_or(probe.y, |ink| probe.y.max((ink.bottom - ink.top) / size));
+        let metrics = Metrics { char_width, row_height };
         let longest = shown.iter().map(|t| t.label.chars().count()).max().unwrap_or(0);
         let rects: Vec<[f32; 4]> = rects.iter().map(|r| [r.left(), r.top(), r.right(), r.bottom()]).collect();
         fitted_size(view.zoom, &self.config.hints, &rects, longest, metrics)
@@ -535,7 +543,16 @@ impl App {
         let left = |target: &&Target| target.label.starts_with(state.typed.as_str());
         let shown: Vec<&Target> = state.targets.iter().filter(left).collect();
         let rects: Vec<Rect> = shown.iter().map(|t| view.transform(&self.doc.layout, t.page).rect(t.rect)).collect();
-        let font = FontId::monospace(self.label_font_size(painter, view, &shown, &rects));
+        // Every character that can be drawn: those of the alphabet, and of the labels shown, in case the alphabet changed since.
+        let mut chars = label_chars(state.purpose, &self.config.hints.alphabet);
+        chars.extend(shown.iter().flat_map(|t| t.label.chars()));
+        chars.sort_unstable();
+        chars.dedup();
+        let font = FontId::monospace(self.label_font_size(painter, view, &shown, &rects, &chars));
+        let m_galley = painter.layout_no_wrap("m".to_owned(), font.clone(), Color32::WHITE);
+        // Measured at the drawn size, so that cells and boxes fit the ink of every key.
+        let inks = char_inks(painter, &font, &chars);
+        let measured_inks: Vec<[f32; 4]> = inks.values().copied().collect();
         if let Some((page, first, last)) = state.start
             && let Some(text) = self.doc.text.get(page).and_then(|t| t.as_ref())
         {
@@ -556,10 +573,9 @@ impl App {
             }
             let (back1, text1) = (theme.hint_key1_background, theme.hint_key1_text);
             let (back2, text2) = (theme.hint_key2_background, theme.hint_key2_text);
-            let keys = next.chars().count() + later.chars().count();
-            let glyph_width = painter.layout_no_wrap("m".to_owned(), font.clone(), text1.egui()).size().x;
-            let cells = CellLayout::new(keys, glyph_width, PAD);
-            let height = painter.layout_no_wrap("m".to_owned(), font.clone(), text1.egui()).size().y;
+            let keys: Vec<(char, Color)> = next.chars().map(|c| (c, text1)).chain(later.chars().map(|c| (c, text2))).collect();
+            let layout = place_label(&inks, &measured_inks, m_galley.size(), &target.label, state.typed.len());
+            let (cells, height) = (layout.cells, layout.height);
             // The label stays upright at the corner of the target that is top left on screen.
             let box_rect =
                 clear_of(previous, Rect::from_min_size(rects[i].min, vec2(cells.box_width, height)), next_on_line(rects[i], rects.get(i + 1)));
@@ -568,10 +584,14 @@ impl App {
             let (first, rest) = box_rect.split_left_right_at_x(meet);
             painter.rect_filled(first, 0.0, back1.egui());
             painter.rect_filled(rest, 0.0, back2.egui());
-            let keys = next.chars().map(|c| (c, text1)).chain(later.chars().map(|c| (c, text2)));
-            for (k, (key, color)) in keys.enumerate() {
-                let galley = painter.layout_no_wrap(key.to_string(), font.clone(), color.egui());
-                painter.galley(box_rect.min + vec2(cells.glyph_x(k, PAD), 0.0), galley, color.egui());
+            // A key without ink is not drawn.
+            if let Some(drop) = layout.drop {
+                for ((key, color), x) in keys.iter().zip(&layout.xs) {
+                    if let Some(x) = x {
+                        let galley = painter.layout_no_wrap(key.to_string(), font.clone(), color.egui());
+                        painter.galley(box_rect.min + vec2(*x, drop), galley, color.egui());
+                    }
+                }
             }
             previous = Some(box_rect);
         }
@@ -659,6 +679,27 @@ fn text_preview_rect(top: [f32; 2], size: [f32; 2]) -> [f32; 4] {
 /// A text caret: a vertical line along the box's height, `inset` in from its left edge.
 fn caret_segment(rect: [f32; 4], inset: f32) -> [[f32; 2]; 2] {
     [[rect[0] + inset, rect[1]], [rect[0] + inset, rect[3]]]
+}
+
+/// The ink of a galley as [left, top, right, bottom] from its origin; empty (right not past left) without any.
+fn ink_bounds(galley: &Galley) -> [f32; 4] {
+    let b = galley.mesh_bounds;
+    if b.is_positive() { [b.left(), b.top(), b.right(), b.bottom()] } else { [0.0; 4] }
+}
+
+/// Where the keys of `label` after its first `typed` bytes are drawn in its box, from the ink of each character in `inks` and every
+/// character measured in `measured_inks`; `m_size` is the size of "m" in the label font.
+fn place_label(inks: &HashMap<char, [f32; 4]>, measured_inks: &[[f32; 4]], m_size: Vec2, label: &str, typed: usize) -> LabelLayout {
+    let ink = |c: char| inks.get(&c).copied().unwrap_or([0.0; 4]);
+    let label_inks: Vec<[f32; 4]> = label[typed..].chars().map(ink).collect();
+    let whole_inks: Vec<[f32; 4]> = label.chars().map(ink).collect();
+    label_layout(measured_inks, m_size.y, &label_inks, &whole_inks, PAD, m_size.x)
+}
+
+/// The ink of each of `chars` in `font`, leaving out those without any.
+fn char_inks(painter: &Painter, font: &FontId, chars: &[char]) -> HashMap<char, [f32; 4]> {
+    let inks = chars.iter().map(|&c| (c, ink_bounds(&painter.layout_no_wrap(c.to_string(), font.clone(), Color32::WHITE))));
+    inks.filter(|(_, ink)| ink[2] > ink[0]).collect()
 }
 
 #[cfg(test)]
@@ -778,5 +819,47 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// The ink of each key of `label` drawn after its first `typed` bytes, where `layout` puts it in the box.
+    fn drawn_inks(painter: &egui::Painter, font: &egui::FontId, label: &str, typed: usize, layout: &super::LabelLayout) -> Vec<Rect> {
+        let drop = layout.drop.expect("the label has ink");
+        let galley = |c: char| painter.layout_no_wrap(c.to_string(), font.clone(), egui::Color32::WHITE);
+        let xs = layout.xs.iter().map(|x| x.expect("every key has ink"));
+        label[typed..].chars().zip(xs).map(|(c, x)| galley(c).mesh_bounds.translate(vec2(x, drop))).collect()
+    }
+
+    #[test]
+    fn real_glyphs_are_centred_in_their_box_and_stay_put_while_typing() {
+        let ctx = egui::Context::default();
+        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+            let painter = ui.painter();
+            // Proportional, so that keys differ in width and in their space either side.
+            let font = egui::FontId::proportional(20.0);
+            let inks = super::char_inks(painter, &font, &"afgijl".chars().collect::<Vec<_>>());
+            let measured: Vec<[f32; 4]> = inks.values().copied().collect();
+            let m = painter.layout_no_wrap("m".to_owned(), font.clone(), egui::Color32::WHITE).size();
+            for label in ["ia", "fg", "jl", "aa", "ff", "lig"] {
+                let whole = super::place_label(&inks, &measured, m, label, 0);
+                for typed in 0..label.len() {
+                    let layout = super::place_label(&inks, &measured, m, label, typed);
+                    assert_eq!(layout.drop, whole.drop, "{label} moved after typing {typed} keys");
+                    let drawn = drawn_inks(painter, &font, label, typed, &layout);
+                    for (i, ink) in drawn.iter().enumerate() {
+                        let (left, right) = (layout.cells.cell_x(i), layout.cells.cell_x(i + 1));
+                        assert!(ink.left() >= left && ink.right() <= right, "{label}: key {i} leaves its cell");
+                        assert!(((ink.left() - left) - (right - ink.right())).abs() < 0.01, "{label}: key {i} is not centred across");
+                        assert!(ink.top() >= 0.0 && ink.bottom() <= layout.height, "{label}: key {i} leaves the box");
+                    }
+                    if typed == 0 {
+                        let top = drawn.iter().map(|r| r.top()).fold(f32::MAX, f32::min);
+                        let bottom = drawn.iter().map(|r| r.bottom()).fold(f32::MIN, f32::max);
+                        assert!((top - (layout.height - bottom)).abs() < 0.01, "{label} is not centred up and down");
+                    }
+                }
+            }
+        });
+        // Nothing draws the font atlas here.
+        output.textures_delta.clear();
     }
 }
