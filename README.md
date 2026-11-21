@@ -2,66 +2,6 @@
   <h1>yavcpdf</h1>
   <p>A minimal, keyboard-driven PDF viewer</p>
 
-https://github.com/user-attachments/assets/47991ad4-8362-49a9-80f2-675ffb887e77
-
-
-
-https://github.com/user-attachments/assets/9895c9b9-81cb-4ec5-91cd-6c0546bdb202
-
-
-
-https://github.com/user-attachments/assets/3b020986-9fb5-4886-a988-326362a44aff
-
-
-
-https://github.com/user-attachments/assets/5249ae5c-1b97-45f0-ab3f-8e2ec25ebaeb
-
-
-
-https://github.com/user-attachments/assets/f1a00cb7-e6cf-4d49-bc75-b70ea350ffa0
-
-
-
-https://github.com/user-attachments/assets/2e97555b-a7a8-443b-98f0-642113809e23
-
-
-
-https://github.com/user-attachments/assets/f3326dfe-927d-43a6-9ab9-dd9c429287dd
-
-
-
-https://github.com/user-attachments/assets/d8c3f2b1-07d9-4972-96e8-dc91ab29a871
-
-
-
-https://github.com/user-attachments/assets/d4ad8107-5d1f-4269-bbc7-878879eb4962
-
-
-
-https://github.com/user-attachments/assets/51f11062-8efe-4ab2-9886-17e7c245c851
-
-
-
-https://github.com/user-attachments/assets/46adf676-bf83-4f53-9ee7-2eb02d1cef15
-
-
-
-https://github.com/user-attachments/assets/c0b22abf-bdee-4225-99f1-4a7270ea46ea
-
-
-
-https://github.com/user-attachments/assets/cf7c2eff-9bc9-48a3-bb73-05820fa3224e
-
-
-
-https://github.com/user-attachments/assets/e64f41f8-5a58-4326-a49c-09cd2027165d
-
-
-
-
-
-
-
   [![Linux](https://img.shields.io/badge/Linux-131415?style=for-the-badge&logo=linux&logoColor=white)](#installation)
   [![Windows](https://img.shields.io/badge/Windows-131415?style=for-the-badge&logo=data:image/svg%2bxml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCI%2BPHBhdGggZmlsbD0iI2ZmZmZmZiIgZD0iTTAgMGgxMXYxMUgwek0xMyAwaDExdjExSDEzek0wIDEzaDExdjExSDB6TTEzIDEzaDExdjExSDEzeiIvPjwvc3ZnPg==)](#installation)
   [![macOS](https://img.shields.io/badge/macOS-131415?style=for-the-badge&logo=apple&logoColor=white)](#installation)
@@ -77,7 +17,8 @@ https://github.com/user-attachments/assets/e64f41f8-5a58-4326-a49c-09cd2027165d
 yavcpdf is a PDF viewer you drive from the keyboard. The whole window is the
 document, with a status line at the bottom. It uses PdfCraft's render engine,
 and its annotation and form writers for `:export`.
-<!-- demo: add a screenshot or video here -->
+
+https://github.com/user-attachments/assets/9895c9b9-81cb-4ec5-91cd-6c0546bdb202
 
 Highlights
 ----------
@@ -422,6 +363,10 @@ Some actions have more default keys than shown, such as the arrow keys,
 <kbd>PageUp</kbd> and <kbd>PageDown</kbd>, <kbd>Home</kbd> and <kbd>End</kbd>.
 [`src/default_config.toml`](src/default_config.toml) lists them all.
 
+https://github.com/user-attachments/assets/d4ad8107-5d1f-4269-bbc7-878879eb4962
+
+https://github.com/user-attachments/assets/e64f41f8-5a58-4326-a49c-09cd2027165d
+
 ### Presentation mode
 
 <kbd>F5</kbd> or `:present` (the `toggle_presentation` action) goes fullscreen and shows one page, fit whole to the
@@ -508,6 +453,8 @@ itself is not counted. It needs the text of every page, so it waits until
 that has been read, saying `reading the text of the pages…`; <kbd>Esc</kbd> stops
 the wait. Reloading the document drops the highlighted references.
 
+https://github.com/user-attachments/assets/5249ae5c-1b97-45f0-ab3f-8e2ec25ebaeb
+
 ### Overview
 
 Shows what a reference points at in a window over the page, so you can read a
@@ -520,6 +467,8 @@ for the reference, and <kbd>Esc</kbd>, <kbd>Ctrl</kbd>+<kbd>C</kbd>, a click
 beside it closes it. Any other key closes it and then does its usual
 action, so <kbd>h</kbd> and <kbd>l</kbd> close it and scroll the page. `[overview]` sets its size and place.
 
+https://github.com/user-attachments/assets/d8c3f2b1-07d9-4972-96e8-dc91ab29a871
+
 ### Table of contents
 
 It comes from the PDF's bookmarks. A PDF with none, such as a Google Docs
@@ -528,12 +477,16 @@ the titles are the text of those links, and their indents are the levels. A PDF
 with neither has no table of contents. An entry that names a spot on its page
 lands there at `view.jump_position`; one that names only the page lands at its top.
 
+https://github.com/user-attachments/assets/47991ad4-8362-49a9-80f2-675ffb887e77
+
 ### Annotations
 
 Choose a tool from the hotbar keys: <kbd>t</kbd> <kbd>h</kbd> highlights,
 <kbd>t</kbd> <kbd>d</kbd> draws, <kbd>t</kbd> <kbd>e</kbd> erases and
 <kbd>t</kbd> <kbd>n</kbd> adds sticky notes. They are kept beside the PDF, not
 in it; see [What is stored where](#what-is-stored-where).
+
+https://github.com/user-attachments/assets/46adf676-bf83-4f53-9ee7-2eb02d1cef15
 
 **The list.** <kbd>g</kbd> <kbd>a</kbd> (or `:annotations`) lists every annotation in the order of
 the document, by page and then top to bottom. A row shows the page label, a swatch of the
@@ -579,6 +532,10 @@ preview smaller or larger by changing the fill size (a note is a fixed size); th
 with the same keys elsewhere. <kbd>Enter</kbd> places the item as a click would
 (a note or text asks for its text, a signature for the pad if none is saved yet),
 and <kbd>Esc</kbd> or <kbd>Ctrl</kbd>+<kbd>C</kbd> leaves without placing.
+
+https://github.com/user-attachments/assets/f3326dfe-927d-43a6-9ab9-dd9c429287dd
+
+https://github.com/user-attachments/assets/3b020986-9fb5-4886-a988-326362a44aff
 
 ### Forms
 
@@ -657,11 +614,15 @@ refused. The signature is kept in the
 sidecar like other fill & sign marks and leaves the viewer through `:export`;
 it is a drawing, not a cryptographic signature.
 
+https://github.com/user-attachments/assets/c0b22abf-bdee-4225-99f1-4a7270ea46ea
+
 ### Portals
 
 Press <kbd>p</kbd> where you are reading, go to the target, press <kbd>p</kbd>
 again. The view returns, and the portal window shows the target of the portal
 nearest the view.
+
+https://github.com/user-attachments/assets/2e97555b-a7a8-443b-98f0-642113809e23
 
 ### Opening files
 
@@ -670,6 +631,8 @@ through the [XDG portal](https://flatpak.github.io/xdg-desktop-portal/) when
 there is one, so a portal backend such as `xdg-desktop-portal-termfilechooser`
 gets used. It says "no file chosen" if the chooser is cancelled, and also if
 none could be shown.
+
+https://github.com/user-attachments/assets/f1a00cb7-e6cf-4d49-bc75-b70ea350ffa0
 
 ### Password-protected PDFs
 
@@ -715,6 +678,8 @@ is no way to protect it in place.
   marks and portals the document has now.
 
 ### Commands and the `:` menu
+
+https://github.com/user-attachments/assets/cf7c2eff-9bc9-48a3-bb73-05820fa3224e
 
 | Command | Action |
 | --- | --- |
@@ -890,6 +855,8 @@ Colours are in the themes, and one key is enough to change one. `dark` and
 through them and `:theme NAME` picks one. `background` is what shows around and
 between the pages, and `page` is the sheet itself. `recolor = false` shows the
 document's own colours.
+
+https://github.com/user-attachments/assets/51f11062-8efe-4ab2-9886-17e7c245c851
 
 `toggle_recolor` (or `:recolor [on|off]`) overrides `recolor` at run time. It has
 no key by default: bind it under `[keys]`, e.g. `toggle_recolor = ["gR"]`. The
