@@ -426,7 +426,7 @@ impl Stroke {
         let chord = mods.ctrl || mods.alt;
         let name = match named_key(key) {
             Some(name) => name.to_owned(),
-            None if chord => key.symbol_or_name().to_lowercase(),
+            None if chord => chord_key_name(key),
             None => return None,
         };
         if name == "space" && !chord && !mods.shift {
@@ -462,6 +462,15 @@ impl Stroke {
     pub fn notation(&self) -> String {
         let mods = format!("{}{}{}", if self.ctrl { "C-" } else { "" }, if self.alt { "A-" } else { "" }, if self.shift { "S-" } else { "" });
         if mods.is_empty() && self.key.chars().count() == 1 { self.key.clone() } else { format!("<{mods}{}>", self.key) }
+    }
+}
+
+/// The name of a key in a chord. egui spells the minus key "−" (U+2212), but the notation and the
+/// configs write "-", so the two names are one key.
+fn chord_key_name(key: egui::Key) -> String {
+    match key {
+        egui::Key::Minus => "-".to_owned(),
+        _ => key.symbol_or_name().to_lowercase(),
     }
 }
 
@@ -761,6 +770,24 @@ mod tests {
         assert!(c_minus.ctrl && c_minus.key == "-");
         let s_space = &parse_sequence("<S-space>").unwrap()[0];
         assert!(s_space.shift && s_space.key == "space");
+    }
+
+    #[test]
+    fn control_minus_from_a_key_event_matches_the_notation() {
+        let event = Stroke::from_key(egui::Key::Minus, egui::Modifiers { ctrl: true, ..Default::default() }).unwrap();
+        assert_eq!(event, stroke("<C-->"));
+    }
+
+    #[test]
+    fn the_emacs_config_zooms_out_with_control_x_control_minus() {
+        let config = crate::config::Config::load_str(include_str!("emacs_config.toml")).unwrap();
+        let (map, _) = Keymap::new(&config.keys, &crate::websearch::bindings(&config.web_search));
+        let ctrl = egui::Modifiers { ctrl: true, ..Default::default() };
+        let c_x = Stroke::from_key(egui::Key::X, ctrl).unwrap();
+        let c_minus = Stroke::from_key(egui::Key::Minus, ctrl).unwrap();
+        let mut p = Pending::default();
+        assert_eq!(p.feed(&map, c_x), None);
+        assert_eq!(p.feed(&map, c_minus), Some((Bound::Action(Action::ZoomOut), None)));
     }
 
     #[test]
