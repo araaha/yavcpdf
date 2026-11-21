@@ -65,6 +65,13 @@ fn clipboard_stroke(event: &Event) -> Option<Stroke> {
     Some(Stroke { ctrl: true, ..Stroke::plain(key) })
 }
 
+/// Whether a key asks for the clipboard's text in a bar or the password field. Ctrl-V is a key in
+/// the document (the Emacs config binds it to `screen_down`), so the fields paste themselves;
+/// Windows has Shift-Insert as well.
+fn paste_request(stroke: &Stroke) -> bool {
+    stroke.is_ctrl("v") || (stroke.key == "insert" && stroke.shift && !stroke.ctrl && !stroke.alt)
+}
+
 /// What a key does to the choice panel as a whole.
 enum ChoiceKey {
     Stay,
@@ -181,6 +188,8 @@ impl App {
             self.password_cancel(ctx);
         } else if stroke.is("cr") {
             self.password_submit(ctx);
+        } else if paste_request(stroke) {
+            ctx.send_viewport_cmd_to(egui::ViewportId::ROOT, egui::ViewportCommand::RequestPaste);
         } else if let Some(edit) = self.keymap.edit(stroke) {
             if edit == Edit::Undo {
                 state.field.clear();
@@ -263,6 +272,8 @@ impl App {
         } else if stroke.is("cr") {
             self.bar_enter(ctx);
             return;
+        } else if paste_request(stroke) {
+            ctx.send_viewport_cmd_to(egui::ViewportId::ROOT, egui::ViewportCommand::RequestPaste);
         } else if menu_page_wins(kind, bar.menu.as_ref().is_some_and(|m| m.is_shown()), stroke)
             && let Some(menu) = bar.menu.as_mut()
             && let Some(down) = menu_page(stroke)
@@ -1020,11 +1031,11 @@ fn click_target(widget: Option<(usize, usize)>, link: Option<usize>, note: Optio
 
 #[cfg(test)]
 mod tests {
-    use super::{ClickTarget, click_target, clipboard_stroke, edit_applies, menu_page, menu_page_wins};
+    use super::{ClickTarget, click_target, clipboard_stroke, edit_applies, menu_page, menu_page_wins, paste_request};
     use crate::app::BarKind;
     use crate::field::Edit;
-    use crate::keymap::parse_sequence;
-    use egui::Event;
+    use crate::keymap::{Stroke, parse_sequence};
+    use egui::{Event, Key, Modifiers};
 
     #[test]
     fn a_click_prefers_a_widget_then_a_link_then_a_note() {
@@ -1039,6 +1050,18 @@ mod tests {
         assert_eq!(clipboard_stroke(&Event::Copy).as_ref(), parse_sequence("<C-c>").unwrap().first());
         assert_eq!(clipboard_stroke(&Event::Cut).as_ref(), parse_sequence("<C-x>").unwrap().first());
         assert_eq!(clipboard_stroke(&Event::Text("c".to_owned())), None);
+    }
+
+    #[test]
+    fn control_v_in_a_bar_asks_for_a_paste() {
+        let ctrl_v = Stroke::from_key(Key::V, Modifiers { ctrl: true, ..Default::default() }).unwrap();
+        assert!(paste_request(&ctrl_v));
+        let ctrl_shift_v = parse_sequence("<C-S-v>").unwrap().remove(0);
+        assert!(paste_request(&ctrl_shift_v), "the terminal's paste key too");
+        let shift_insert = Stroke::from_key(Key::Insert, Modifiers { shift: true, ..Default::default() }).unwrap();
+        assert!(paste_request(&shift_insert));
+        assert!(!paste_request(&parse_sequence("v").unwrap()[0]));
+        assert!(!paste_request(&parse_sequence("<C-c>").unwrap()[0]));
     }
 
     #[test]

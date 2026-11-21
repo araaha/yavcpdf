@@ -65,6 +65,30 @@ Esc and <kbd>Ctrl</kbd>+<kbd>C</kbd> are the `cancel` action. The `edit_*`
 actions (see [Editing text](keys.md#editing-text)) apply in the bars, the contents and
 choice filters and the password field only, and a key that types a character can't be used for them.
 
+## Emacs-style keys
+
+[`src/emacs_config.toml`](../src/emacs_config.toml) is a complete config based on
+the built-in defaults, with natural GNU Emacs keys: <kbd>Ctrl</kbd>+<kbd>V</kbd> or
+<kbd>Space</kbd> / <kbd>Alt</kbd>+<kbd>V</kbd> or <kbd>b</kbd> for screens (with
+<kbd>Page Down</kbd>, <kbd>Page Up</kbd> and <kbd>Backspace</kbd>),
+<kbd>Ctrl</kbd>+<kbd>N</kbd> / <kbd>Ctrl</kbd>+<kbd>P</kbd> for lines,
+<kbd>Alt</kbd>+<kbd>&lt;</kbd> / <kbd>Alt</kbd>+<kbd>&gt;</kbd> for the ends,
+<kbd>Ctrl</kbd>+<kbd>S</kbd> / <kbd>Ctrl</kbd>+<kbd>R</kbd> for search,
+<kbd>Alt</kbd>+<kbd>W</kbd> to copy, <kbd>Alt</kbd>+<kbd>X</kbd> for the command
+bar, and <kbd>Ctrl</kbd>+<kbd>X</kbd> <kbd>Ctrl</kbd>+<kbd>C</kbd> to quit. The
+viewer's own features use <kbd>Ctrl</kbd>+<kbd>C</kbd> as a prefix, as a major mode
+does in Emacs. Copy the file to the config folder as `config.toml` to use it. The
+bars and the password field still paste with <kbd>Ctrl</kbd>+<kbd>V</kbd>.
+
+A few keys are spelled for the viewer's input layer rather than Emacs itself:
+<kbd>Alt</kbd>+<kbd>&lt;</kbd>, <kbd>Alt</kbd>+<kbd>&gt;</kbd> and
+<kbd>Alt</kbd>+<kbd>?</kbd> are written `<M-S-,>`, `<M-S-.>` and `<M-S-?>`, and
+<kbd>Ctrl</kbd>+<kbd>X</kbd> <kbd>Ctrl</kbd>+<kbd>=</kbd> is `C-x C-=` because
+`C-x C-+` would need the shifted spelling. `C-x U` is an explicit redo, since Emacs's
+own undo also reverses direction. The file is a full copy, so when
+`src/default_config.toml` gains one, copy it across. The `:` menu, the panels and
+presentation mode have fixed keys that `[keys]` does not set.
+
 ## Themes
 
 Colours are in the themes, and one key is enough to change one. `dark` and

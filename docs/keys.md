@@ -9,6 +9,9 @@ before most motions: `10j`, `42G`. With a tool in hand, the digits
 <kbd>1</kbd> to <kbd>N</kbd> (N is the number of hotbar colours, 5 by default)
 choose a colour instead, so counts such as `42G` don't work then.
 
+An alternative complete config with GNU Emacs bindings is in
+[`src/emacs_config.toml`](../src/emacs_config.toml).
+
 > [!TIP]
 > Press <kbd>:</kbd> to see nearly every action with its keys, and type to filter them.
 

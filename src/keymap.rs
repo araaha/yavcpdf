@@ -426,7 +426,7 @@ impl Stroke {
         let chord = mods.ctrl || mods.alt;
         let name = match named_key(key) {
             Some(name) => name.to_owned(),
-            None if chord => key.symbol_or_name().to_lowercase(),
+            None if chord => chord_key_name(key),
             None => return None,
         };
         if name == "space" && !chord && !mods.shift {
@@ -465,12 +465,22 @@ impl Stroke {
     }
 }
 
+/// The name of a key in a chord. egui spells the minus key "−" (U+2212), but the notation and the
+/// configs write "-", so the two names are one key.
+fn chord_key_name(key: egui::Key) -> String {
+    match key {
+        egui::Key::Minus => "-".to_owned(),
+        _ => key.symbol_or_name().to_lowercase(),
+    }
+}
+
 fn named_key(key: egui::Key) -> Option<&'static str> {
     use egui::Key;
     Some(match key {
         Key::Escape => "esc",
         Key::Tab => "tab",
         Key::Enter => "cr",
+        Key::Insert => "insert",
         Key::Backspace => "bs",
         Key::Delete => "del",
         Key::Space => "space",
@@ -511,7 +521,7 @@ fn canonical_key(name: &str) -> Option<String> {
         "del" | "delete" => "del",
         "lt" => "<",
         "gt" => ">",
-        "tab" | "space" | "up" | "down" | "left" | "right" | "pageup" | "pagedown" | "home" | "end" => lower.as_str(),
+        "tab" | "space" | "insert" | "up" | "down" | "left" | "right" | "pageup" | "pagedown" | "home" | "end" => lower.as_str(),
         f if f.strip_prefix('f').and_then(|n| n.parse::<u8>().ok()).is_some_and(|n| (1..=12).contains(&n)) => f,
         _ => return None,
     };
@@ -763,6 +773,24 @@ mod tests {
     }
 
     #[test]
+    fn control_minus_from_a_key_event_matches_the_notation() {
+        let event = Stroke::from_key(egui::Key::Minus, egui::Modifiers { ctrl: true, ..Default::default() }).unwrap();
+        assert_eq!(event, stroke("<C-->"));
+    }
+
+    #[test]
+    fn the_emacs_config_zooms_out_with_control_x_control_minus() {
+        let config = crate::config::Config::load_str(include_str!("emacs_config.toml")).unwrap();
+        let (map, _) = Keymap::new(&config.keys, &crate::websearch::bindings(&config.web_search));
+        let ctrl = egui::Modifiers { ctrl: true, ..Default::default() };
+        let c_x = Stroke::from_key(egui::Key::X, ctrl).unwrap();
+        let c_minus = Stroke::from_key(egui::Key::Minus, ctrl).unwrap();
+        let mut p = Pending::default();
+        assert_eq!(p.feed(&map, c_x), None);
+        assert_eq!(p.feed(&map, c_minus), Some((Bound::Action(Action::ZoomOut), None)));
+    }
+
+    #[test]
     fn a_lone_angle_bracket_is_a_key_and_a_bad_name_is_an_error() {
         assert_eq!(parse_sequence("<").unwrap()[0], Stroke::plain("<"));
         assert!(parse_sequence("<nonsense>").is_err());
@@ -907,6 +935,27 @@ mod tests {
         let config = crate::config::Config::load_str("").unwrap();
         let (_, errors) = Keymap::new(&config.keys, &Default::default());
         assert!(errors.is_empty(), "{errors:?}");
+    }
+
+    #[test]
+    fn the_emacs_config_binds_every_action_without_conflicts_and_only_pager_bare_keys() {
+        let config = crate::config::Config::load_str(include_str!("emacs_config.toml")).unwrap();
+        let (map, errors) = Keymap::new(&config.keys, &crate::websearch::bindings(&config.web_search));
+        assert!(errors.is_empty(), "{errors:?}");
+        for action in Action::ALL {
+            assert!(config.keys.get(&action).is_some_and(|keys| !keys.is_empty()), "{} is unbound", action.name());
+        }
+        // The pager's Space and b are kept on purpose; any other printable key would be taken from a bar.
+        assert_eq!(map.typed_by(&Action::ALL), vec![' ', 'b'], "a normal-mode key would be typed into a bar");
+        let mut seen = std::collections::HashMap::new();
+        for (action, keys) in config.keys.iter().filter(|(a, _)| !a.scoped()) {
+            for key in keys {
+                let sequence = parse_sequence(key).unwrap();
+                if let Some(other) = seen.insert(sequence, action.name()) {
+                    panic!("{key} is bound to both {other} and {}", action.name());
+                }
+            }
+        }
     }
 
     #[test]
