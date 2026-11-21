@@ -115,9 +115,12 @@ Packaging is in `packaging/` (AUR, macOS, Nix) and `flake.nix`; releases are bui
   the protect commands only ever write a new file.
 - A new action touches several places: the `Action` enum and `Action::ALL` in `keymap.rs` (a test
   checks they agree), its behaviour in `actions.rs`, a default binding in `default_config.toml`,
-  and the README's key tables. A new `:` command goes in `complete::COMMANDS` and `App::command`.
-- User-visible behaviour is documented in `README.md`; update it in the same change, including
-  when only a default binding or setting changes.
+  and the key tables in `docs/keys.md`. A new `:` command goes in `complete::COMMANDS` and `App::command`,
+  and in the command table in `docs/keys.md`.
+- User-visible behaviour is documented in `docs/` (`keys.md`, `features.md`, `configuration.md`);
+  update it in the same change, including when only a default binding or setting changes.
+  `README.md` keeps installation, command-line usage, a short summary and demo of each feature,
+  and "Not supported"; touch it when one of those changes.
 - Never edit the pdfcraft revs in `Cargo.toml` by hand. They must all be the same commit:
   use `scripts/update-pdfcraft.sh [REV]`. The Nix package reads the rev from `Cargo.lock`.
 
